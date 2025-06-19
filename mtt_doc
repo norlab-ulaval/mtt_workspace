@@ -1,0 +1,341 @@
+//----------------Defines---------------------
+
+
+#define MTT_SWITCHES_VEHICLE_TYPE 0
+#define MTT_SWITCHES_GLOBAL 1
+#define MTT_SWITCHES_DIRECTION_MODE 6
+#define MTT_ANALOG_THROTTLE 2
+#define MTT_ANALOG_WINCH 3
+#define MTT_ANALOG_BRAKE 4
+#define MTT_ANALOG_STEER 5
+
+#define MTT_DEF_WINCH_IN 0xe5
+#define MTT_DEF_WINCH_CENTER 0x7f
+#define MTT_DEF_WINCH_OUT 0x18
+#define MTT_DEF_SAFETY_LOCKED 0
+#define MTT_DEF_SAFETY_UNLOCKED 1
+#define MTT_DEF_DIRECTION_FORWARD 1
+#define MTT_DEF_DIRECTION_REVERSE 0
+#define MTT_DEF_LIGHT_ON 1
+#define MTT_DEF_LIGHT_OFF 0
+#define MTT_DEF_OPEN_LOOP 0
+#define MTT_DEF_CLOSED_LOOP 1
+#define MTT_DEF_VEHICLE_SINGLE_TRACK 0
+#define MTT_DEF_VEHICLE_SBS_LEFT 1
+#define MTT_DEF_VEHICLE_SBS_RIGHT 2
+
+typedef struct {
+    uint8_t CAN_Array[8];
+} MttControlStruct;
+
+MttControlStruct MttControl;
+
+//-----Prototypes a mettre dnas le .h--------------
+
+void MTT_SetSteer(uint8_t SteerValue);
+void MTT_SetThrottle(uint8_t ThrottleValue);
+void MTT_SetBrake(uint8_t BrakeValue);
+void MTT_WinchIN(void);
+void MTT_WinchOUT(void);
+void MTT_WinchNeutral(void);
+void MTT_SetSecuritySwitch(uint8_t SwitchValue);
+void MTT_SetDirection(uint8_t Direction);
+void MTT_LightON(void);
+void MTT_LightOFF(void);
+void MTT_ConfigureDirectionMode(uint8_t DirectionMode);
+void MTT_ConfigureVehicleType(uint8_t VehicleType);
+void MTT_SendCanFrame(void);
+
+//------------------Définition des différentes trames CANBUS-------------------------
+/*
+
+BOARD: Display/Rempte Control
+#define CAN_WIFI_ADDRESS1 0x001 Trame de controle du vehicule
+
+#define CAN_SECOND_CONTROL_FRAME 0x100 Trame de control du vehicule de provenance externe.  (Répliqué a 0x001 par le module ecran en désactivant le signal joystick)
+
+#define CAN_BMS_TRAME_1 0x600   Battery Cells Temperature
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___Battery TEMP4 LSB
+|  |  |  |  |  |  |______Battery TEMP4 MSB
+|  |  |  |  |  |_________Battery TEMP3 LSB
+|  |  |  |  |____________Battery TEMP3 MSB
+|  |  |  |_______________Battery TEMP2 LSB
+|  |  |__________________Battery TEMP2 MSB
+|  |_____________________Battery TEMP1 LSB
+|________________________Battery TEMP1 MSB
+
+
+#define CAN_BMS_TRAME_2 0x601
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___Local temp sensor B
+|  |  |  |  |  |  |______Local temp sensor B
+|  |  |  |  |  |_________Local temp sensor A
+|  |  |  |  |____________Local temp sensor A
+|  |  |  |_______________Battery MOS TEMP LSB
+|  |  |__________________Battery MOS TEMP MSB
+|  |_____________________Battery TEMP Ambiant LSB
+|________________________Battery TEMP Ambiant MSB
+
+#define CAN_BMS_TRAME_3 0x602
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___CHARGE TIME REMAINING LSB
+|  |  |  |  |  |  |______CHARGE TIME REMAINING MSB
+|  |  |  |  |  |_________HEATPADS STATE: BIT 1(0 = PAD A OFF 1 = PAD A ON) BIT 0(0 = PAD B OFF 1 = PAD B ON)
+|  |  |  |  |____________BATTERY VOLTAGE LSB
+|  |  |  |_______________BATTERY VOLTAGE MSB
+|  |  |__________________BATTERY CURRENT LSB
+|  |_____________________BATTERY CURRENT MSB
+|________________________BATTERY STATE OF CHARGE (%)
+
+
+#define CAN_BMS_TRAME_DATE_TIME_REMAIN 0x603
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___MINUTES/SECOND LSB
+|  |  |  |  |  |  |______MINUTES/SECOND MSB
+|  |  |  |  |  |_________DAY/HOUR LSB
+|  |  |  |  |____________DAY/HOUR MSB
+|  |  |  |_______________YEAR/MONTH LSB
+|  |  |__________________YEAR/MONTH MSB
+|  |_____________________CHARGE TIME REMAINING LSB
+|________________________CHARGE TIME REMAINING MSB
+
+
+#define CAN_MAIN 0x2ff
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___TACHIMETER CUMULATIVE BYTE 0
+|  |  |  |  |  |  |______TACHIMETER CUMULATIVE BYTE 1
+|  |  |  |  |  |_________TACHIMETER CUMULATIVE BYTE 2
+|  |  |  |  |____________TACHIMETER CUMULATIVE BYTE 3 (IN TICK)
+|  |  |  |_______________TACHIMETER INSTANT LSB
+|  |  |__________________TACHIMETER INSTANT MSB (IN TICK)
+|  |_____________________MAIN MODULE TEMPERATURE SENSOR B
+|________________________MAIN MODULE TEMPERATURE SENSOR A
+
+PS:  Si vous avez besoins du TACHIMETRE en KM ou en MILES, je peux fournir la formule de conversion OU
+     une nouvelle trame CANBUS avec les informations deja décodés au choix.
+
+#define CAN_MAIN_BOARD1 0x300 //
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___MAIN CONTROLLER SOFTWARE REVISION BYTE 0 (4 BYTES FORMING FLOAT 3 TO 0)
+|  |  |  |  |  |  |______MAIN CONTROLLER SOFTWARE REVISION BYTE 1
+|  |  |  |  |  |_________MAIN CONTROLLER SOFTWARE REVISION BYTE 2
+|  |  |  |  |____________MAIN CONTROLLER SOFTWARE REVISION BYTE 3
+|  |  |  |_______________MAIN CONTROLLER HARDWARE REVISION BYTE 0 (4 BYTES FORMING FLOAT 3 TO 0)
+|  |  |__________________MAIN CONTROLLER HARDWARE REVISION BYTE 1
+|  |_____________________MAIN CONTROLLER HARDWARE REVISION BYTE 2
+|________________________MAIN CONTROLLER HARDWARE REVISION BYTE 3
+
+
+#define CAN_MAIN_BOARD2 0x301
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___BATTERY CONTROLLER SOFTWARE REVISION BYTE 0 (4 BYTES FORMING FLOAT 3 TO 0)
+|  |  |  |  |  |  |______BATTERY CONTROLLER SOFTWARE REVISION BYTE 1
+|  |  |  |  |  |_________BATTERY CONTROLLER SOFTWARE REVISION BYTE 2
+|  |  |  |  |____________BATTERY CONTROLLER SOFTWARE REVISION BYTE 3
+|  |  |  |_______________BATTERY CONTROLLER HARDWARE REVISION BYTE 0 (4 BYTES FORMING FLOAT 3 TO 0)
+|  |  |__________________BATTERY CONTROLLER HARDWARE REVISION BYTE 1
+|  |_____________________BATTERY CONTROLLER HARDWARE REVISION BYTE 2
+|________________________BATTERY CONTROLLER HARDWARE REVISION BYTE 3
+
+#define CAN_CHARGER_FRAME 0x1806e5f4LU  (Extended 29 bits) //MUST STREAM THIS AT LEAST ONCE PER SECOND OR THE CHARGER WILL SHUTDOWN
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___
+|  |  |  |  |  |  |______
+|  |  |  |  |  |_________
+|  |  |  |  |____________
+|  |  |  |_______________MAX CURRENT LSB  (mA /100)
+|  |  |__________________MAX CURRENT MSB
+|  |_____________________MAX VOLTAGE LSB  (mV /100)
+|________________________MAX VOLTAGE MSB
+
+#define CAN_CHARGER_ANSWER 0x18FF50E5LU  (Extended 29 bits)
+00 01 02 03 04 05 06 07
+|  |  |  |  |  |  |  |___
+|  |  |  |  |  |  |______
+|  |  |  |  |  |_________
+|  |  |  |  |____________
+|  |  |  |_______________MAX CONFIGURED CURRENT LSB  (mA /100)
+|  |  |__________________MAX CONFIGURED CURRENT MSB
+|  |_____________________MAX CONFIGURED VOLTAGE LSB  (mV /100)
+|________________________MAX CONFIGURED VOLTAGE MSB
+
+
+*/
+
+//-----Exemple Main--------------------------
+
+main()
+{
+    //Ceci est la boucle requise pour le fonctionnement (Interrupt, main, task, wathever...)
+    while(1)
+    {
+        MTT_SetSteer(valeur du steer);
+        if (action de la winch en entrée requise par exemple)
+        {
+            
+            //Selon le cas
+            MTT_WinchOUT();
+            MTT_WinchIN();
+            MTT_WinchNeutral();
+
+        }
+        //au final des actions, appeller la routine d'envoie de la trame au CANBUS
+        MTT_SendCanFrame();
+        delay ou vtaskdelay(temps d'attente pour autre task ect...);
+    }
+}
+
+//------------------------Interface--------------------------
+
+
+void MTT_SetSteer(uint8_t SteerValue)
+{
+  /*Cette routine set la valeur de la direction
+  les valeurs permises sont de 0 a 255
+  */
+  MttControl.CAN_Array[MTT_ANALOG_STEER] = SteerValue;
+}
+void MTT_SetThrottle(uint8_t ThrottleValue)
+{
+  /*Cette routine set la valeur de l'accélérateur
+  les valeurs permises sont de 0 a 230
+  */
+  if (ThrottleValue>230)
+  {
+    ThrottleValue = 230;
+  }
+  MttControl.CAN_Array[MTT_ANALOG_THROTTLE] = ThrottleValue;
+}
+
+void MTT_SetBrake(uint8_t BrakeValue)
+{
+  /*Cette routine set la valeur de la commande de frein
+  les valeurs permises sont de 0 a 255
+  */
+  MttControl.CAN_Array[MTT_ANALOG_BRAKE] = BrakeValue;
+}
+
+void MTT_WinchIN(void)
+{
+  /*Cette routine Fait entrer le cable du treuil 
+  Valeur: MTT_DEF_WINCH_IN (0xe5)
+  */
+  MttControl.CAN_Array[MTT_ANALOG_WINCH] = MTT_DEF_WINCH_IN;
+}
+void MTT_WinchOUT(void)
+{
+  /*Cette routine Fait sortir le cable du treuil 
+  Valeur: MTT_DEF_WINCH_OUT (0x18)
+  */
+  MttControl.CAN_Array[MTT_ANALOG_WINCH] = MTT_DEF_WINCH_OUT;
+}
+void MTT_WinchNeutral(void)
+{
+  /*Cette routine Arrete le cable du treuil (en position neutre)
+  Valeur: MTT_DEF_WINCH_CENTER (0x7f)
+  */
+  MttControl.CAN_Array[MTT_ANALOG_WINCH] = MTT_DEF_WINCH_CENTER;
+}
+void MTT_SetSecuritySwitch(uint8_t SwitchValue)
+{
+  /*
+  Cette routine barre ou débarre le contrôle de sécurité
+  Cette fonctionalité est utile pour une télécommande physique.
+  Pour que le systeme puisse fonctionner, le controle doit être en 
+  position MTT_DEF_SAFETY_UNLOCKED
+  
+  Valeurs: MTT_DEF_SAFETY_LOCKED (0x00)
+           MTT_DEF_SAFETY_UNLOCKED(0x01)
+ 
+  */
+  if (SwitchValue == MTT_DEF_SAFETY_LOCKED)
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] &= 0b11110111;
+  }
+  else if (SwitchValue == MTT_DEF_SAFETY_UNLOCKED)
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] |= 0b00001000;
+  }
+}
+void MTT_SetDirection(uint8_t Direction)
+{
+  /*
+  Cette routine set la direction du moteur traction d'avant 
+  ou de reculon.
+  Valeurs: MTT_DEF_DIRECTION_FORWARD (0x01)
+           MTT_DEF_DIRECTION_REVERSE (0x00)
+  */
+
+  if (Direction == MTT_DEF_DIRECTION_FORWARD)
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] &= 0b11011111;
+  }
+  else if (Direction == MTT_DEF_DIRECTION_REVERSE)
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] |= 0b00100000;
+  }
+}
+
+void MTT_LightON(void)
+{
+  /*
+  Cette routine allume le phare avant
+  */
+  MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] &= 0b10111111;
+}
+void MTT_LightOFF(void)
+{
+  /*
+  Cette routine éteint le phare avant
+  */
+  MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] |= 0b01000000;
+}
+void MTT_ConfigureDirectionMode(uint8_t DirectionMode)
+{
+  /*
+  Cette routine configure le mode de la direction.
+  Valeurs:  MTT_DEF_CLOSED_LOOP (0x01)
+            MTT_DEF_OPEN_LOOP (0x00)
+
+  ATTENTION:  Ce mode enclenche la position Absolue ou relative.  Contrairement au mode conventionnel
+  avec la télécommande, en mode CLOSED_LOOP le véhicule suit la position de la commande (Mode absolue).
+  Par conséquent, comme le vehicule prendra la valeur absolue de la commande MTT_SetSteer, vous assurer qu'il n'y a 
+  personne qui risque d'être coincé par l'articulation et qu'il y a bien l'espace nécessaire avant de changer cette valeur.
+  */
+  
+  if (DirectionMode == MTT_DEF_CLOSED_LOOP)  
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001;
+  }
+  else if (DirectionMode == MTT_DEF_OPEN_LOOP)
+  {
+    MttControl.CAN_Array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110;
+  }
+}
+void MTT_ConfigureVehicleType(uint8_t VehicleType)
+{
+  /*
+  Cette routine change le type de vehicule.
+  Valeurs: MTT_DEF_VEHICLE_SINGLE_TRACK (0x00)
+           MTT_DEF_VEHICLE_SBS_LEFT (0x01)
+           MTT_DEF_VEHICLE_SBS_RIGHT (0x02)
+
+  ATTENTION: La modification de cette valeur change le comportement du véhicule (Accélération et Direction).  S'assurer de
+  bien connaitre le fonctionnement avant de changer cette valeur.
+  */
+  MttControl.CAN_Array[MTT_SWITCHES_VEHICLE_TYPE] = VehicleType;
+}
+void MTT_SendCanFrame(void)
+{
+  /*
+  Cette routine est pour l'envoie de la trame canbus.
+  L'adresse doit etre 0x100 et les octets a envoyer sont 
+  MttControl.CAN_Array[0 a 7 dans l'ordre]
+
+  Donc, batir une trame avec ces octets et la streamer sur le port CANBUS.  Elle doit etre Streamé 
+  au moins 5 fois par seconde, mais pour un controle temps réel il est mieux d'augmenter le debit.
+  */
+ 
+}
+
