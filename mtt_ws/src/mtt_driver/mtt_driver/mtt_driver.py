@@ -1,7 +1,14 @@
 #!/usr/bin/env python3
+import rclpy
+from rclpy.node import Node
+
+from std_msgs.msg import String
 import can
 from enum import Enum
-import sched, time
+import time
+import socket
+import fcntl
+import struct
 
 
 MTT_SWITCHES_VEHICLE_TYPE = 0
@@ -38,13 +45,48 @@ class LightState(Enum):
     Off = 0x00
     On = 0x01
 
-class MttDriver():
+def interface_exists(ifname):
+    """Check if a network interface exists (e.g. 'can0')."""
+    SIOCGIFINDEX = 0x8933
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        fcntl.ioctl(s.fileno(), SIOCGIFINDEX, struct.pack('256s', ifname.encode('utf-8')[:15]))
+        return True
+    except OSError:
+        return False
+    
+class MttDriver(Node):
     def __init__(self):
+        super().__init__("mtt_driver")
 
         # to validate
-        self.node_id = 0x001
-        # self.node_id = 0x100
-        self.bus = can.interface.Bus("can0", bustype="socketcan")
+        self.node_id = 0x001 # remote controller id
+        # self.node_id = 0x100 # is supposed to work according to documentation but it doesn't
+
+        # can bus initialization
+        interface_name = "can0"
+        timeout_seconds = 10
+        check_interval = 0.5
+        elapsed = 0.0
+
+        self.get_logger().info(f"Waiting for CAN interface '{interface_name}'...")
+
+        while not interface_exists(interface_name) and elapsed < timeout_seconds:
+            time.sleep(check_interval)
+            elapsed += check_interval
+
+        if not interface_exists(interface_name):
+            self.get_logger().error(f"CAN interface '{interface_name}' not found after {timeout_seconds} seconds.")
+            rclpy.shutdown()
+            return
+
+        try:
+            self.bus = can.interface.Bus(interface_name, bustype="socketcan")
+            self.get_logger().info(f"Successfully initialized CAN bus on '{interface_name}'")
+        except OSError as e:
+            self.get_logger().error(f"Failed to initialize CAN bus: {e}")
+            rclpy.shutdown()
+
 
         self.can_array = [0] * 8
 
@@ -98,34 +140,18 @@ class MttDriver():
         self.set_direction_mode(DirectionMode.OpenLoop)
         # self.set_direction_mode(DirectionMode.CloseLoop)
 
-
-        self.mtt_configuration_verification()
-
-        self.send_frame_period = 0.01
+        self.send_frame_period = 0.1
         self.count = 0
 
-        # Eventually replaced by a ros timer
-        self.scheduler = sched.scheduler(time.time, time.sleep)
-        self.scheduler.enter(self.send_frame_period, 1, self.do_something, (self.scheduler,))
-        self.scheduler.run()
-
+        self.timer = self.create_timer(self.send_frame_period, self.send_can_frame)
 
 
     def __del__(self):
-        self.bus.shutdown()
+        if hasattr(self, "bus") and self.bus:
+            self.bus.shutdown()
 
 
         # TODO: iterative error 
-
-    def mtt_configuration_verification(self):
-
-        # Eventually create a list specifically for attributes that are not intended to stay at None after init
-        attrs = vars(self)
-        print(', '.join("%s: %s \n" % item for item in attrs.items()))
-        for variable in attrs.items():
-            if variable[1] == None:
-                print("ERROR: " + str(variable) + " not initialized in " + str(self))
-                del self
 
 
     def set_steer(self, steer_value):
@@ -288,19 +314,7 @@ class MttDriver():
 
     def send_can_frame(self):
         
-        print(self.can_array)
-
-        # print(bin(self.can_array[1]))
-        # print(bin(self.can_array[3]))
-
-        self.bus.send(can.Message(arbitration_id=self.node_id, data=self.can_array, is_extended_id=False))
-        # self.set_light_state(LightState.Off)
-
-
-    def do_something(self, scheduler): 
-        # schedule the next call first
-        self.scheduler.enter(self.send_frame_period, 1, self.do_something, (self.scheduler,))
-
+        # only for testing purpose
         self.count += self.send_frame_period
 
         if self.count >= 5:
@@ -312,16 +326,19 @@ class MttDriver():
             self.set_light_state(new_state)
             self.count = 0
 
-        # then do your stuff
-        self.send_can_frame()
+        print(self.can_array)
+
+        self.bus.send(can.Message(arbitration_id=self.node_id, data=self.can_array, is_extended_id=False))
 
 
 
 def main(args=None):
 
-
+    rclpy.init(args=args)
     mtt_driver = MttDriver()
-    # mtt_driver.send_can_frame()
+    rclpy.spin(mtt_driver)
+
+    rclpy.shutdown()
 
 
 if __name__ == '__main__':
