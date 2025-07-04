@@ -49,3 +49,15 @@ qtcreator-*
 
 # Catkin custom files
 CATKIN_IGNORE
+
+# MTT Project specific
+# Build directories
+mtt_test_tools/**/build/
+mtt_test_tools/**/Build/
+
+# Compiled binaries
+*.o
+mtt_test_tools/**/mtt_mock_server
+
+# Python cache
+__pycache__/
