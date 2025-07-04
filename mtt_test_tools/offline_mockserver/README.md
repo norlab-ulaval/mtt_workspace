@@ -38,19 +38,11 @@ The server simulates the vehicle's basic logic, responds to control commands, an
 
 ### 🔲 Future Implementation TODOs
 
-- 🔲 Main Board frames (0x300, 0x301) for extended system status
-- 🔲 Remote frame (0x001) handling for system diagnostics
-- 🔲 Brake override safety verification and enforcement
-- 🔲 Advanced physics simulation (acceleration/deceleration curves)
-- 🔲 Battery voltage simulation based on load and SOC
-- 🔲 Temperature variation simulation based on usage patterns
 - 🔲 Error state simulation (overheat, low battery, motor faults)
 - 🔲 Configurable CAN frame transmission rates
 - 🔲 Data logging to file for analysis and replay
 - 🔲 Configuration file support for vehicle parameters
 - 🔲 Multiple vehicle profile support
-- 🔲 Network interface for remote control and monitoring
-- 🔲 Integration with hardware-in-the-loop testing frameworks
 - 🔲 Automated test scenario playback
 
 ## Project Components
