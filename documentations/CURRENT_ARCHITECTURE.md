@@ -23,6 +23,7 @@ flowchart TB
         SpeedTopic["/mtt_speed<br/>std_msgs/Float64"]
         DistTopic["/mtt_distance<br/>std_msgs/Float64"]
         TempTopic["/mtt_temperature<br/>std_msgs/Float64MultiArray"]
+        OdomTopic["/mtt_odometry<br/>nav_msgs/Odometry"]
     end
 
     %% CAN Driver Layer
@@ -41,29 +42,32 @@ flowchart TB
     Manual --> CmdVelTopic
     Manual --> AuxTopic
 
-    %% ROS node connections
+    %% ROS node connections (Control)
     JoyNode --> JoyTopic
     JoyTopic --> TeleopNode
     TeleopNode --> CmdVelTopic
     TeleopNode --> AuxTopic
     
-    %% Two parallel paths to vehicle
+    %% Path to vehicle (Control)
     CmdVelTopic --> WrapperNode
     AuxTopic --> WrapperNode
     WrapperNode --> CanDriver
     
-    %% CAN to vehicle
+    %% CAN to vehicle (Control)
     CanDriver --> CanBus
     CanBus --> MTT154
     
-    %% Telemetry feedback
+    %% Telemetry feedback from vehicle
     MTT154 --> CanBus
     CanBus --> CanDriver
     CanDriver --> WrapperNode
+
+    %% ROS node connections (Telemetry)
     WrapperNode --> TachTopic
     WrapperNode --> SpeedTopic
     WrapperNode --> DistTopic
     WrapperNode --> TempTopic
+    WrapperNode --> OdomTopic
 
     %% Styling
     classDef inputClass fill:#ffffff,stroke:#01579b,stroke-width:2px,color:#000000
@@ -74,54 +78,55 @@ flowchart TB
 
     class Joy,Auto,Manual inputClass
     class JoyNode,TeleopNode,WrapperNode rosClass
-    class JoyTopic,CmdVelTopic,AuxTopic,TachTopic,SpeedTopic,DistTopic,TempTopic topicClass
+    class JoyTopic,CmdVelTopic,AuxTopic,TachTopic,SpeedTopic,DistTopic,TempTopic,OdomTopic topicClass
     class CanDriver,CanBus canClass
     class MTT154 vehicleClass
 ```
 
 ## Current MTT-154 Driver Architecture
-*Updated for CAN Bus Specification v1.1 Compliance*
+*Updated for CAN Bus Specification v1.1 Compliance with Telemetry*
 
 ### Component Overview
 
 **Input Sources:**
 - **Joy Controller**: Physical joystick (8BitDo, Xbox, PS4) for manual teleoperation
 - **Autonomy Stack**: Navigation systems (Nav2, custom) for autonomous operation
-- **Manual Commands**: Direct ROS topic publishing for testing/development
+- **Manual Commands**: Direct ROS topic publishing for testing and development
 
 **ROS 2 Interface Layer:**
 - **joy_node**: Standard ROS joystick driver publishing sensor_msgs/Joy
-- **mtt_teleop_joy.py**: Translates joystick input to vehicle commands
-- **mtt_ros_wrapper.py**: Bridges standard ROS topics to CAN interface
+- **mtt_teleop_joy.py**: Translates joystick input to vehicle commands (/cmd_vel, /mtt_aux_cmd)
+- **mtt_ros_wrapper.py**: Bridges standard ROS topics to the CAN interface for control and publishes telemetry data from the vehicle
 
 **ROS Topics:**
+*Control Topics:*
 - **/joy**: Raw joystick input (sensor_msgs/Joy)
 - **/cmd_vel**: Standard velocity commands (geometry_msgs/Twist)
-- **/mtt_aux_cmd**: Auxiliary commands (brake, winch, dead man's switch)
-- **/mtt_tachometer**: Complete tachometer data (MttTachometerData)
+- **/mtt_aux_cmd**: Auxiliary commands like brake, winch, and dead-man switch (MttAuxCommand)
+
+*Telemetry Topics:*
 - **/mtt_speed**: Vehicle speed in km/h (std_msgs/Float64)
-- **/mtt_distance**: Cumulative distance in km (std_msgs/Float64)
-- **/mtt_temperature**: Temperature sensors array (std_msgs/Float64MultiArray)
+- **/mtt_distance**: Cumulative distance traveled in km (std_msgs/Float64)
+- **/mtt_temperature**: Motor controller temperatures (std_msgs/Float64MultiArray)
+- **/mtt_tachometer**: Raw, detailed telemetry from the CAN bus (MttTachometerData)
+- **/mtt_odometry**: Standard odometry message for navigation stacks (nav_msgs/Odometry)
 
 **CAN Driver Layer:**
-- **mtt_driver.py**: Pure Python CAN interface (no ROS dependencies)
-  - Current specification compliance: Security switch (bit 7), tachometer data parsing
-  - Emergency stop patch: Light control acts as temporary E-stop
-  - Speed/distance calculations with proper gear ratios
-- **CAN Bus**: SocketCAN interface (can0) for vehicle communication
+- **mtt_driver.py**: Pure Python CAN interface with a threaded listener for receiving telemetry. No ROS dependencies
+- **CAN Bus**: SocketCAN interface (e.g., can0) for physical vehicle communication
 
 **Vehicle Hardware:**
-- **MTT-154**: Physical vehicle with CAN bus control interface
+- **MTT-154**: Physical vehicle with a CAN bus control and telemetry interface
 
 ### Key Features
 
-1. **Simple Architecture**: Single ROS wrapper to CAN driver
-2. **Standard ROS Integration**: Compatible with existing ROS ecosystem
-3. **Safety First**: Dead man's switch and E-stop functionality
-4. **Flexible Input**: Supports joysticks, autonomy, and manual commands
-5. **Modular Design**: Components can be used independently
-6. **Current Specification Compliance**: Updated for latest CAN bus specification
-7. **Telemetry Publishing**: Real-time vehicle data on ROS topics
+1. **Standard ROS Integration**: Uses standard topics (/cmd_vel, /mtt_odometry) for easy integration
+2. **Telemetry Publishing**: Provides real-time vehicle data (speed, distance, temperature) on ROS topics
+3. **Odometry for Navigation**: Publishes standard nav_msgs/Odometry for use with Nav2 and SLAM
+4. **Flexible Input**: Supports joysticks, autonomy stacks, and direct manual commands
+5. **Safety First**: Implements a dead-man switch, E-stop functionality, and safe startup defaults
+6. **Modular Design**: The ROS wrapper and pure Python CAN driver can be used independently
+7. **CAN Bus v1.1 Compliance**: Adheres to the latest CAN bus specification for reliable control
 8. **Speed/Distance Tracking**: Accurate odometry from tachometer data
 
 ### Safety Systems
@@ -134,11 +139,11 @@ flowchart TB
 - **Temporary emergency stop patch**: Light control acts as E-stop mechanism
 - **System readiness checks**: Both security switch and light state validation
 
-### Control Flow
+### Data Flow
 
-1. **Teleoperation**: Joy → joy_node → mtt_teleop_joy → Topics → mtt_ros_wrapper → CAN
-2. **Autonomy**: Nav2 → Topics → mtt_ros_wrapper → CAN
-3. **Telemetry**: Vehicle → CAN → mtt_driver → mtt_ros_wrapper → ROS Topics
+**Teleoperation**: Joy → joy_node → mtt_teleop_joy → Topics → mtt_ros_wrapper → mtt_driver → CAN → Vehicle
+**Autonomy**: Nav2 Stack → /cmd_vel Topic → mtt_ros_wrapper → mtt_driver → CAN → Vehicle  
+**Telemetry**: Vehicle → CAN → mtt_driver → mtt_ros_wrapper → Telemetry & Odometry Topics
 
 ### Current Specification Updates
 
@@ -153,6 +158,7 @@ flowchart TB
 - `/mtt_speed`: Real-time speed in km/h
 - `/mtt_distance`: Cumulative distance traveled
 - `/mtt_temperature`: Temperature sensor readings
+- `/mtt_odometry`: Standard odometry message for navigation stacks (nav_msgs/Odometry)
 
 **Enhanced Safety:**
 - Dual safety mechanism: Security switch + light state validation
