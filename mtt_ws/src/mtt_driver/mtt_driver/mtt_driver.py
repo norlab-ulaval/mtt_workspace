@@ -379,6 +379,10 @@ class MTTCanDriver:
     
     def get_odometry_data(self) -> dict:
         """Get complete odometry data dictionary"""
+        # TODO: Add steering angle data for higher-level kinematic models
+        # Single track (VehicleSingleTrack): Reverse bicycle model
+        # Side-by-side (VehicleSbsLeft/Right): Skid-steer drive model
+        # Implementation will be done at ROS controller level using ros_controllers
         return {
             'speed_ms': self.get_current_speed_ms(),
             'speed_kmh': self.get_current_speed_kmh(),
@@ -388,7 +392,8 @@ class MTTCanDriver:
             'temperature_a': self.tachometer_data.main_sensor_temp_a,
             'temperature_b': self.tachometer_data.main_sensor_temp_b,
             'direction': self.current_direction.name,
-            'data_age_ms': (time.time() - self.tachometer_data.timestamp) * 1000 if self.tachometer_data.timestamp > 0 else 0
+            'data_age_ms': (time.time() - self.tachometer_data.timestamp) * 1000 if self.tachometer_data.timestamp > 0 else 0,
+            # TODO: Add steering_angle_rad and vehicle_type for kinematic models
         }
 
     # --- Control Methods ---
@@ -411,6 +416,9 @@ class MTTCanDriver:
         if steer_value >= 0 and steer_value <= 255:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
+            # TODO: Expose steering data for higher-level kinematic models
+            # Vehicle types: Single track (reverse bicycle model) / Side-by-side (skid-steer)
+            # Implementation at ROS controller level using ros_controllers
 
 
     def set_throttle(self, throttle_value):

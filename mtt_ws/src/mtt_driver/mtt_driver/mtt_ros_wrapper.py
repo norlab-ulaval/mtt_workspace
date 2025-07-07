@@ -151,26 +151,34 @@ class MTTRosWrapper(Node):
 
     def _publish_odometry(self, odometry_data):
         """Publish standard ROS2 odometry message"""
+        # TODO: Complete odometry integration with vehicle kinematic models
+        # Current: simplified straight-line motion (distance tracking only)
+        # Vehicle configurations:
+        # - Single track: Reverse bicycle model kinematic implementation needed or more complex Articulated Steering Vehicles
+        # - Side-by-side: Skid-steer drive model implementation needed
+        # Implementation will be done at higher ROS controller level using ros_controllers
+        
         odom_msg = Odometry()
         odom_msg.header.stamp = self.get_clock().now().to_msg()
         odom_msg.header.frame_id = "odom"
         odom_msg.child_frame_id = "mtt_base_link"
 
-        # Position (only x-axis movement for tracked vehicle)
-        # Direction handling: negative distance for reverse
+        # Position calculation - currently straight-line distance only
+        # TODO: Replace with proper kinematic model at ros_controllers level
         actual_distance = odometry_data['total_distance_m']
         if odometry_data['direction'] == 'Reverse':
             actual_distance = -odometry_data['total_distance_m']
 
         odom_msg.pose.pose.position.x = actual_distance
-        odom_msg.pose.pose.position.y = 0.0
+        odom_msg.pose.pose.position.y = 0.0  # TODO: Will be calculated by kinematic model
         odom_msg.pose.pose.position.z = 0.0
 
-        # Orientation (no rotation for straight line movement)
+        # Orientation - currently no rotation
+        # TODO: Will be calculated by kinematic model using steering data
         odom_msg.pose.pose.orientation.x = 0.0
         odom_msg.pose.pose.orientation.y = 0.0
-        odom_msg.pose.pose.orientation.z = 0.0
-        odom_msg.pose.pose.orientation.w = 1.0
+        odom_msg.pose.pose.orientation.z = 0.0  # TODO: From kinematic model
+        odom_msg.pose.pose.orientation.w = 1.0  # TODO: From kinematic model
 
         # Velocity
         odom_msg.twist.twist.linear.x = odometry_data['speed_ms']
@@ -178,7 +186,7 @@ class MTTRosWrapper(Node):
         odom_msg.twist.twist.linear.z = 0.0
         odom_msg.twist.twist.angular.x = 0.0
         odom_msg.twist.twist.angular.y = 0.0
-        odom_msg.twist.twist.angular.z = 0.0
+        odom_msg.twist.twist.angular.z = 0.0  # TODO: From kinematic model
 
         self.odometry_pub.publish(odom_msg)
 

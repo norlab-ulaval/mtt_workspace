@@ -111,6 +111,8 @@ The driver provides comprehensive odometry data compatible with ROS2 navigation:
 - **Standard ROS2 format**: Compatible with nav2 and SLAM algorithms
 - **MSB-first parsing**: Correctly handles CAN 0x2FF byte order per specification
 
+**⚠️ Current Implementation**: The odometry currently assumes straight-line motion. Steering angle integration for accurate 2D pose estimation will be implemented in a future update.
+
 #### Frame IDs
 - **odom**: Fixed odometry frame for navigation
 - **mtt_base_link**: Vehicle base frame for transforms
