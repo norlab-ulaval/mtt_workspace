@@ -1,15 +1,17 @@
-#!/usr/bin/env python3
-import rclpy
-from rclpy.node import Node
-
-from std_msgs.msg import String
 import can
 from enum import Enum
+import logging
 import time
 import socket
 import fcntl
 import struct
 
+log = logging.getLogger('MTTCanDriver')
+log.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+if not log.handlers:
+    log.addHandler(handler)
 
 MTT_SWITCHES_VEHICLE_TYPE = 0
 MTT_SWITCHES_GLOBAL = 1
@@ -28,9 +30,9 @@ class DirectionState(Enum):
     Forward = 0x01
 
 class WinchState(Enum):
-    WinchNeutral = 0x7f # 127
-    WinchIn = 0xe5 # 229
-    WinchOut = 0x18 # 24
+    WinchNeutral = 0x7f  # 127
+    WinchIn = 0xe5       # 229
+    WinchOut = 0x18      # 24
 
 class SecuritySwitchState(Enum):
     SafetyLocked = 0x00
@@ -54,43 +56,41 @@ def interface_exists(ifname):
         return True
     except OSError:
         return False
+
+class MTTCanDriver:
+    """Non-ROS driver for controlling the MTT-154 via CAN bus.
     
-class MttDriver(Node):
-    def __init__(self):
-        super().__init__("mtt_driver")
+    Provides low-level CAN communication interface for the MTT-154 vehicle.
+    Handles throttle, steering, brake, winch, and safety system control.
+    """
 
-        # to validate
-        self.node_id = 0x001 # remote controller id
-        # self.node_id = 0x100 # is supposed to work according to documentation but it doesn't
-
-        # can bus initialization
-        interface_name = "can0"
+    def __init__(self, can_interface='can0'):
+        # CAN node configuration
+        self.node_id = 0x100  # rf remote controller id 0x001 and software controller id 0x100
+        self.can_array = [0] * 8
+        
+        # CAN bus initialization with interface checking
         timeout_seconds = 10
         check_interval = 0.5
         elapsed = 0.0
 
-        self.get_logger().info(f"Waiting for CAN interface '{interface_name}'...")
+        log.info(f"Waiting for CAN interface '{can_interface}'...")
 
-        while not interface_exists(interface_name) and elapsed < timeout_seconds:
+        while not interface_exists(can_interface) and elapsed < timeout_seconds:
             time.sleep(check_interval)
             elapsed += check_interval
 
-        if not interface_exists(interface_name):
-            self.get_logger().error(f"CAN interface '{interface_name}' not found after {timeout_seconds} seconds.")
-            rclpy.shutdown()
-            return
+        if not interface_exists(can_interface):
+            log.error(f"CAN interface '{can_interface}' not found after {timeout_seconds} seconds.")
+            raise Exception(f"CAN interface '{can_interface}' not available")
 
         try:
-            self.bus = can.interface.Bus(interface_name, bustype="socketcan")
-            self.get_logger().info(f"Successfully initialized CAN bus on '{interface_name}'")
+            self.bus = can.interface.Bus(can_interface, bustype="socketcan")
+            log.info(f"Successfully initialized CAN bus on '{can_interface}'")
         except OSError as e:
-            self.get_logger().error(f"Failed to initialize CAN bus: {e}")
-            rclpy.shutdown()
+            log.error(f"Failed to initialize CAN bus: {e}")
+            raise
 
-
-        self.can_array = [0] * 8
-
-        # initializing the default values for the configuration of the mtt
         self.vehicle_type = None
         self.steer_value = None
         self.throttle_value = None
@@ -134,43 +134,48 @@ class MttDriver(Node):
 
         # MTT_ANALOG_STEER
         # self.set_steer(0)
-        self.set_steer(128)
+        self.set_steer(128) # Center position
 
         # MTT_SWITCHES_DIRECTION_MODE
         self.set_direction_mode(DirectionMode.OpenLoop)
         # self.set_direction_mode(DirectionMode.CloseLoop)
 
-        self.send_frame_period = 0.1
-        self.count = 0
+    def reset_motion_commands(self):
+        """Resets all motion commands to a safe, stopped state."""
+        self.set_throttle(0)
+        self.set_steer(128)  # Center position
+        self.set_brake(255)  # Full brake
+        self.set_winch_state(WinchState.WinchNeutral)
+        self.set_direction(DirectionState.Forward)
 
-        self.timer = self.create_timer(self.send_frame_period, self.send_can_frame)
+    def send_can_frame(self):
+        """Sends the current command frame to the CAN bus."""
+        if not self.bus: 
+            return
+        try:
+            message = can.Message(arbitration_id=self.node_id, data=self.can_array, is_extended_id=False)
+            self.bus.send(message)
+        except can.CanError as e:
+            log.error(f"Error sending CAN frame: {e}")
 
-
-    def __del__(self):
-        if hasattr(self, "bus") and self.bus:
-            self.bus.shutdown()
-
-
-        # TODO: iterative error 
-
-
+    # --- Control Methods ---
     def set_steer(self, steer_value):
 
         if not isinstance(steer_value, int):
-            print("ERROR: steer_value is not an integer: " + str(steer_value))
+            log.error(f"steer_value is not an integer: {steer_value}")
             return
 
         # out of bound values are set to the closest bound
         # TODO: ignore out of bound values instead
         if steer_value > 255:
-            print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
+            log.warning(f"out of bound value {steer_value} for steer_value")
             steer_value = 255
 
         if steer_value < 0:
-            print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
+            log.warning(f"out of bound value {steer_value} for steer_value")
             steer_value = 0
 
-        if steer_value >= 0 and steer_value <= 255:  
+        if steer_value >= 0 and steer_value <= 255:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
 
@@ -178,35 +183,35 @@ class MttDriver(Node):
     def set_throttle(self, throttle_value):
 
         if not isinstance(throttle_value, int):
-            print("ERROR: throttle_value is not an integer: " + str(throttle_value))
+            log.error(f"throttle_value is not an integer: {throttle_value}")
             return
 
         # TODO: ignore out of bound values instead
         if throttle_value > 230:
-            print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
+            log.warning(f"out of bound value {throttle_value} for throttle_value")
             throttle_value = 230
 
         if throttle_value < 0:
-            print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
+            log.warning(f"out of bound value {throttle_value} for throttle_value")
             throttle_value = 0
 
         if throttle_value >= 0 and throttle_value <= 230:
-            self.throttle_value = throttle_value  
+            self.throttle_value = throttle_value
             self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
 
 
     def set_brake(self, brake_value):
         
         if not isinstance(brake_value, int):
-            print("ERROR: brake_value is not an integer: " + str(brake_value))
+            log.error(f"brake_value is not an integer: {brake_value}")
             return
             
         if brake_value > 255:
-            print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
+            log.warning(f"out of bound value {brake_value} for brake_value")
             brake_value = 255
 
         if brake_value < 0:
-            print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
+            log.warning(f"out of bound value {brake_value} for brake_value")
             brake_value = 0
 
         if brake_value >= 0 and brake_value <= 255:
@@ -229,10 +234,9 @@ class MttDriver(Node):
             self.winch_state = WinchState.WinchOut
 
         else:
-            print("ERROR: invalid value for winch_state: " + str(winch_state))
-            return 
-
-
+            log.error(f"invalid value for winch_state: {winch_state}")
+            return
+        
     def set_security_switch(self, switch_value):
 
         if switch_value == SecuritySwitchState.SafetyLocked:
@@ -244,7 +248,7 @@ class MttDriver(Node):
             self.security_switch_state = SecuritySwitchState.SafetyUnlocked
 
         else:
-            print("ERROR: invalid value for switch_value: " + str(switch_value))
+            log.error(f"invalid value for switch_value: {switch_value}")
             return
 
 
@@ -260,7 +264,7 @@ class MttDriver(Node):
             self.direction_state = DirectionState.Reverse
 
         else:
-            print("ERROR: invalid value for direction: " + str(direction))
+            log.error(f"invalid value for direction: {direction}")
             return
 
 
@@ -275,7 +279,7 @@ class MttDriver(Node):
             self.light_state = LightState.On
             self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111
         else:
-            print("ERROR: invalid value for light_state: " + str(light_state))
+            log.error(f"invalid value for light_state: {light_state}")
             return
 
 
@@ -289,7 +293,7 @@ class MttDriver(Node):
             self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
             self.direction_mode = DirectionMode.OpenLoop
         else:
-            print("ERROR: invalid value for direction_mode: " + str(direction_mode))
+            log.error(f"invalid value for direction_mode: {direction_mode}")
             return
 
 
@@ -308,38 +312,9 @@ class MttDriver(Node):
             self.vehicle_type = VehicleType.VehicleSbsRight
 
         else:
-            print("ERROR: invalid value for vehicle_type: " + str(vehicle_type))
+            log.error(f"invalid value for vehicle_type: {vehicle_type}")
             return
 
-
-    def send_can_frame(self):
-        
-        # only for testing purpose
-        self.count += self.send_frame_period
-
-        if self.count >= 5:
-            if self.light_state == LightState.On:
-                new_state = LightState.Off
-            else:
-                new_state = LightState.On
-
-            self.set_light_state(new_state)
-            self.count = 0
-
-        print(self.can_array)
-
-        self.bus.send(can.Message(arbitration_id=self.node_id, data=self.can_array, is_extended_id=False))
-
-
-
-def main(args=None):
-
-    rclpy.init(args=args)
-    mtt_driver = MttDriver()
-    rclpy.spin(mtt_driver)
-
-    rclpy.shutdown()
-
-
-if __name__ == '__main__':
-    main()
+    def shutdown(self):
+        if self.bus: 
+            self.bus.shutdown()

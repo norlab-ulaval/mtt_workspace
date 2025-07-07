@@ -8,9 +8,16 @@ endif()
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
+find_package(rosidl_default_generators REQUIRED)
+
+rosidl_generate_interfaces(${PROJECT_NAME}
+  "msg/MttAuxCommand.msg"
+  DEPENDENCIES std_msgs
+)
 
 
-# Python
 ament_python_install_package(${PROJECT_NAME})
 
 install(TARGETS 
@@ -18,6 +25,8 @@ install(TARGETS
 
 install(PROGRAMS
   ${PROJECT_NAME}/mtt_driver.py
+  ${PROJECT_NAME}/mtt_ros_wrapper.py
+  ${PROJECT_NAME}/mtt_teleop_joy.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()
