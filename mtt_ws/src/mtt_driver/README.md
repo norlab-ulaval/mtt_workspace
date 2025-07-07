@@ -2,6 +2,8 @@
 
 ROS 2 driver for MTT-154 All-Terrain Vehicle.
 
+**July 2025 Specification Compliant** - Includes tachometer data processing, proper security switch handling, and emergency stop functionality.
+
 ## Installation
 
 ```bash
@@ -25,8 +27,8 @@ ros2 launch mtt_driver mtt_teleop.launch.py
 
 ## Components
 
-- `mtt_ros_wrapper.py`: Main ROS 2 wrapper
-- `mtt_driver.py`: CAN bus interface  
+- `mtt_ros_wrapper.py`: Main ROS 2 wrapper with tachometer data publishing
+- `mtt_driver.py`: Pure Python CAN bus interface (July 2025 compliant)
 - `mtt_teleop_joy.py`: Joystick control
 ```bash
 ros2 run mtt_driver mtt_teleop_joy
@@ -44,6 +46,10 @@ ros2 run mtt_driver mtt_teleop_joy
 
 - `/cmd_vel` (geometry_msgs/Twist): Velocity commands from joystick (teleop node only)
 - `/mtt_aux_cmd` (mtt_driver/MttAuxCommand): Auxiliary commands from joystick (teleop node only)
+- `/mtt/speed_kmh` (std_msgs/Float64): Vehicle speed in km/h from tachometer
+- `/mtt/distance_km` (std_msgs/Float64): Cumulative distance in kilometers
+- `/mtt/temperature_a` (sensor_msgs/Temperature): Main sensor temperature A
+- `/mtt/temperature_b` (sensor_msgs/Temperature): Main sensor temperature B
 
 ## Controller Mapping
 
@@ -62,13 +68,32 @@ The default controller mapping is configured for 8BitDo controllers:
 - **Brake Priority**: Brake commands take precedence over throttle commands
 - **Safe Defaults**: All commands default to safe values (stopped, braked)
 
-## CAN Interface
+## CAN Interface (July 2025 Specification)
 
-The driver uses SocketCAN for communication. Make sure your CAN interface is properly configured:
+The driver uses SocketCAN for communication and implements the July 2025 specification:
+
+- **0x001**: Joystick/remote controller 
+- **0x100**: Auxiliary control (this driver) - **overrides 0x001 when active**
+- **0x2ff**: Tachometer data (receive only)
 
 ```bash
 sudo ip link set can0 up type can bitrate 500000
 ```
+
+### Critical Safety Requirements
+
+- **Security switch MUST be unlocked** for operation (controlled via dead man's switch)
+- **Light state acts as emergency stop** (test both states to determine operational mode)
+- **Direction is controlled by master system** (this driver)
+- **Emergency stop** immediately stops all motion and applies maximum brake
+
+### Tachometer Data
+
+The driver automatically receives and processes tachometer data from the vehicle:
+- **Speed calculation**: Real-time km/h from encoder ticks
+- **Distance tracking**: Cumulative distance with ~2-3mm accuracy  
+- **Temperature monitoring**: Two temperature sensors for diagnostics
+- **Gear ratios**: Precisely calculated using manufacturer specifications
 
 ## Troubleshooting
 
@@ -100,6 +125,3 @@ The modular architecture allows easy extension:
 - Implement new control logic in `mtt_driver.py`
 - Create new ROS nodes that publish to `/cmd_vel` and `/mtt_aux_cmd`
 
-## License
-
-[Your License Here]
