@@ -80,7 +80,7 @@ flowchart TB
 ```
 
 ## Current MTT-154 Driver Architecture
-*Updated for July 2025 CAN Bus Specification Compliance*
+*Updated for CAN Bus Specification v1.1 Compliance*
 
 ### Component Overview
 
@@ -105,7 +105,7 @@ flowchart TB
 
 **CAN Driver Layer:**
 - **mtt_driver.py**: Pure Python CAN interface (no ROS dependencies)
-  - July 2025 compliance: Security switch (bit 7), tachometer data parsing
+  - Current specification compliance: Security switch (bit 7), tachometer data parsing
   - Emergency stop patch: Light control acts as temporary E-stop
   - Speed/distance calculations with proper gear ratios
 - **CAN Bus**: SocketCAN interface (can0) for vehicle communication
@@ -120,7 +120,7 @@ flowchart TB
 3. **Safety First**: Dead man's switch and E-stop functionality
 4. **Flexible Input**: Supports joysticks, autonomy, and manual commands
 5. **Modular Design**: Components can be used independently
-6. **July 2025 Compliance**: Updated for latest CAN bus specification
+6. **Current Specification Compliance**: Updated for latest CAN bus specification
 7. **Telemetry Publishing**: Real-time vehicle data on ROS topics
 8. **Speed/Distance Tracking**: Accurate odometry from tachometer data
 
@@ -130,7 +130,7 @@ flowchart TB
 - Emergency stop functionality
 - Safe default values on startup
 - Proper shutdown procedures
-- **Security switch management (July 2025)**: Bit 7 (0x80) for vehicle unlock
+- **Security switch management (CANBus_Specification.md v1.1)**: Bit 7 (0x80) for vehicle unlock
 - **Temporary emergency stop patch**: Light control acts as E-stop mechanism
 - **System readiness checks**: Both security switch and light state validation
 
@@ -140,7 +140,7 @@ flowchart TB
 2. **Autonomy**: Nav2 → Topics → mtt_ros_wrapper → CAN
 3. **Telemetry**: Vehicle → CAN → mtt_driver → mtt_ros_wrapper → ROS Topics
 
-### July 2025 Updates
+### Current Specification Updates
 
 **CAN Bus Compliance:**
 - Security switch corrected to bit 7 (0x80) instead of bit 3 (0x08)

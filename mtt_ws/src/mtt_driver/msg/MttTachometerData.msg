@@ -1,19 +1,20 @@
-# MTT Tachometer Data Message
-# Contains speed, distance, and temperature information from vehicle
+# MTT-154 Tachometer Data Message (CANBus_Specification.md v1.1)
+# Contains complete telemetry data from vehicle CAN 0x2FF
 
-# Speed in km/h calculated from tachometer instant reading
-float64 speed_kmh
-
-# Cumulative distance in kilometers
-float64 distance_km
+# Standard ROS header
+std_msgs/Header header
 
 # Temperature sensors in Celsius
-float64 temperature_a
-float64 temperature_b
+float64 main_sensor_temp_a
+float64 main_sensor_temp_b
 
-# Raw tachometer values
-uint16 tachimeter_instant
-uint32 tachimeter_cumulative
+# Raw tachometer values (MSB-first from CAN)
+uint16 tachometer_instant     # Instantaneous speed in raw encoder ticks per second (RPS)
+uint32 tachometer_cumulative  # Cumulative distance in raw encoder ticks
 
-# Timestamp when data was received
-builtin_interfaces/Time stamp
+# Calculated speed values
+float64 speed_ms    # Speed in meters per second
+float64 speed_kmh   # Speed in kilometers per hour
+
+# Calculated distance
+float64 distance_km # Cumulative distance in kilometers

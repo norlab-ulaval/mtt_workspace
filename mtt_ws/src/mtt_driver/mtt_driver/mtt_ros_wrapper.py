@@ -1,15 +1,29 @@
+#!/usr/bin/env python3
+"""
+MTT-154 ROS2 Wrapper
+
+ROS2 node providing standard interfaces for MTT-154 control.
+Implements CANBus_Specification.md v1.1 (2025-07-03).
+
+Subscribes to /cmd_vel and /mtt_aux_cmd topics to control the vehicle
+through CAN bus communication. Implements safety features including
+dead man's switch and emergency stop functionality.
+
+Publishes tachometer data including speed, distance, and temperatures.
+"""
+
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import Temperature
-from std_msgs.msg import Float64
-from mtt_driver.msg import MttAuxCommand
+from std_msgs.msg import Float64, Float64MultiArray
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Point, Pose, Quaternion, Vector3
+from mtt_driver.msg import MttAuxCommand, MttTachometerData
 from mtt_driver.mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState
 
 class MTTRosWrapper(Node):
     """ROS 2 node that provides standard interfaces for MTT-154 control.
-    
-    MTT Driver - Compliant with July 2025 specifications
     
     Subscribes to /cmd_vel and /mtt_aux_cmd topics to control the vehicle
     through CAN bus communication. Implements safety features including
@@ -32,11 +46,12 @@ class MTTRosWrapper(Node):
         self.create_subscription(Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, 'mtt_aux_cmd', self.aux_cmd_callback, 10)
         
-        # Publishers for tachometer data
-        self.speed_pub = self.create_publisher(Float64, 'mtt/speed_kmh', 10)
-        self.distance_pub = self.create_publisher(Float64, 'mtt/distance_km', 10)
-        self.temp_a_pub = self.create_publisher(Temperature, 'mtt/temperature_a', 10)
-        self.temp_b_pub = self.create_publisher(Temperature, 'mtt/temperature_b', 10)
+        # Publishers for tachometer and odometry data
+        self.speed_pub = self.create_publisher(Float64, 'mtt_speed', 10)
+        self.distance_pub = self.create_publisher(Float64, 'mtt_distance', 10)
+        self.temperature_pub = self.create_publisher(Float64MultiArray, 'mtt_temperature', 10)
+        self.tachometer_pub = self.create_publisher(MttTachometerData, 'mtt_tachometer', 10)
+        self.odometry_pub = self.create_publisher(Odometry, 'mtt_odometry', 10)
         
         # Control loop timer (20 Hz)
         self.create_timer(0.05, self.control_loop)
@@ -95,34 +110,77 @@ class MTTRosWrapper(Node):
         self._publish_tachometer_data()
 
     def _publish_tachometer_data(self):
-        """Publish tachometer data to ROS topics"""
+        """Publish tachometer and odometry data to ROS topics"""
         tach_data = self.driver.get_tachometer_data()
+        odometry_data = self.driver.get_odometry_data()
         
-        if tach_data['new_data_available']:
-            # Publish speed
+        if tach_data.new_data_available:
+            # Publish speed (km/h)
             speed_msg = Float64()
-            speed_msg.data = self.driver.get_speed_kmh()
+            speed_msg.data = odometry_data['speed_kmh']
             self.speed_pub.publish(speed_msg)
             
-            # Publish distance
+            # Publish distance (km)
             distance_msg = Float64()
-            distance_msg.data = self.driver.get_cumulative_distance_km()
+            distance_msg.data = odometry_data['total_distance_m'] / 1000.0  # Convert m to km
             self.distance_pub.publish(distance_msg)
             
-            # Publish temperatures
-            temp_a_msg = Temperature()
-            temp_a_msg.header.stamp = self.get_clock().now().to_msg()
-            temp_a_msg.header.frame_id = "mtt_sensor_a"
-            temp_a_msg.temperature = tach_data['main_sensor_temp_a']
-            temp_a_msg.variance = 0.0
-            self.temp_a_pub.publish(temp_a_msg)
+            # Publish temperature array
+            temp_msg = Float64MultiArray()
+            temp_msg.data = [
+                odometry_data['temperature_a'], 
+                odometry_data['temperature_b']
+            ]
+            self.temperature_pub.publish(temp_msg)
             
-            temp_b_msg = Temperature()
-            temp_b_msg.header.stamp = self.get_clock().now().to_msg()
-            temp_b_msg.header.frame_id = "mtt_sensor_b"
-            temp_b_msg.temperature = tach_data['main_sensor_temp_b']
-            temp_b_msg.variance = 0.0
-            self.temp_b_pub.publish(temp_b_msg)
+            # Publish complete tachometer data
+            tachometer_msg = MttTachometerData()
+            tachometer_msg.header.stamp = self.get_clock().now().to_msg()
+            tachometer_msg.header.frame_id = "mtt_base_link"
+            tachometer_msg.main_sensor_temp_a = odometry_data['temperature_a']
+            tachometer_msg.main_sensor_temp_b = odometry_data['temperature_b']
+            tachometer_msg.tachometer_instant = tach_data.tachometer_instant
+            tachometer_msg.tachometer_cumulative = tach_data.tachometer_cumulative
+            tachometer_msg.speed_ms = odometry_data['speed_ms']
+            tachometer_msg.speed_kmh = odometry_data['speed_kmh']
+            tachometer_msg.distance_km = odometry_data['total_distance_m'] / 1000.0
+            self.tachometer_pub.publish(tachometer_msg)
+            
+            # Publish standard ROS odometry
+            self._publish_odometry(odometry_data)
+
+    def _publish_odometry(self, odometry_data):
+        """Publish standard ROS2 odometry message"""
+        odom_msg = Odometry()
+        odom_msg.header.stamp = self.get_clock().now().to_msg()
+        odom_msg.header.frame_id = "odom"
+        odom_msg.child_frame_id = "mtt_base_link"
+
+        # Position (only x-axis movement for tracked vehicle)
+        # Direction handling: negative distance for reverse
+        actual_distance = odometry_data['total_distance_m']
+        if odometry_data['direction'] == 'Reverse':
+            actual_distance = -odometry_data['total_distance_m']
+
+        odom_msg.pose.pose.position.x = actual_distance
+        odom_msg.pose.pose.position.y = 0.0
+        odom_msg.pose.pose.position.z = 0.0
+
+        # Orientation (no rotation for straight line movement)
+        odom_msg.pose.pose.orientation.x = 0.0
+        odom_msg.pose.pose.orientation.y = 0.0
+        odom_msg.pose.pose.orientation.z = 0.0
+        odom_msg.pose.pose.orientation.w = 1.0
+
+        # Velocity
+        odom_msg.twist.twist.linear.x = odometry_data['speed_ms']
+        odom_msg.twist.twist.linear.y = 0.0
+        odom_msg.twist.twist.linear.z = 0.0
+        odom_msg.twist.twist.angular.x = 0.0
+        odom_msg.twist.twist.angular.y = 0.0
+        odom_msg.twist.twist.angular.z = 0.0
+
+        self.odometry_pub.publish(odom_msg)
 
     def destroy_node(self):
         """Clean shutdown with emergency stop."""

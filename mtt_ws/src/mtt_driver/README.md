@@ -2,7 +2,7 @@
 
 ROS 2 driver for MTT-154 All-Terrain Vehicle.
 
-**July 2025 Specification Compliant** - Includes tachometer data processing, proper security switch handling, and emergency stop functionality.
+**CAN Bus Specification v1.1 Compliant** - Includes tachometer data processing, proper security switch handling, and emergency stop functionality.
 
 ## Installation
 
@@ -28,7 +28,7 @@ ros2 launch mtt_driver mtt_teleop.launch.py
 ## Components
 
 - `mtt_ros_wrapper.py`: Main ROS 2 wrapper with tachometer data publishing
-- `mtt_driver.py`: Pure Python CAN bus interface (July 2025 compliant)
+- `mtt_driver.py`: Pure Python CAN bus interface (CANBus_Specification.md v1.1 compliant)
 - `mtt_teleop_joy.py`: Joystick control
 ```bash
 ros2 run mtt_driver mtt_teleop_joy
@@ -44,10 +44,16 @@ ros2 run mtt_driver mtt_teleop_joy
 
 ### Published Topics
 
+#### Control Topics (Teleop only)
 - `/cmd_vel` (geometry_msgs/Twist): Velocity commands from joystick (teleop node only)
 - `/mtt_aux_cmd` (mtt_driver/MttAuxCommand): Auxiliary commands from joystick (teleop node only)
-- `/mtt/speed_kmh` (std_msgs/Float64): Vehicle speed in km/h from tachometer
-- `/mtt/distance_km` (std_msgs/Float64): Cumulative distance in kilometers
+
+#### Telemetry Topics (CANBus_Specification.md v1.1)
+- `/mtt_speed` (std_msgs/Float64): Vehicle speed in km/h
+- `/mtt_distance` (std_msgs/Float64): Cumulative distance in kilometers
+- `/mtt_temperature` (std_msgs/Float64MultiArray): Temperature sensors [A, B] in °C
+- `/mtt_tachometer` (mtt_driver/MttTachometerData): Complete tachometer data structure
+- `/mtt_odometry` (nav_msgs/Odometry): Standard ROS2 odometry for navigation stack
 - `/mtt/temperature_a` (sensor_msgs/Temperature): Main sensor temperature A
 - `/mtt/temperature_b` (sensor_msgs/Temperature): Main sensor temperature B
 
@@ -68,9 +74,9 @@ The default controller mapping is configured for 8BitDo controllers:
 - **Brake Priority**: Brake commands take precedence over throttle commands
 - **Safe Defaults**: All commands default to safe values (stopped, braked)
 
-## CAN Interface (July 2025 Specification)
+## CAN Interface (CANBus_Specification.md v1.1)
 
-The driver uses SocketCAN for communication and implements the July 2025 specification:
+The driver uses SocketCAN for communication and implements the current CAN bus specification:
 
 - **0x001**: Joystick/remote controller 
 - **0x100**: Auxiliary control (this driver) - **overrides 0x001 when active**
@@ -94,6 +100,39 @@ The driver automatically receives and processes tachometer data from the vehicle
 - **Distance tracking**: Cumulative distance with ~2-3mm accuracy  
 - **Temperature monitoring**: Two temperature sensors for diagnostics
 - **Gear ratios**: Precisely calculated using manufacturer specifications
+
+### Odometry Integration
+
+The driver provides comprehensive odometry data compatible with ROS2 navigation:
+
+#### Data Processing
+- **Real-time speed calculation**: Uses manufacturer gear ratios and encoder data
+- **Distance tracking**: Cumulative odometry with direction awareness
+- **Standard ROS2 format**: Compatible with nav2 and SLAM algorithms
+- **MSB-first parsing**: Correctly handles CAN 0x2FF byte order per specification
+
+#### Frame IDs
+- **odom**: Fixed odometry frame for navigation
+- **mtt_base_link**: Vehicle base frame for transforms
+
+#### Monitoring
+```bash
+# Monitor speed
+ros2 topic echo /mtt_speed
+
+# Monitor odometry  
+ros2 topic echo /mtt_odometry
+
+# Monitor complete telemetry
+ros2 topic echo /mtt_tachometer
+```
+
+#### Integration with Navigation
+The odometry data is published in standard format for integration with:
+- **Nav2**: ROS2 navigation stack
+- **SLAM algorithms**: Real-time mapping
+- **TF2**: Transform broadcasting
+- **Robot localization**: Sensor fusion
 
 ## Troubleshooting
 
