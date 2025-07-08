@@ -40,27 +40,44 @@ pip3 install python-can
 
 ## Quick Start
 
-### 1. Setup and Run Everything Automatically
+### 1. Build ROS Package
 
 ```bash
-cd mtt_project
-chmod +x test_mtt_ros_driver.sh
-./test_mtt_ros_driver.sh
+cd ~/mtt_ws
+# Build the ROS package
+colcon build --packages-select mtt_driver
+
+# Source the workspace
+source install/setup.bash
 ```
 
-This script will:
-- Setup virtual CAN interface (vcan0)
-- Build the mockserver
-- Build the ROS 2 driver
-- Start the mockserver
-- Test basic CAN communication
+### 2. Setup and Run Mockserver (Standalone)
 
-### 2. Launch ROS 2 Driver with Test Mode
+```bash
+# Build standalone mockserver
+cd ~/mtt_ws/mtt_test_tools/offline_mockserver
+chmod +x build_mtt_mock.sh
+./build_mtt_mock.sh
+
+# Setup virtual CAN interface
+sudo modprobe vcan
+sudo ip link delete vcan0 2>/dev/null || true  # Remove if exists
+sudo ip link add dev vcan0 type vcan
+sudo ip link set vcan0 up
+
+# Start mockserver (standalone, no ROS dependencies)
+cd build
+./mtt_mock_server -c vcan0
+```
+
+### 3. Run ROS Driver in Test Mode
 
 In a new terminal:
 ```bash
-cd mtt_project/mtt_ws
-source /opt/ros/humble/setup.bash  # or your ROS 2 distro
+cd ~/mtt_ws
+source /opt/ros/jazzy/setup.bash   # For ROS 2 Jazzy
+# source /opt/ros/humble/setup.bash # For ROS 2 Humble  
+# source /opt/ros/foxy/setup.bash  # For ROS 2 Foxy
 source install/setup.bash
 
 # Option A: Use dedicated test launch file
@@ -69,8 +86,8 @@ ros2 launch mtt_driver mtt_test.launch.py
 # Option B: Use main launch file with test mode
 ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true
 
-# Option C: Use specific CAN interface
-ros2 launch mtt_driver mtt_teleop.launch.py can_interface:=vcan0
+# Option C: Run individual components
+ros2 run mtt_driver mtt_ros_wrapper --ros-args -p test_mode:=true
 ```
 
 ### 3. Monitor System
@@ -99,7 +116,8 @@ sudo ip link set vcan0 up
 
 #### 2. Start Mockserver
 ```bash
-cd mtt_test_tools/offline_mockserver
+# Standalone mockserver (no ROS dependencies)
+cd ~/mtt_ws/mtt_test_tools/offline_mockserver
 ./build_mtt_mock.sh
 cd build
 ./mtt_mock_server -c vcan0
@@ -107,22 +125,19 @@ cd build
 
 #### 3. Build and Run ROS Driver
 ```bash
-cd mtt_ws
-source /opt/ros/humble/setup.bash
+cd ~/mtt_ws
+source /opt/ros/foxy/setup.bash  # or your ROS 2 distro
 colcon build --packages-select mtt_driver
 source install/setup.bash
 
-# Option A: Run with test launch file (explicit test mode)
+# Option A: Test launch file (driver + test node)
 ros2 launch mtt_driver mtt_test.launch.py
 
-# Option B: Run with main launch file in test mode
+# Option B: Main launch file in test mode
 ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true
 
-# Option C: Run just the driver with test mode
+# Option C: Run components individually
 ros2 run mtt_driver mtt_ros_wrapper --ros-args -p test_mode:=true
-
-# Option D: Run with specific CAN interface
-ros2 run mtt_driver mtt_ros_wrapper --ros-args -p can_interface:=vcan0
 ```
 
 ### Manual Command Testing
