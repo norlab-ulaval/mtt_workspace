@@ -35,8 +35,23 @@ class MTTRosWrapper(Node):
     def __init__(self):
         super().__init__('mtt_ros_wrapper')
         
+        # Declare and get parameters
+        self.declare_parameter('can_interface', 'can0')  # Default to real hardware
+        self.declare_parameter('test_mode', False)       # Default to production mode
+        
+        can_interface = self.get_parameter('can_interface').get_parameter_value().string_value
+        test_mode = self.get_parameter('test_mode').get_parameter_value().bool_value
+        
+        # Override CAN interface if in test mode
+        if test_mode:
+            can_interface = 'vcan0'
+            self.get_logger().info("TEST MODE: Using virtual CAN interface (vcan0)")
+        else:
+            self.get_logger().info(f"PRODUCTION MODE: Using CAN interface: {can_interface}")
+        
         try:
-            self.driver = MTTCanDriver()
+            self.driver = MTTCanDriver(can_interface)
+            self.get_logger().info(f"MTT Driver initialized successfully")
         except Exception as e:
             self.get_logger().fatal(f"Could not start driver: {e}")
             return
