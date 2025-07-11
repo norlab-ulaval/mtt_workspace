@@ -34,9 +34,10 @@ MTT_GEAR3 = 15
 MTT_GEAR4 = 32
 MTT_GEAR_DRIVE = 8
 MTT_GEAR_TRACK = 54
-MTT_ENCODER_TEETH = 5
+MTT_ENCODER_TEETH = 5  # MTT_Encoder_TEET in firmware
 MTT_TRACK_LENGTH_CM = 393
-MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000.0
+MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000.0  # Firmware: MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000
+MTT_TRACK_LENGTH_M = MTT_TRACK_LENGTH_CM / 100.0  # For convenience in Python
 
 # CAN IDs - Reference: CANBus_Specification.md Section 3.0
 CAN_MAIN_TELEMETRY = 0x2FF  # Main controller data (encoder, temperature)
@@ -89,16 +90,21 @@ class TachometerData:
     new_data_available: bool = False # Flag indicating fresh data
 
     def get_speed_ms(self, final_ratio: float) -> float:
-        """Calculate speed in m/s from encoder data"""
+        """Calculate speed in m/s from encoder data (firmware-compatible)"""
         if final_ratio == 0.0:
             return 0.0
-        # Convert RPS to actual speed using gear ratios
-        speed_ms = (self.tachometer_instant / final_ratio) * MTT_TRACK_LENGTH_KM * 1000.0  # Convert km to m
+        # Firmware RPS_to_KMh: return ((float)RPS / FinalRatio) * (float)MTT_TRACK_LENGTH_KM *3600;
+        # Convert to m/s: ((RPS / FinalRatio) * MTT_TRACK_LENGTH_KM * 3600) / 3.6
+        speed_kmh = (self.tachometer_instant / final_ratio) * MTT_TRACK_LENGTH_KM * 3600
+        speed_ms = speed_kmh / 3.6
         return speed_ms
 
     def get_speed_kmh(self, final_ratio: float) -> float:
-        """Calculate speed in km/h from encoder data"""
-        return self.get_speed_ms(final_ratio) * 3.6
+        """Calculate speed in km/h from encoder data (exact firmware implementation)"""
+        if final_ratio == 0.0:
+            return 0.0
+        # Firmware RPS_to_KMh: return ((float)RPS / FinalRatio) * (float)MTT_TRACK_LENGTH_KM *3600;
+        return (self.tachometer_instant / final_ratio) * MTT_TRACK_LENGTH_KM * 3600
 
     def __str__(self):
         return (f"TachometerData(TempA={self.main_sensor_temp_a}°C, TempB={self.main_sensor_temp_b}°C, "
@@ -285,11 +291,20 @@ class MTTCanDriver:
             log.error(f"Error sending CAN frame: {e}")
 
     def _calculate_gear_ratio(self):
-        """Calculate the final gear ratio for speed conversion"""
+        """Calculate the final gear ratio for speed conversion (exact firmware implementation)"""
+        # Firmware RPS_to_KMh_Precalc() function:
+        # ratio1 = ((float)MTT_GEAR2 / (float)MTT_GEAR1) * (float)MTT_Encoder_TEET;
+        # ratio2 = ((float)MTT_GEAR4 / (float)MTT_GEAR3) * ratio1;
+        # FinalRatio = (((float)MTT_GEAR_TRACK / (float)MTT_GEAR_DRIVE) * ratio2) * 2;
+        
+        # NOTE: This ratio is used for SPEED calculation only (RPS to km/h)
+        # For DISTANCE calculation, we use empirical measurement: 15160 ticks = 1 track turn = 3.93m
+        
         ratio1 = (MTT_GEAR2 / MTT_GEAR1) * MTT_ENCODER_TEETH
         ratio2 = (MTT_GEAR4 / MTT_GEAR3) * ratio1
         final_ratio = ((MTT_GEAR_TRACK / MTT_GEAR_DRIVE) * ratio2) * 2
-        log.info(f"Encoder final ratio calculated: {final_ratio}")
+        
+        log.info(f"Encoder final ratio calculated: {final_ratio} (firmware-exact calculation, used for speed only)")
         return final_ratio
 
     def _can_listener(self):
@@ -318,6 +333,7 @@ class MTTCanDriver:
         tachimeter_instant = struct.unpack('>H', data[2:4])[0]  # big-endian uint16
         
         # Bytes 4-7: Cumulative RPS (distance in ticks) - MSB first (Big Endian)
+        # Firmware: RxData_3[4]<<24 | RxData_3[5]<<16 | RxData_3[6]<<8 | RxData_3[7]
         tachimeter_cumulative = struct.unpack('>I', data[4:8])[0]  # big-endian uint32
 
         # Update tachometer data structure
@@ -332,7 +348,14 @@ class MTTCanDriver:
         if self.last_cumulative_ticks > 0:
             tick_diff = tachimeter_cumulative - self.last_cumulative_ticks
             if tick_diff > 0:  # Avoid negative values due to overflow
-                distance_increment = (tick_diff / self.encoder_final_ratio) * MTT_TRACK_LENGTH_KM * 1000.0  # Convert to meters
+                # Direct calculation from real-world measurement:
+                # 15160 ticks = 1 track turn = 3.93m (corrected measurement)
+                # Therefore: distance = ticks * (3.93m / 15160 ticks)
+                distance_per_tick = MTT_TRACK_LENGTH_M / 15160.0  # Empirically measured
+                distance_increment = tick_diff * distance_per_tick
+                
+                # Odometry always accumulates positive distance regardless of direction
+                # Direction is only used for speed calculation, not odometry
                 self.total_distance += distance_increment
 
         self.last_cumulative_ticks = tachimeter_cumulative

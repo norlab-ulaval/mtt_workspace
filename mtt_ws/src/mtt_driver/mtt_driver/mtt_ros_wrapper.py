@@ -58,6 +58,10 @@ class MTTRosWrapper(Node):
 
         self.is_estopped = True
         
+        # ROS odometry tracking variables
+        self.ros_position_x = 0.0  # Current ROS odometry position
+        self.last_driver_distance = 0.0  # Last distance from driver to calculate increments
+        
         self.create_subscription(Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, 'mtt_aux_cmd', self.aux_cmd_callback, 10)
         
@@ -179,12 +183,21 @@ class MTTRosWrapper(Node):
         odom_msg.header.frame_id = "odom"
         odom_msg.child_frame_id = "mtt_base_link"
 
-        # Position calculation - straight-line distance only
-        actual_distance = odometry_data['total_distance_m']
-        if odometry_data['direction'] == 'Reverse':
-            actual_distance = -odometry_data['total_distance_m']
+        # Calculate incremental distance from driver
+        current_driver_distance = odometry_data['total_distance_m']
+        distance_increment = current_driver_distance - self.last_driver_distance
+        
+        # Apply direction to the increment (not the total distance)
+        if odometry_data['direction'] == 'Forward':
+            self.ros_position_x += distance_increment
+        else:  # Reverse
+            self.ros_position_x -= distance_increment
+        
+        # Update last distance for next calculation
+        self.last_driver_distance = current_driver_distance
 
-        odom_msg.pose.pose.position.x = actual_distance
+        # Set position in odometry message
+        odom_msg.pose.pose.position.x = self.ros_position_x
         odom_msg.pose.pose.position.y = 0.0
         odom_msg.pose.pose.position.z = 0.0
 

@@ -1,0 +1,1898 @@
+diff --git a/TESTING_GUIDE.md b/TESTING_GUIDE.md
+new file mode 100644
+index 0000000..e774ca2
+--- /dev/null
++++ b/TESTING_GUIDE.md
+@@ -0,0 +1,352 @@
++# MTT ROS 2 Driver Testing Guide
++
++This guide explains how to test the MTT ROS 2 driver using the offline mockserver instead of the physical robot.
++
++## Overview
++
++The testing setup includes:
++- **Test Mode**: Uses `test_mode` parameter to switch between real hardware (`can0`) and virtual testing (`vcan0`)
++- **Offline Mockserver**: Simulates the MTT-154 vehicle's CAN bus behavior
++- **Virtual CAN Interface**: Creates a virtual network for testing without hardware
++- **ROS 2 Driver**: The actual driver code you want to test
++- **Test Nodes**: Automated testing scripts to verify functionality
++
++## Testing Modes
++
++### Production Mode (Default)
++- Uses `can0` interface for real hardware
++- Default configuration for robot deployment
++- Launch: `ros2 launch mtt_driver mtt_teleop.launch.py`
++
++### Test Mode 
++- Uses `vcan0` interface for simulation
++- Requires explicit test mode activation
++- Launch: `ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true`
++
++## Prerequisites
++
++### Required Packages
++```bash
++# Ubuntu/Debian
++sudo apt update
++sudo apt install can-utils build-essential cmake
++
++# Python packages
++pip3 install python-can
++
++# ROS 2 (if not already installed)
++# Follow official ROS 2 installation guide for your distro
++```
++
++## Quick Start
++
++### 1. Build ROS Package
++
++```bash
++cd ~/mtt_ws
++# Build the ROS package
++colcon build --packages-select mtt_driver
++
++# Source the workspace
++source install/setup.bash
++```
++
++### 2. Setup and Run Mockserver (Standalone)
++
++```bash
++# Build standalone mockserver
++cd ~/mtt_ws/mtt_test_tools/offline_mockserver
++chmod +x build_mtt_mock.sh
++./build_mtt_mock.sh
++
++# Setup virtual CAN interface
++sudo modprobe vcan
++sudo ip link delete vcan0 2>/dev/null || true  # Remove if exists
++sudo ip link add dev vcan0 type vcan
++sudo ip link set vcan0 up
++
++# Start mockserver (standalone, no ROS dependencies)
++cd build
++./mtt_mock_server -c vcan0
++```
++
++### 3. Run ROS Driver in Test Mode
++
++In a new terminal:
++```bash
++cd ~/mtt_ws
++source /opt/ros/jazzy/setup.bash   # For ROS 2 Jazzy
++# source /opt/ros/humble/setup.bash # For ROS 2 Humble  
++# source /opt/ros/foxy/setup.bash  # For ROS 2 Foxy
++source install/setup.bash
++
++# Option A: Use dedicated test launch file
++ros2 launch mtt_driver mtt_test.launch.py
++
++# Option B: Use main launch file with test mode
++ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true
++
++# Option C: Run individual components
++ros2 run mtt_driver mtt_ros_wrapper --ros-args -p test_mode:=true
++```
++
++### 3. Monitor System
++
++In another terminal:
++```bash
++# Monitor CAN traffic
++candump vcan0
++
++# Monitor ROS topics
++ros2 topic echo /mtt_tachometer
++ros2 topic echo /mtt_speed
++ros2 topic list
++```
++
++## Manual Testing
++
++### Step-by-Step Manual Setup
++
++#### 1. Setup Virtual CAN
++```bash
++sudo modprobe vcan
++sudo ip link add dev vcan0 type vcan
++sudo ip link set vcan0 up
++```
++
++#### 2. Start Mockserver
++```bash
++# Standalone mockserver (no ROS dependencies)
++cd ~/mtt_ws/mtt_test_tools/offline_mockserver
++./build_mtt_mock.sh
++cd build
++./mtt_mock_server -c vcan0
++```
++
++#### 3. Build and Run ROS Driver
++```bash
++cd ~/mtt_ws
++source /opt/ros/foxy/setup.bash  # or your ROS 2 distro
++colcon build --packages-select mtt_driver
++source install/setup.bash
++
++# Option A: Test launch file (driver + test node)
++ros2 launch mtt_driver mtt_test.launch.py
++
++# Option B: Main launch file in test mode
++ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true
++
++# Option C: Run components individually
++ros2 run mtt_driver mtt_ros_wrapper --ros-args -p test_mode:=true
++```
++
++### Manual Command Testing
++
++#### Send Test Commands
++```bash
++# Enable safety and move forward
++ros2 topic pub /mtt_aux_cmd mtt_driver/msg/MttAuxCommand '{dead_man_switch: true}' --once
++ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.5}}' --once
++
++# Test braking
++ros2 topic pub /mtt_aux_cmd mtt_driver/msg/MttAuxCommand '{dead_man_switch: true, brake: 1.0}' --once
++
++# Test reverse
++ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: -0.3}}' --once
++
++# Test steering
++ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.3}, angular: {z: 0.5}}' --once
++
++# Emergency stop
++ros2 topic pub /mtt_aux_cmd mtt_driver/msg/MttAuxCommand '{dead_man_switch: false}' --once
++```
++
++#### Monitor Feedback
++```bash
++# Real-time tachometer data
++ros2 topic echo /mtt_tachometer
++
++# Speed monitoring
++ros2 topic echo /mtt_speed
++
++# Distance monitoring  
++ros2 topic echo /mtt_distance
++
++# Temperature monitoring
++ros2 topic echo /mtt_temperature
++```
++
++## Expected Behavior
++
++### 1. Mockserver Output
++You should see:
++```
++[MTT_MOCK] Starting MTT vehicle mock server on vcan0
++[MTT_MOCK] Control received - Safety: UNLOCKED, Dir: FWD, Mode: THROTTLING, Throttle: 115, ...
++```
++
++### 2. ROS Driver Output
++You should see:
++```
++[INFO] [mtt_ros_wrapper]: MTT Driver initialized on CAN interface: vcan0
++[INFO] [mtt_ros_wrapper]: MTT ROS Wrapper ready. E-stop is ACTIVE by default.
++```
++
++### 3. CAN Traffic
++Monitor with `candump vcan0`:
++```
++vcan0  100   [8]  00 80 73 7F 00 80 00 00    # Control frame (driver -> mockserver)
++vcan0  2FF   [8]  19 16 00 1C 00 00 00 64    # Main data frame (mockserver -> driver)
++vcan0  600   [8]  00 19 00 1A 00 18 00 1B    # BMS frame 1 (mockserver -> driver)
++```
++
++## Testing Scenarios
++
++### 1. Basic Movement Test
++- Enable dead man's switch
++- Send forward command
++- Verify speed feedback
++- Send stop command
++
++### 2. Safety System Test
++- Try movement without dead man's switch (should be ignored)
++- Enable dead man's switch
++- Disable dead man's switch during movement (should stop)
++
++### 3. Direction Control Test
++- Move forward
++- Move reverse
++- Test steering left/right
++
++### 4. Brake System Test
++- Move forward
++- Apply brakes (should override throttle)
++- Release brakes
++
++### 5. Winch Control Test
++- Extend winch
++- Retract winch
++- Stop winch
++
++## Troubleshooting
++
++### Common Issues
++
++#### 1. "CAN interface 'vcan0' not found"
++```bash
++# Recreate the interface
++sudo ip link delete vcan0
++sudo ip link add dev vcan0 type vcan
++sudo ip link set vcan0 up
++```
++
++#### 2. "Permission denied" on CAN interface
++```bash
++# Add user to can group or run with sudo
++sudo usermod -a -G dialout $USER
++# Re-login or use sudo
++```
++
++#### 3. No CAN traffic visible
++```bash
++# Check if mockserver is running
++ps aux | grep mtt_mock_server
++
++# Check if interface is up
++ip link show vcan0
++```
++
++#### 4. ROS 2 import errors
++```bash
++# Source ROS 2 environment
++source /opt/ros/humble/setup.bash
++source install/setup.bash
++```
++
++#### 5. Python-can not found
++```bash
++pip3 install python-can
++# or
++sudo apt install python3-can
++```
++
++### Validation Checklist
++
++- [ ] Virtual CAN interface created successfully
++- [ ] Mockserver starts without errors
++- [ ] ROS 2 driver connects to CAN interface
++- [ ] Can send control commands via ROS topics
++- [ ] Receiving tachometer feedback from mockserver
++- [ ] Safety system prevents movement when dead man's switch is off
++- [ ] Emergency stop works correctly
++- [ ] Speed, distance, and temperature data is published
++- [ ] CAN traffic visible with candump
++
++## Advanced Testing
++
++### Load Testing
++Run multiple test cycles to verify stability:
++```bash
++# Run test node in loop
++while true; do
++    timeout 30 ros2 run mtt_driver mtt_test_node
++    sleep 5
++done
++```
++
++### Network Simulation
++Test with CAN frame delays and errors:
++```bash
++# Add artificial latency to vcan0
++sudo tc qdisc add dev vcan0 root netem delay 10ms
++```
++
++### Multi-Node Testing
++Test with multiple ROS nodes subscribing to the same topics to verify data integrity.
++
++## Integration with Hardware
++
++Once testing is complete, switch to real hardware by simply using the default launch:
++```bash
++# Production mode (default) - uses can0
++ros2 launch mtt_driver mtt_teleop.launch.py
++
++# Or explicitly specify production mode
++ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=false
++
++# Or specify the real CAN interface
++ros2 launch mtt_driver mtt_teleop.launch.py can_interface:=can0
++```
++
++Ensure proper CAN bus setup for your hardware:
++```bash
++sudo ip link set can0 up type can bitrate 250000
++```
++
++## Files Modified for Testing
++
++- `config/mtt_config.yaml`: Kept `can0` as default (production ready)
++- `launch/mtt_teleop.launch.py`: Added test_mode and can_interface arguments
++- `mtt_ros_wrapper.py`: Added test_mode parameter support
++- Added `mtt_test_node.py`: Automated testing node
++- Added `mtt_test.launch.py`: Test launch configuration with explicit test mode
++- Added `test_mtt_ros_driver.sh`: Complete test setup script
++
++### Launch Arguments Summary
++
++| Launch File | Default Mode | Test Mode |
++|-------------|--------------|-----------|
++| `mtt_teleop.launch.py` | Production (`can0`) | `test_mode:=true` → `vcan0` |
++| `mtt_test.launch.py` | Test (`vcan0`) | Always test mode |
++
++### Parameter Options
++
++| Parameter | Default | Description |
++|-----------|---------|-------------|
++| `test_mode` | `false` | When `true`, forces use of `vcan0` |
++| `can_interface` | `can0` | Specific CAN interface to use |
++
++This ensures that:
++- **Default behavior is production-ready** (uses `can0`)
++- **Test mode is explicit** (must specify `test_mode:=true` or use test launch file)
++- **No accidental testing in production** (default config is safe for robot)
+diff --git a/USAGE_EXAMPLES.md b/USAGE_EXAMPLES.md
+new file mode 100644
+index 0000000..e21ba8b
+--- /dev/null
++++ b/USAGE_EXAMPLES.md
+@@ -0,0 +1,78 @@
++# MTT Driver Usage Examples
++
++## Production (Robot) Usage
++
++### Default launch (recommended for robot)
++```bash
++ros2 launch mtt_driver mtt_teleop.launch.py
++```
++- Uses `can0` interface
++- Production-ready configuration
++- Safe for robot deployment
++
++### Explicit production mode
++```bash
++ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=false
++```
++
++### Custom CAN interface
++```bash
++ros2 launch mtt_driver mtt_teleop.launch.py can_interface:=can1
++```
++
++## Testing Usage
++
++### Dedicated test launch (recommended for testing)
++```bash
++ros2 launch mtt_driver mtt_test.launch.py
++```
++- Uses `vcan0` interface
++- Includes automated test node
++- Explicit test configuration
++
++### Main launch in test mode
++```bash
++ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true
++```
++- Overrides to use `vcan0`
++- Keeps joystick functionality
++
++### Manual driver testing
++```bash
++ros2 run mtt_driver mtt_ros_wrapper --ros-args -p test_mode:=true
++```
++
++## Quick Test Setup
++
++### Complete test environment
++```bash
++# Terminal 1: Setup and run mockserver
++cd mtt_project
++./test_mtt_ros_driver.sh
++
++# Terminal 2: Run driver in test mode
++cd mtt_ws && source install/setup.bash
++ros2 launch mtt_driver mtt_test.launch.py
++
++# Terminal 3: Monitor
++candump vcan0
++```
++
++### Manual testing commands
++```bash
++# Enable and test movement
++ros2 topic pub /mtt_aux_cmd mtt_driver/msg/MttAuxCommand '{dead_man_switch: true}' --once
++ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.5}}' --once
++
++# Monitor feedback
++ros2 topic echo /mtt_tachometer
++```
++
++## Configuration Summary
++
++| Mode | CAN Interface | Launch Command | Use Case |
++|------|---------------|----------------|----------|
++| Production | `can0` | `ros2 launch mtt_driver mtt_teleop.launch.py` | Robot deployment |
++| Test | `vcan0` | `ros2 launch mtt_driver mtt_test.launch.py` | Development/testing |
++| Test | `vcan0` | `ros2 launch mtt_driver mtt_teleop.launch.py test_mode:=true` | Testing with joystick |
++| Custom | User-defined | `ros2 launch mtt_driver mtt_teleop.launch.py can_interface:=canX` | Custom hardware |
+diff --git a/mtt_ws/.gitignore b/mtt_ws/.gitignore
+new file mode 100644
+index 0000000..e66116a
+--- /dev/null
++++ b/mtt_ws/.gitignore
+@@ -0,0 +1,49 @@
++# Compiled Python files
++__pycache__/
++*.py[cod]
++*$py.class
++
++# Distribution / packaging
++.Python
++build/
++develop-eggs/
++dist/
++downloads/
++eggs/
++.eggs/
++lib/
++lib64/
++parts/
++sdist/
++var/
++wheels/
++pip-wheel-metadata/
++share/python-wheels/
++*.egg-info/
++.installed.cfg
++*.egg
++MANIFEST
++
++# ROS 2 build artifacts
++build/
++install/
++log/
++
++# IDE files
++.vscode/
++.idea/
++*.swp
++*.swo
++*~
++
++# OS generated files
++.DS_Store
++.DS_Store?
++._*
++.Spotlight-V100
++.Trashes
++ehthumbs.db
++Thumbs.db
++
++# CAN interface logs
++*.log
+diff --git a/mtt_test_tools/offline_mockserver/CMakeLists.txt b/mtt_ws/mtt_test_tools/offline_mockserver/CMakeLists.txt
+similarity index 100%
+rename from mtt_test_tools/offline_mockserver/CMakeLists.txt
+rename to mtt_ws/mtt_test_tools/offline_mockserver/CMakeLists.txt
+diff --git a/mtt_test_tools/offline_mockserver/README.md b/mtt_ws/mtt_test_tools/offline_mockserver/README.md
+similarity index 100%
+rename from mtt_test_tools/offline_mockserver/README.md
+rename to mtt_ws/mtt_test_tools/offline_mockserver/README.md
+diff --git a/mtt_test_tools/offline_mockserver/build_mtt_mock.sh b/mtt_ws/mtt_test_tools/offline_mockserver/build_mtt_mock.sh
+similarity index 100%
+rename from mtt_test_tools/offline_mockserver/build_mtt_mock.sh
+rename to mtt_ws/mtt_test_tools/offline_mockserver/build_mtt_mock.sh
+diff --git a/mtt_test_tools/offline_mockserver/monitor_can.sh b/mtt_ws/mtt_test_tools/offline_mockserver/monitor_can.sh
+old mode 100755
+new mode 100644
+similarity index 100%
+rename from mtt_test_tools/offline_mockserver/monitor_can.sh
+rename to mtt_ws/mtt_test_tools/offline_mockserver/monitor_can.sh
+diff --git a/mtt_test_tools/offline_mockserver/mtt_mock_server.cpp b/mtt_ws/mtt_test_tools/offline_mockserver/mtt_mock_server.cpp
+similarity index 95%
+rename from mtt_test_tools/offline_mockserver/mtt_mock_server.cpp
+rename to mtt_ws/mtt_test_tools/offline_mockserver/mtt_mock_server.cpp
+index 10f73cd..fe048af 100644
+--- a/mtt_test_tools/offline_mockserver/mtt_mock_server.cpp
++++ b/mtt_ws/mtt_test_tools/offline_mockserver/mtt_mock_server.cpp
+@@ -60,7 +60,7 @@ struct VehicleState {
+     bool closed_loop_steer = false;
+     
+     // Simulated sensor data
+-    int16_t instant_tachometer = 0;
++    uint16_t instant_tachometer = 0;  // Unsigned - represents speed magnitude only
+     uint32_t cumulative_ticks = 0;
+     int8_t temp_a = 25;
+     int8_t temp_b = 22;
+@@ -103,7 +103,6 @@ void decode_control_frame(const uint8_t* data) {
+     
+     //TODO Verify if vehicule brake overrides throttle for safety
+     if (vehicle_state.safety_unlocked) {
+-        int speed_factor = vehicle_state.forward_direction ? 1 : -1;
+         int net_force = 0;
+         
+         if (vehicle_state.brake > 10) {  // threshold to avoid noise
+@@ -117,8 +116,10 @@ void decode_control_frame(const uint8_t* data) {
+             vehicle_state.battery_current = 0;
+         }
+         
+-        vehicle_state.instant_tachometer = (net_force * speed_factor) / 4;
+-        vehicle_state.cumulative_ticks += abs(vehicle_state.instant_tachometer);
++        // Generate realistic tachometer values (unsigned magnitude only)
++        // Scale throttle/brake (0-255) to 0-230 range for encoder ticks per second
++        vehicle_state.instant_tachometer = (abs(net_force) * 230) / 255;  // 0-230 range
++        vehicle_state.cumulative_ticks += vehicle_state.instant_tachometer / 10;  // Slower accumulation
+         
+     } else {
+         vehicle_state.instant_tachometer = 0;
+diff --git a/mtt_test_tools/offline_mockserver/test_mtt_system.sh b/mtt_ws/mtt_test_tools/offline_mockserver/test_mtt_system.sh
+old mode 100755
+new mode 100644
+similarity index 100%
+rename from mtt_test_tools/offline_mockserver/test_mtt_system.sh
+rename to mtt_ws/mtt_test_tools/offline_mockserver/test_mtt_system.sh
+diff --git a/mtt_ws/src/mtt_driver/CMakeLists.txt b/mtt_ws/src/mtt_driver/CMakeLists.txt
+deleted file mode 100644
+index 4d8bdbe..0000000
+--- a/mtt_ws/src/mtt_driver/CMakeLists.txt
++++ /dev/null
+@@ -1,33 +0,0 @@
+-cmake_minimum_required(VERSION 3.8)
+-project(mtt_driver)
+-
+-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+-  add_compile_options(-Wall -Wextra -Wpedantic)
+-endif()
+-
+-find_package(ament_cmake REQUIRED)
+-find_package(rclcpp REQUIRED)
+-find_package(std_msgs REQUIRED)
+-find_package(geometry_msgs REQUIRED)
+-find_package(sensor_msgs REQUIRED)
+-find_package(rosidl_default_generators REQUIRED)
+-
+-rosidl_generate_interfaces(${PROJECT_NAME}
+-  "msg/MttAuxCommand.msg"
+-  DEPENDENCIES std_msgs
+-)
+-
+-
+-ament_python_install_package(${PROJECT_NAME})
+-
+-install(TARGETS 
+-  DESTINATION lib/${PROJECT_NAME})
+-
+-install(PROGRAMS
+-  ${PROJECT_NAME}/mtt_driver.py
+-  ${PROJECT_NAME}/mtt_ros_wrapper.py
+-  ${PROJECT_NAME}/mtt_teleop_joy.py
+-  DESTINATION lib/${PROJECT_NAME})
+-
+-ament_package()
+-
+diff --git a/mtt_ws/src/mtt_driver/config/mtt_config.yaml b/mtt_ws/src/mtt_driver/config/mtt_config.yaml
+index a65dac3..6523606 100644
+--- a/mtt_ws/src/mtt_driver/config/mtt_config.yaml
++++ b/mtt_ws/src/mtt_driver/config/mtt_config.yaml
+@@ -38,7 +38,7 @@ ps4_controller:
+ 
+ can_interface: "can0"
+ can_node_id: 0x100
+-can_bitrate: 500000
++can_bitrate: 250000
+ 
+ max_throttle: 230
+ max_brake: 255
+diff --git a/mtt_ws/src/mtt_driver/launch/mtt_full_test.launch.py b/mtt_ws/src/mtt_driver/launch/mtt_full_test.launch.py
+new file mode 100644
+index 0000000..f8e0714
+--- /dev/null
++++ b/mtt_ws/src/mtt_driver/launch/mtt_full_test.launch.py
+@@ -0,0 +1,80 @@
++from launch import LaunchDescription
++from launch_ros.actions import Node
++from launch.actions import ExecuteProcess, TimerAction
++from launch.substitutions import PathJoinSubstitution
++from launch_ros.substitutions import FindPackageShare
++
++def generate_launch_description():
++    package_share = FindPackageShare('mtt_driver')
++    
++    return LaunchDescription([
++        # Setup virtual CAN interface
++        ExecuteProcess(
++            cmd=['sudo', 'modprobe', 'vcan'],
++            name='load_vcan_module',
++            output='screen'
++        ),
++        
++        ExecuteProcess(
++            cmd=['sudo', 'ip', 'link', 'delete', 'vcan0'],
++            name='delete_existing_vcan',
++            output='screen',
++            on_exit='continue'
++        ),
++        
++        ExecuteProcess(
++            cmd=['sudo', 'ip', 'link', 'add', 'dev', 'vcan0', 'type', 'vcan'],
++            name='create_vcan',
++            output='screen'
++        ),
++        
++        ExecuteProcess(
++            cmd=['sudo', 'ip', 'link', 'set', 'vcan0', 'up'],
++            name='activate_vcan',
++            output='screen'
++        ),
++        
++        # Start mockserver after a small delay
++        TimerAction(
++            period=2.0,
++            actions=[
++                Node(
++                    package='mtt_driver',
++                    executable='mtt_mock_server',
++                    name='mtt_mock_server',
++                    arguments=['-c', 'vcan0'],
++                    output='screen'
++                )
++            ]
++        ),
++        
++        # Start MTT ROS wrapper in test mode
++        TimerAction(
++            period=3.0,
++            actions=[
++                Node(
++                    package='mtt_driver',
++                    executable='mtt_ros_wrapper',
++                    name='mtt_ros_wrapper',
++                    output='screen',
++                    parameters=[{
++                        'can_interface': 'vcan0',
++                        'test_mode': True
++                    }]
++                )
++            ]
++        ),
++        
++        # Start test node
++        TimerAction(
++            period=4.0,
++            actions=[
++                Node(
++                    package='mtt_driver',
++                    executable='mtt_test_node',
++                    name='mtt_test_node',
++                    output='screen'
++                )
++            ]
++        ),
++    ])
+diff --git a/mtt_ws/src/mtt_driver/launch/mtt_teleop.launch.py b/mtt_ws/src/mtt_driver/launch/mtt_teleop.launch.py
+index 4f74388..aa7b710 100644
+--- a/mtt_ws/src/mtt_driver/launch/mtt_teleop.launch.py
++++ b/mtt_ws/src/mtt_driver/launch/mtt_teleop.launch.py
+@@ -1,8 +1,30 @@
+ from launch import LaunchDescription
+ from launch_ros.actions import Node
++from launch.actions import DeclareLaunchArgument
++from launch.substitutions import LaunchConfiguration
+ 
+ def generate_launch_description():
++    # Declare launch arguments
++    test_mode_arg = DeclareLaunchArgument(
++        'test_mode',
++        default_value='false',
++        description='Use virtual CAN interface for testing (vcan0) instead of real hardware (can0)'
++    )
++    
++    can_interface_arg = DeclareLaunchArgument(
++        'can_interface',
++        default_value='can0',
++        description='CAN interface to use (can0 for robot, vcan0 for testing)'
++    )
++    
++    # Get launch configuration values
++    test_mode = LaunchConfiguration('test_mode')
++    can_interface = LaunchConfiguration('can_interface')
++    
+     return LaunchDescription([
++        test_mode_arg,
++        can_interface_arg,
++        
+         Node(
+             package='joy',
+             executable='joy_node',
+@@ -18,6 +40,10 @@ def generate_launch_description():
+             package='mtt_driver',
+             executable='mtt_ros_wrapper',
+             name='mtt_ros_wrapper',
+-            output='screen'
++            output='screen',
++            parameters=[{
++                'can_interface': can_interface,
++                'test_mode': test_mode
++            }]
+         ),
+     ])
+diff --git a/mtt_ws/src/mtt_driver/launch/mtt_test.launch.py b/mtt_ws/src/mtt_driver/launch/mtt_test.launch.py
+new file mode 100644
+index 0000000..6efc770
+--- /dev/null
++++ b/mtt_ws/src/mtt_driver/launch/mtt_test.launch.py
+@@ -0,0 +1,23 @@
++from launch import LaunchDescription
++from launch_ros.actions import Node
++
++def generate_launch_description():
++    return LaunchDescription([
++        Node(
++            package='mtt_driver',
++            executable='mtt_ros_wrapper',
++            name='mtt_ros_wrapper',
++            output='screen',
++            parameters=[{
++                'can_interface': 'vcan0',
++                'test_mode': True
++            }]
++        ),
++        
++        Node(
++            package='mtt_driver',
++            executable='mtt_test_node',
++            name='mtt_test_node',
++            output='screen'
++        ),
++    ])
+diff --git a/mtt_ws/src/mtt_driver/mtt_driver/mtt_driver.py b/mtt_ws/src/mtt_driver/mtt_driver/mtt_driver.py
+index 8f58b53..c60b530 100755
+--- a/mtt_ws/src/mtt_driver/mtt_driver/mtt_driver.py
++++ b/mtt_ws/src/mtt_driver/mtt_driver/mtt_driver.py
+@@ -58,7 +58,7 @@ class DirectionState(Enum):
+     Forward = 0x01
+ 
+ class WinchState(Enum):
+-    WinchNeutral = 0x7f  # 127
++    WinchNeutral = 0x7F  # 127 - matches RF remote idle frame
+     WinchIn = 0xe5       # 229
+     WinchOut = 0x18      # 24
+ 
+@@ -131,14 +131,34 @@ class MTTCanDriver:
+     - Direction is controlled by master system
+     """
+ 
++    # Template frame for reference - not used in actual operation
++    idle_frame_template = [
++        0x00,  # [0] Vehicle type: Single Track
++        0x68,  # [1] Global switches: deadman pressed, security unlocked, light off
++        0x19,  # [2] Throttle: idle value (25 decimal)
++        0x7F,  # [3] Winch: neutral (127 decimal)
++        0x29,  # [4] Brake: idle value (41 decimal)
++        0x7F,  # [5] Steer: center (127 decimal)
++        0x00,  # [6] Direction mode: open loop
++        0x7F   # [7] Reserved
++    ]
++
+     def __init__(self, can_interface='can0'):
+-        # CAN ID Configuration
+-        # Reference: CANBus_Specification.md Section 3.1.2
+-        # 0x100 takes priority over 0x001 joystick commands
+-        self.node_id = 0x100
+-        self.can_array = [0] * 8
++        self.node_id = 0x001
++        
++        # Initialize CAN frame with safe starting values
++        self.can_array = [
++            0x00,  # [0] Vehicle type: Single Track
++            0x68,  # [1] Global switches: deadman pressed, security unlocked, light OFF
++            0x00,  # [2] Throttle: minimum (0)
++            0x7F,  # [3] Winch: neutral (127)
++            0x00,  # [4] Brake: minimum (0)
++            0x7F,  # [5] Steer: center (127)
++            0x00,  # [6] Direction mode: open loop
++            0x7F   # [7] Reserved
++        ]
+         
+-        # CAN bus initialization with interface checking
++        # CAN bus initialization
+         timeout_seconds = 10
+         check_interval = 0.5
+         elapsed = 0.0
+@@ -160,6 +180,7 @@ class MTTCanDriver:
+             log.error(f"Failed to initialize CAN bus: {e}")
+             raise
+ 
++        # Initialize state variables
+         self.vehicle_type = None
+         self.steer_value = None
+         self.throttle_value = None
+@@ -169,76 +190,97 @@ class MTTCanDriver:
+         self.direction_state = None
+         self.direction_mode = None
+         self.light_state = None
+-
+-        # Odometry and Tachometer Data
+-        self.tachometer_data = TachometerData()
+-        self.encoder_final_ratio = 0.0
+-        self.last_cumulative_ticks = 0
+-        self.total_distance = 0.0  # in meters
+-        self.current_direction = DirectionState.Forward  # Track current direction for odometry
+         
+-        # Calculate gear ratio once at startup
++        # Odometry and tachometer data
++        self.tachometer_data = TachometerData()
+         self.encoder_final_ratio = self._calculate_gear_ratio()
++        self.last_cumulative_ticks = 0
++        self.total_distance = 0.0
++        self.current_direction = DirectionState.Forward
+         
+-        # CAN listener thread for tachometer data (0x2FF frames)
++        # Start CAN threads
+         self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
+         self.can_listener_running = True
+         self.can_listener_thread.start()
++        
++        self.frame_lock = threading.Lock()
++        self.sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
++        self.sender_running = True
++        self.sender_thread.start()
+ 
+-        # Safety Configuration
+-        # Reference: CANBus_Specification.md Section 3.1 - Critical safety patches
+-        # - Security switch MUST be unlocked (MTT_DEF_SAFETY_UNLOCKED) for operation
+-        # - Light state acts as emergency stop due to test modifications
+-        # - One light state = stop, other = operational (test both to determine)
+-        # - Direction is controlled by master system (us) via direction bit
+-
+-        # MTT_SWITCHES_VEHICLE_TYPE
++        # Initialize vehicle state
+         self.set_vehicle_type(VehicleType.VehicleSingleTrack)
+-
+-        # MTT_SWITCHES_GLOBAL - SAFETY CRITICAL
+-        # Security switch must be unlocked for system to function
+-        self.set_security_switch(SecuritySwitchState.SafetyLocked)  # Start locked for safety
+-        
+-        # Set initial direction (controlled by master system)
++        self.set_security_switch(SecuritySwitchState.SafetyLocked)
+         self.set_direction(DirectionState.Forward)
+-        
+-        # Light state - emergency stop mechanism added for testing
+-        # Test both states to determine operational state
+-        self.set_light_state(LightState.On)  # Test: may need to be Off for operation
+-
+-        # MTT_ANALOG_THROTTLE
++        self.set_light_state(LightState.Off)
+         self.set_throttle(0)
+-        # self.set_throttle(60)
+-
+-        # MTT_ANALOG_WINCH
+         self.set_winch_state(WinchState.WinchNeutral)
+-
+-        # MTT_ANALOG_BRAKE
+         self.set_brake(0)
+-
+-        # MTT_ANALOG_STEER
+-        # self.set_steer(0)
+-        self.set_steer(128) # Center position
+-
+-        # MTT_SWITCHES_DIRECTION_MODE
++        self.set_steer(127)
+         self.set_direction_mode(DirectionMode.OpenLoop)
+-        # self.set_direction_mode(DirectionMode.CloseLoop)
+ 
+     def reset_motion_commands(self):
+         """Resets all motion commands to a safe, stopped state."""
+         self.set_throttle(0)
+-        self.set_steer(128)  # Center position
++        self.set_steer(127)  # Center position
+         self.set_brake(255)  # Full brake
+-        self.set_winch_state(WinchState.WinchNeutral)
+         self.set_direction(DirectionState.Forward)
++        self.set_winch_state(WinchState.WinchNeutral)
+ 
+-    def send_can_frame(self):
+-        """Sends the current command frame to the CAN bus."""
+-        if not self.bus: 
++    def build_can_frame(self, **kwargs):
++        """
++        Build a CAN frame starting from the idle template, only altering fields specified in kwargs.
++        Example: build_can_frame(throttle=60, winch=WinchState.WinchIn.value)
++        """
++        frame = self.idle_frame_template.copy()
++        if 'vehicle_type' in kwargs:
++            frame[MTT_SWITCHES_VEHICLE_TYPE] = kwargs['vehicle_type']
++        if 'global_switches' in kwargs:
++            frame[MTT_SWITCHES_GLOBAL] = kwargs['global_switches']
++        if 'throttle' in kwargs:
++            frame[MTT_ANALOG_THROTTLE] = kwargs['throttle']
++        if 'winch' in kwargs:
++            frame[MTT_ANALOG_WINCH] = kwargs['winch']
++        if 'brake' in kwargs:
++            frame[MTT_ANALOG_BRAKE] = kwargs['brake']
++        if 'steer' in kwargs:
++            frame[MTT_ANALOG_STEER] = kwargs['steer']
++        if 'direction_mode' in kwargs:
++            frame[MTT_SWITCHES_DIRECTION_MODE] = kwargs['direction_mode']
++        # Reserved byte (7) can be set if needed
++        return frame
++
++    def send_can_frame(self, **kwargs):
++        """
++        Sends a CAN frame using the current can_array state, with only specified fields altered.
++        Usage: send_can_frame(throttle=60, winch=WinchState.WinchIn.value)
++        """
++        if not self.bus:
+             return
++        
++        # Start with current state
++        frame = self.can_array.copy()
++        
++        # Apply any overrides from kwargs
++        if 'vehicle_type' in kwargs:
++            frame[MTT_SWITCHES_VEHICLE_TYPE] = kwargs['vehicle_type']
++        if 'global_switches' in kwargs:
++            frame[MTT_SWITCHES_GLOBAL] = kwargs['global_switches']
++        if 'throttle' in kwargs:
++            frame[MTT_ANALOG_THROTTLE] = kwargs['throttle']
++        if 'winch' in kwargs:
++            frame[MTT_ANALOG_WINCH] = kwargs['winch']
++        if 'brake' in kwargs:
++            frame[MTT_ANALOG_BRAKE] = kwargs['brake']
++        if 'steer' in kwargs:
++            frame[MTT_ANALOG_STEER] = kwargs['steer']
++        if 'direction_mode' in kwargs:
++            frame[MTT_SWITCHES_DIRECTION_MODE] = kwargs['direction_mode']
++        
+         try:
+-            message = can.Message(arbitration_id=self.node_id, data=self.can_array, is_extended_id=False)
++            message = can.Message(arbitration_id=self.node_id, data=frame, is_extended_id=False)
+             self.bus.send(message)
++            log.debug(f"Sent CAN frame: {' '.join([f'{b:02X}' for b in frame])}")
+         except can.CanError as e:
+             log.error(f"Error sending CAN frame: {e}")
+ 
+@@ -281,7 +323,7 @@ class MTTCanDriver:
+         # Update tachometer data structure
+         self.tachometer_data.main_sensor_temp_a = float(temp_a)
+         self.tachometer_data.main_sensor_temp_b = float(temp_b)
+-        self.tachometer_data.tachometer_instant = tachimeter_instant
++        self.tachometer_data.tachometer_instant = tachimeter_instant  # Fixed typo here
+         self.tachometer_data.tachometer_cumulative = tachimeter_cumulative
+         self.tachometer_data.timestamp = time.time()
+         self.tachometer_data.new_data_available = True
+@@ -304,29 +346,11 @@ class MTTCanDriver:
+                 f"Temp A: {temp_a}°C, Temp B: {temp_b}°C"
+             )
+ 
+-    def get_speed_kmh(self):
+-        """Convert tachometer instant reading to km/h"""
+-        if self.tachometer_data['tachimeter_instant'] > 0:
+-            rps = float(self.tachometer_data['tachimeter_instant'])
+-            return (rps / self.final_ratio) * self.MTT_TRACK_LENGTH_KM * 3600
+-        return 0.0
+-
+-    def get_cumulative_distance_km(self):
+-        """Get cumulative distance in kilometers from tachometer data"""
+-        if self.tachometer_data['tachimeter_cumulative'] > 0:
+-            ticks = float(self.tachometer_data['tachimeter_cumulative'])
+-            return (ticks / self.final_ratio) * self.MTT_TRACK_LENGTH_KM
+-        return 0.0
+-
+-    def get_tachometer_data(self):
+-        """Get all tachometer data"""
+-        return self.tachometer_data.copy()
+-
+     def emergency_stop(self):
+-        """Emergency stop function - sets all motion controls to safe values"""
++        """Emergency stop - sets all motion controls to safe values"""
+         self.set_throttle(0)
+-        self.set_brake(255)  # Maximum brake
+-        self.set_steer(128)  # Center steering
++        self.set_brake(255)
++        self.set_steer(127)
+         self.set_winch_state(WinchState.WinchNeutral)
+         log.warn("EMERGENCY STOP ACTIVATED")
+ 
+@@ -396,108 +420,80 @@ class MTTCanDriver:
+             # TODO: Add steering_angle_rad and vehicle_type for kinematic models
+         }
+ 
++    def set_deadman_switch(self, pressed=True):
++        """Set deadman switch state"""
++        with self.frame_lock:
++            if pressed:
++                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000  # Set bit 3
++            else:
++                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
++
+     # --- Control Methods ---
+     def set_steer(self, steer_value):
+-
++        """Set steering value (0-255, 127 is center)"""
+         if not isinstance(steer_value, int):
+             log.error(f"steer_value is not an integer: {steer_value}")
+             return
+ 
+-        # out of bound values are set to the closest bound
+-        # TODO: ignore out of bound values instead
+-        if steer_value > 255:
+-            log.warning(f"out of bound value {steer_value} for steer_value")
+-            steer_value = 255
+-
+-        if steer_value < 0:
+-            log.warning(f"out of bound value {steer_value} for steer_value")
+-            steer_value = 0
+-
+-        if steer_value >= 0 and steer_value <= 255:
++        steer_value = max(0, min(255, steer_value))
++        with self.frame_lock:
+             self.steer_value = steer_value
+             self.can_array[MTT_ANALOG_STEER] = steer_value
+-            # TODO: Expose steering data for higher-level kinematic models
+-            # Vehicle types: Single track (reverse bicycle model) / Side-by-side (skid-steer)
+-            # Implementation at ROS controller level using ros_controllers
+-
+ 
+     def set_throttle(self, throttle_value):
+-
++        """Set throttle value (0-230)"""
+         if not isinstance(throttle_value, int):
+             log.error(f"throttle_value is not an integer: {throttle_value}")
+             return
+ 
+-        # TODO: ignore out of bound values instead
+-        if throttle_value > 230:
+-            log.warning(f"out of bound value {throttle_value} for throttle_value")
+-            throttle_value = 230
+-
+-        if throttle_value < 0:
+-            log.warning(f"out of bound value {throttle_value} for throttle_value")
+-            throttle_value = 0
+-
+-        if throttle_value >= 0 and throttle_value <= 230:
++        throttle_value = max(0, min(230, throttle_value))
++        with self.frame_lock:
+             self.throttle_value = throttle_value
+             self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
+ 
+-
+     def set_brake(self, brake_value):
+-        
++        """Set brake value (0-255)"""
+         if not isinstance(brake_value, int):
+             log.error(f"brake_value is not an integer: {brake_value}")
+             return
+             
+-        if brake_value > 255:
+-            log.warning(f"out of bound value {brake_value} for brake_value")
+-            brake_value = 255
+-
+-        if brake_value < 0:
+-            log.warning(f"out of bound value {brake_value} for brake_value")
+-            brake_value = 0
+-
+-        if brake_value >= 0 and brake_value <= 255:
++        brake_value = max(0, min(255, brake_value))
++        with self.frame_lock:
+             self.brake_value = brake_value
+             self.can_array[MTT_ANALOG_BRAKE] = brake_value
+ 
+-
+     def set_winch_state(self, winch_state):
+-
++        """Set winch state - holds the state until explicitly changed"""
+         if winch_state == WinchState.WinchNeutral:
+-            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+-            self.winch_state = WinchState.WinchNeutral
+-
++            with self.frame_lock:
++                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchNeutral.value
++                self.winch_state = WinchState.WinchNeutral
++                    
+         elif winch_state == WinchState.WinchIn:
+-            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+-            self.winch_state = WinchState.WinchIn
+-             
++            with self.frame_lock:
++                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchIn.value
++                self.winch_state = WinchState.WinchIn
++                    
+         elif winch_state == WinchState.WinchOut:
+-            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+-            self.winch_state = WinchState.WinchOut
+-
++            with self.frame_lock:
++                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchOut.value
++                self.winch_state = WinchState.WinchOut
++                    
+         else:
+             log.error(f"invalid value for winch_state: {winch_state}")
+             return
+-        
++    
+     def set_security_switch(self, switch_value):
+-        """
+-        CRITICAL: Security switch must be unlocked for system to function
+-        
+-        From CANBus_Specification.md v1.1:
+-        void MTT_SetSecuritySwitch(uint8_t SwitchValue)
+-        - MTT_DEF_SAFETY_LOCKED (0x00): MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] &= 0b01111111
+-        - MTT_DEF_SAFETY_UNLOCKED (0x01): MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] |= 0b10000000
+-        
+-        Bit 7 (0x80) controls security switch:
+-        - 0 = locked (system cannot function)
+-        - 1 = unlocked (system can function)
+-        """
++        """Set security switch state"""
+         if switch_value == SecuritySwitchState.SafetyLocked:
+-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7
+-            self.security_switch_state = SecuritySwitchState.SafetyLocked
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7
++                self.security_switch_state = SecuritySwitchState.SafetyLocked
+ 
+         elif switch_value == SecuritySwitchState.SafetyUnlocked:
+-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
+-            self.security_switch_state = SecuritySwitchState.SafetyUnlocked
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
++                self.security_switch_state = SecuritySwitchState.SafetyUnlocked
+ 
+         else:
+             log.error(f"invalid value for switch_value: {switch_value}")
+@@ -505,17 +501,18 @@ class MTTCanDriver:
+ 
+ 
+     def set_direction(self, direction):
+-        """Set vehicle direction and track for odometry"""
+-        # semble être inversé forward et reverse
++        """Set vehicle direction"""
+         if direction == DirectionState.Forward:
+-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111
+-            self.direction_state = DirectionState.Forward
+-            self.current_direction = DirectionState.Forward  # Track for odometry
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000  # Set bit 5
++                self.direction_state = DirectionState.Forward
++                self.current_direction = DirectionState.Forward
+ 
+         elif direction == DirectionState.Reverse:
+-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000
+-            self.direction_state = DirectionState.Reverse
+-            self.current_direction = DirectionState.Reverse  # Track for odometry
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111  # Clear bit 5
++                self.direction_state = DirectionState.Reverse
++                self.current_direction = DirectionState.Reverse
+ 
+         else:
+             log.error(f"invalid value for direction: {direction}")
+@@ -523,60 +520,94 @@ class MTTCanDriver:
+ 
+ 
+     def set_light_state(self, light_state):
+-
+-        # Semble être inversé on et off
++        """Set light state"""
+         if light_state == LightState.Off:
+-            self.light_state = LightState.Off
+-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b01000000
++            with self.frame_lock:
++                self.light_state = LightState.Off
++                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b01000000  # Set bit 6
+ 
+         elif light_state == LightState.On:
+-            self.light_state = LightState.On
+-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111
++            with self.frame_lock:
++                self.light_state = LightState.On
++                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111  # Clear bit 6
+         else:
+             log.error(f"invalid value for light_state: {light_state}")
+             return
+ 
+ 
+     def set_direction_mode(self, direction_mode):
+-
++        """Set direction mode"""
+         if direction_mode == DirectionMode.CloseLoop:
+-            self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
+-            self.direction_mode = DirectionMode.CloseLoop
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
++                self.direction_mode = DirectionMode.CloseLoop
+ 
+         elif direction_mode == DirectionMode.OpenLoop:
+-            self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
+-            self.direction_mode = DirectionMode.OpenLoop
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
++                self.direction_mode = DirectionMode.OpenLoop
+         else:
+             log.error(f"invalid value for direction_mode: {direction_mode}")
+             return
+ 
+ 
+     def set_vehicle_type(self, vehicle_type):
+-
++        """Set vehicle type"""
+         if vehicle_type == VehicleType.VehicleSingleTrack:
+-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+-            self.vehicle_type = VehicleType.VehicleSingleTrack
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
++                self.vehicle_type = VehicleType.VehicleSingleTrack
+ 
+         elif vehicle_type == VehicleType.VehicleSbsLeft:
+-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+-            self.vehicle_type = VehicleType.VehicleSbsLeft
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
++                self.vehicle_type = VehicleType.VehicleSbsLeft
+              
+         elif vehicle_type == VehicleType.VehicleSbsRight:
+-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+-            self.vehicle_type = VehicleType.VehicleSbsRight
++            with self.frame_lock:
++                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
++                self.vehicle_type = VehicleType.VehicleSbsRight
+ 
+         else:
+             log.error(f"invalid value for vehicle_type: {vehicle_type}")
+             return
+ 
+-    def shutdown(self):
+-        if self.bus: 
+-            self.bus.shutdown()
+-
+-    def __del__(self):
+-        """Cleanup method for proper resource disposal"""
++    def cleanup(self):
++        """Clean up resources before shutting down"""
++        self.sender_running = False
++        if hasattr(self, 'sender_thread'):
++            self.sender_thread.join(timeout=1.0)
++        
+         self.can_listener_running = False
+-        if hasattr(self, "can_listener_thread"):
++        if hasattr(self, 'can_listener_thread'):
+             self.can_listener_thread.join(timeout=1.0)
+-        if hasattr(self, "bus") and self.bus:
++        
++        if hasattr(self, 'bus') and self.bus:
+             self.bus.shutdown()
++            log.info("CAN driver cleaned up")
++
++    def get_current_frame_hex(self):
++        """Get the current CAN frame as hex string for debugging"""
++        return " ".join([f"{b:02X}" for b in self.can_array])
++
++    def _sender_loop(self):
++        """Continuously sends keepalive frames at 20Hz to maintain communication"""
++        while self.sender_running:
++            try:
++                with self.frame_lock:
++                    # Send current frame state as keepalive
++                    frame_data = self.can_array.copy()
++                
++                message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
++                self.bus.send(message)
++                log.debug(f"Keepalive frame: {' '.join([f'{b:02X}' for b in frame_data])}")
++                
++            except can.CanError as e:
++                if self.sender_running:
++                    log.error(f"Keepalive send failed: {e}")
++            except Exception as e:
++                if self.sender_running:
++                    log.error(f"Keepalive error: {e}")
++            
++            time.sleep(0.05)  # Send at 20 Hz (50ms interval) for reliable keepalive
++
+diff --git a/mtt_ws/src/mtt_driver/mtt_driver/mtt_ros_wrapper.py b/mtt_ws/src/mtt_driver/mtt_driver/mtt_ros_wrapper.py
+index 0c8e64b..00ba8e4 100644
+--- a/mtt_ws/src/mtt_driver/mtt_driver/mtt_ros_wrapper.py
++++ b/mtt_ws/src/mtt_driver/mtt_driver/mtt_ros_wrapper.py
+@@ -19,8 +19,8 @@ from sensor_msgs.msg import Temperature
+ from std_msgs.msg import Float64, Float64MultiArray
+ from nav_msgs.msg import Odometry
+ from geometry_msgs.msg import Point, Pose, Quaternion, Vector3
+-from mtt_driver.msg import MttAuxCommand, MttTachometerData
+-from mtt_driver.mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState
++from mtt_msgs.msg import MttAuxCommand, MttTachometerData
++from .mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState
+ 
+ class MTTRosWrapper(Node):
+     """ROS 2 node that provides standard interfaces for MTT-154 control.
+@@ -35,8 +35,23 @@ class MTTRosWrapper(Node):
+     def __init__(self):
+         super().__init__('mtt_ros_wrapper')
+         
++        # Declare and get parameters
++        self.declare_parameter('can_interface', 'can0')  # Default to real hardware
++        self.declare_parameter('test_mode', False)       # Default to production mode
++        
++        can_interface = self.get_parameter('can_interface').get_parameter_value().string_value
++        test_mode = self.get_parameter('test_mode').get_parameter_value().bool_value
++        
++        # Override CAN interface if in test mode
++        if test_mode:
++            can_interface = 'vcan0'
++            self.get_logger().info("TEST MODE: Using virtual CAN interface (vcan0)")
++        else:
++            self.get_logger().info(f"PRODUCTION MODE: Using CAN interface: {can_interface}")
++        
+         try:
+-            self.driver = MTTCanDriver()
++            self.driver = MTTCanDriver(can_interface)
++            self.get_logger().info(f"MTT Driver initialized successfully")
+         except Exception as e:
+             self.get_logger().fatal(f"Could not start driver: {e}")
+             return
+@@ -68,7 +83,7 @@ class MTTRosWrapper(Node):
+         self.driver.set_throttle(throttle)
+         
+         # Convert angular velocity to steering (0-255 range, 128 is center)
+-        steer = int((-msg.angular.z + 1.0) * 127.5)
++        steer = int((msg.angular.z + 1.0) * 127.5)
+         self.driver.set_steer(steer)
+         
+         # Set direction based on linear velocity sign
+@@ -76,7 +91,7 @@ class MTTRosWrapper(Node):
+         self.driver.set_direction(direction)
+ 
+     def aux_cmd_callback(self, msg: MttAuxCommand):
+-        """Handle auxiliary commands (brake, winch, dead man's switch)."""
++        """Handle auxiliary commands (brake, winch, dead man's switch, light toggle)."""
+         if not msg.dead_man_switch and not self.is_estopped:
+             self.is_estopped = True
+             self.driver.reset_motion_commands()
+@@ -99,12 +114,20 @@ class MTTRosWrapper(Node):
+         else: 
+             self.driver.set_winch_state(WinchState.WinchNeutral)
+ 
++        # Light state handling (0=off, 1=on)
++        if hasattr(msg, 'light_state'):
++            from .mtt_driver import LightState
++            if msg.light_state == 1:
++                self.driver.set_light_state(LightState.On)
++            else:
++                self.driver.set_light_state(LightState.Off)
++
+     def control_loop(self):
+-        """Main control loop - sends CAN frames at 20 Hz and publishes tachometer data."""
++        """Main control loop - publishes tachometer data and manages safety state."""
+         if self.is_estopped:
+             self.driver.set_security_switch(SecuritySwitchState.SafetyLocked)
+         
+-        self.driver.send_can_frame()
++        # CAN frames are sent automatically by the driver's keepalive thread
+         
+         # Publish tachometer data if available
+         self._publish_tachometer_data()
+@@ -151,34 +174,25 @@ class MTTRosWrapper(Node):
+ 
+     def _publish_odometry(self, odometry_data):
+         """Publish standard ROS2 odometry message"""
+-        # TODO: Complete odometry integration with vehicle kinematic models
+-        # Current: simplified straight-line motion (distance tracking only)
+-        # Vehicle configurations:
+-        # - Single track: Reverse bicycle model kinematic implementation needed or more complex Articulated Steering Vehicles
+-        # - Side-by-side: Skid-steer drive model implementation needed
+-        # Implementation will be done at higher ROS controller level using ros_controllers
+-        
+         odom_msg = Odometry()
+         odom_msg.header.stamp = self.get_clock().now().to_msg()
+         odom_msg.header.frame_id = "odom"
+         odom_msg.child_frame_id = "mtt_base_link"
+ 
+-        # Position calculation - currently straight-line distance only
+-        # TODO: Replace with proper kinematic model at ros_controllers level
++        # Position calculation - straight-line distance only
+         actual_distance = odometry_data['total_distance_m']
+         if odometry_data['direction'] == 'Reverse':
+             actual_distance = -odometry_data['total_distance_m']
+ 
+         odom_msg.pose.pose.position.x = actual_distance
+-        odom_msg.pose.pose.position.y = 0.0  # TODO: Will be calculated by kinematic model
++        odom_msg.pose.pose.position.y = 0.0
+         odom_msg.pose.pose.position.z = 0.0
+ 
+-        # Orientation - currently no rotation
+-        # TODO: Will be calculated by kinematic model using steering data
++        # Orientation - no rotation
+         odom_msg.pose.pose.orientation.x = 0.0
+         odom_msg.pose.pose.orientation.y = 0.0
+-        odom_msg.pose.pose.orientation.z = 0.0  # TODO: From kinematic model
+-        odom_msg.pose.pose.orientation.w = 1.0  # TODO: From kinematic model
++        odom_msg.pose.pose.orientation.z = 0.0
++        odom_msg.pose.pose.orientation.w = 1.0
+ 
+         # Velocity
+         odom_msg.twist.twist.linear.x = odometry_data['speed_ms']
+@@ -186,16 +200,17 @@ class MTTRosWrapper(Node):
+         odom_msg.twist.twist.linear.z = 0.0
+         odom_msg.twist.twist.angular.x = 0.0
+         odom_msg.twist.twist.angular.y = 0.0
+-        odom_msg.twist.twist.angular.z = 0.0  # TODO: From kinematic model
++        odom_msg.twist.twist.angular.z = 0.0
+ 
+         self.odometry_pub.publish(odom_msg)
+ 
+     def destroy_node(self):
+         """Clean shutdown with emergency stop."""
+         self.get_logger().info("Shutting down MTT driver - applying emergency stop")
+-        self.driver.emergency_stop()
+-        self.driver.send_can_frame()
+-        self.driver.shutdown()
++        if hasattr(self, 'driver') and self.driver:
++            self.driver.emergency_stop()
++            self.driver.send_can_frame()
++            self.driver.cleanup()
+         super().destroy_node()
+ 
+ def main(args=None):
+diff --git a/mtt_ws/src/mtt_driver/mtt_driver/mtt_teleop_joy.py b/mtt_ws/src/mtt_driver/mtt_driver/mtt_teleop_joy.py
+index 6a5237b..4ab1691 100644
+--- a/mtt_ws/src/mtt_driver/mtt_driver/mtt_teleop_joy.py
++++ b/mtt_ws/src/mtt_driver/mtt_driver/mtt_teleop_joy.py
+@@ -2,10 +2,10 @@ import rclpy
+ from rclpy.node import Node
+ from sensor_msgs.msg import Joy
+ from geometry_msgs.msg import Twist
+-from mtt_driver.msg import MttAuxCommand
++from mtt_msgs.msg import MttAuxCommand
+ 
+ class MTTTeleopJoy(Node):
+-    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd."""
++    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd, including light toggle."""
+ 
+     def __init__(self):
+         super().__init__('mtt_teleop_joy')
+@@ -15,7 +15,9 @@ class MTTTeleopJoy(Node):
+         self.get_logger().info("MTT Teleop Node started.")
+         
+         self.axis_map = {'left_v': 1, 'right_h': 3, 'brake': 5, 'dpad_v': 7}
+-        self.button_map = {'dead_man': 5}
++        self.button_map = {'dead_man': 5, 'light_toggle': 4}
++        self.prev_light_btn = 0
++        self.light_state = False
+ 
+     def joy_callback(self, msg: Joy):
+         twist_msg = Twist()
+@@ -33,6 +35,17 @@ class MTTTeleopJoy(Node):
+             aux_msg.winch_command = MttAuxCommand.WINCH_OUT
+         else: 
+             aux_msg.winch_command = MttAuxCommand.WINCH_NEUTRAL
++
++        # Light toggle logic (rising edge detection)
++        light_btn = msg.buttons[self.button_map['light_toggle']]
++        if light_btn == 1 and self.prev_light_btn == 0:
++            self.light_state = not self.light_state
++        self.prev_light_btn = light_btn
++        
++        # Set light state if supported
++        if hasattr(aux_msg, 'light_state'):
++            aux_msg.light_state = int(self.light_state)
++
+         self.aux_cmd_pub.publish(aux_msg)
+ 
+ def main(args=None):
+diff --git a/mtt_ws/src/mtt_driver/package.xml b/mtt_ws/src/mtt_driver/package.xml
+index 6041d71..ce2ff1a 100644
+--- a/mtt_ws/src/mtt_driver/package.xml
++++ b/mtt_ws/src/mtt_driver/package.xml
+@@ -7,24 +7,21 @@
+   <maintainer email="alex.chorel-campanozzi@ecn.forces.gc.ca">admassistant</maintainer>
+   <license>TODO: License declaration</license>
+ 
+-  <buildtool_depend>ament_cmake</buildtool_depend>
+-
+-  <build_depend>rosidl_default_generators</build_depend>
+-  <exec_depend>rosidl_default_runtime</exec_depend>
+-  <member_of_group>rosidl_interface_packages</member_of_group>
++  <buildtool_depend>ament_python</buildtool_depend>
+ 
+   <exec_depend>rclpy</exec_depend>
++  <exec_depend>python3-can</exec_depend>
+   <depend>geometry_msgs</depend>
+   <depend>sensor_msgs</depend>
++  <depend>nav_msgs</depend>
+   <depend>std_msgs</depend>
++  <depend>mtt_msgs</depend>
+ 
+   <test_depend>ament_lint_auto</test_depend>
+   <test_depend>ament_lint_common</test_depend>
+ 
+-  <depend>rclcpp</depend>
+-
+   <export>
+-    <build_type>ament_cmake</build_type>
++    <build_type>ament_python</build_type>
+   </export>
+ </package>
+ 
+diff --git a/mtt_ws/src/mtt_driver/requirements.txt b/mtt_ws/src/mtt_driver/requirements.txt
+deleted file mode 100644
+index 3ebea95..0000000
+--- a/mtt_ws/src/mtt_driver/requirements.txt
++++ /dev/null
+@@ -1,5 +0,0 @@
+-python-can>=4.0.0
+-rclpy
+-geometry_msgs
+-sensor_msgs
+-std_msgs
+diff --git a/mtt_ws/src/mtt_driver/resource/mtt_driver b/mtt_ws/src/mtt_driver/resource/mtt_driver
+new file mode 100644
+index 0000000..8b13789
+--- /dev/null
++++ b/mtt_ws/src/mtt_driver/resource/mtt_driver
+@@ -0,0 +1 @@
++
+diff --git a/mtt_ws/src/mtt_driver/scripts/winch_fix_explanation.py b/mtt_ws/src/mtt_driver/scripts/winch_fix_explanation.py
+new file mode 100644
+index 0000000..e69de29
+diff --git a/mtt_ws/src/mtt_driver/setup.py b/mtt_ws/src/mtt_driver/setup.py
+index 3449bcf..06a35b8 100644
+--- a/mtt_ws/src/mtt_driver/setup.py
++++ b/mtt_ws/src/mtt_driver/setup.py
+@@ -12,22 +12,21 @@ setup(
+         ('share/ament_index/resource_index/packages',
+             ['resource/' + package_name]),
+         ('share/' + package_name, ['package.xml']),
+-        ('share/' + package_name + '/launch', glob('launch/*.launch.py')),
+-        ('share/' + package_name + '/config', glob('config/*.yaml')),
++        (os.path.join('share', package_name, 'launch'), glob('launch/*')),
++        (os.path.join('share', package_name, 'config'), glob('config/*')),
+     ],
+-
+     install_requires=['setuptools'],
+     zip_safe=True,
+     maintainer='Alex',
+     maintainer_email='alex.chorel-campanozzi@ecn.forces.gc.ca',
+     description='ROS 2 driver for MTT-154 vehicle',
+-    license='Apalache Liscense 2.0',
+-    #tests_require=['pytest'],
++    license='Apache License 2.0',
+     entry_points={
+         'console_scripts': [
+-            'mtt_driver_py = mtt_driver.mtt_driver:main',
++            'mtt_driver = mtt_driver.mtt_driver:main',
+             'mtt_ros_wrapper = mtt_driver.mtt_ros_wrapper:main',
+             'mtt_teleop_joy = mtt_driver.mtt_teleop_joy:main',
++            'mtt_test_node = mtt_driver.mtt_test_node:main',
+         ],
+     },
+ )
+diff --git a/mtt_ws/src/mtt_msgs/CMakeLists.txt b/mtt_ws/src/mtt_msgs/CMakeLists.txt
+new file mode 100644
+index 0000000..1c33021
+--- /dev/null
++++ b/mtt_ws/src/mtt_msgs/CMakeLists.txt
+@@ -0,0 +1,16 @@
++cmake_minimum_required(VERSION 3.8)
++project(mtt_msgs)
++
++# Find dependencies
++find_package(ament_cmake REQUIRED)
++find_package(std_msgs REQUIRED)
++find_package(rosidl_default_generators REQUIRED)
++
++# Generate custom messages
++rosidl_generate_interfaces(${PROJECT_NAME}
++  "msg/MttAuxCommand.msg"
++  "msg/MttTachometerData.msg"
++  DEPENDENCIES std_msgs
++)
++
++ament_package()
+diff --git a/mtt_ws/src/mtt_driver/msg/MttAuxCommand.msg b/mtt_ws/src/mtt_msgs/msg/MttAuxCommand.msg
+similarity index 85%
+rename from mtt_ws/src/mtt_driver/msg/MttAuxCommand.msg
+rename to mtt_ws/src/mtt_msgs/msg/MttAuxCommand.msg
+index ee92fe3..9c0b978 100644
+--- a/mtt_ws/src/mtt_driver/msg/MttAuxCommand.msg
++++ b/mtt_ws/src/mtt_msgs/msg/MttAuxCommand.msg
+@@ -13,3 +13,6 @@ uint8 WINCH_NEUTRAL = 0
+ uint8 WINCH_IN = 1
+ uint8 WINCH_OUT = 2
+ uint8 winch_command
++
++# Light light_state
++int32 light_state  # 0=off, 1=on
+diff --git a/mtt_ws/src/mtt_driver/msg/MttTachometerData.msg b/mtt_ws/src/mtt_msgs/msg/MttTachometerData.msg
+similarity index 100%
+rename from mtt_ws/src/mtt_driver/msg/MttTachometerData.msg
+rename to mtt_ws/src/mtt_msgs/msg/MttTachometerData.msg
+diff --git a/mtt_ws/src/mtt_msgs/package.xml b/mtt_ws/src/mtt_msgs/package.xml
+new file mode 100644
+index 0000000..1762709
+--- /dev/null
++++ b/mtt_ws/src/mtt_msgs/package.xml
+@@ -0,0 +1,24 @@
++<?xml version="1.0"?>
++<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
++<package format="3">
++  <name>mtt_msgs</name>
++  <version>0.0.0</version>
++  <description>Message definitions for MTT-154 vehicle</description>
++  <maintainer email="alex.chorel-campanozzi@ecn.forces.gc.ca">Alex</maintainer>
++  <license>Apache License 2.0</license>
++
++  <buildtool_depend>ament_cmake</buildtool_depend>
++
++  <build_depend>rosidl_default_generators</build_depend>
++  <exec_depend>rosidl_default_runtime</exec_depend>
++  <member_of_group>rosidl_interface_packages</member_of_group>
++
++  <depend>std_msgs</depend>
++
++  <test_depend>ament_lint_auto</test_depend>
++  <test_depend>ament_lint_common</test_depend>
++
++  <export>
++    <build_type>ament_cmake</build_type>
++  </export>
++</package>
+diff --git a/test_mtt_ros_driver.sh b/test_mtt_ros_driver.sh
+new file mode 100644
+index 0000000..b739d23
+--- /dev/null
++++ b/test_mtt_ros_driver.sh
+@@ -0,0 +1,230 @@
++#!/bin/bash
++
++# MTT ROS 2 Driver Test Script
++# Tests the complete ROS 2 MTT driver stack with the offline mockserver
++
++set -e
++
++echo "=== MTT ROS 2 Driver Test Setup ==="
++echo "This script will test the MTT ROS 2 driver with the offline mockserver"
++echo ""
++
++# Colors for output
++RED='\033[0;31m'
++GREEN='\033[0;32m'
++YELLOW='\033[1;33m'
++BLUE='\033[0;34m'
++NC='\033[0m' # No Color
++
++# Function to print colored output
++print_status() {
++    echo -e "${BLUE}[INFO]${NC} $1"
++}
++
++print_warning() {
++    echo -e "${YELLOW}[WARNING]${NC} $1"
++}
++
++print_error() {
++    echo -e "${RED}[ERROR]${NC} $1"
++}
++
++print_success() {
++    echo -e "${GREEN}[SUCCESS]${NC} $1"
++}
++
++# Function to setup virtual CAN interface
++setup_vcan() {
++    print_status "Setting up virtual CAN interface..."
++    sudo modprobe vcan 2>/dev/null || true
++    sudo ip link delete vcan0 2>/dev/null || true
++    sudo ip link add dev vcan0 type vcan
++    sudo ip link set vcan0 up
++    
++    if ip link show vcan0 &>/dev/null; then
++        print_success "Virtual CAN interface vcan0 created and activated"
++    else
++        print_error "Failed to create virtual CAN interface"
++        exit 1
++    fi
++}
++
++# Function to build the mockserver
++build_mockserver() {
++    print_status "Building MTT mockserver..."
++    cd mtt_test_tools/offline_mockserver
++    if [ ! -f "build_mtt_mock.sh" ]; then
++        print_error "Mockserver build script not found!"
++        exit 1
++    fi
++    
++    chmod +x build_mtt_mock.sh
++    ./build_mtt_mock.sh
++    
++    if [ -f "build/mtt_mock_server" ]; then
++        print_success "Mockserver built successfully"
++    else
++        print_error "Failed to build mockserver"
++        exit 1
++    fi
++    cd ../..
++}
++
++# Function to build ROS 2 driver
++build_ros_driver() {
++    print_status "Building ROS 2 MTT driver..."
++    cd mtt_ws
++    
++    # Source ROS 2 if available
++    if [ -f "/opt/ros/humble/setup.bash" ]; then
++        source /opt/ros/humble/setup.bash
++        print_status "Sourced ROS 2 Humble"
++    elif [ -f "/opt/ros/iron/setup.bash" ]; then
++        source /opt/ros/iron/setup.bash
++        print_status "Sourced ROS 2 Iron"
++    elif [ -f "/opt/ros/rolling/setup.bash" ]; then
++        source /opt/ros/rolling/setup.bash
++        print_status "Sourced ROS 2 Rolling"
++    else
++        print_warning "ROS 2 installation not found in standard locations"
++        print_warning "Please source your ROS 2 setup.bash manually"
++    fi
++    
++    # Install Python dependencies
++    print_status "Installing Python dependencies..."
++    pip3 install python-can || print_warning "Failed to install python-can"
++    
++    # Build the package
++    colcon build --packages-select mtt_driver
++    
++    if [ -f "install/setup.bash" ]; then
++        print_success "ROS 2 driver built successfully"
++    else
++        print_error "Failed to build ROS 2 driver"
++        exit 1
++    fi
++    cd ..
++}
++
++# Function to start mockserver in background
++start_mockserver() {
++    print_status "Starting MTT mockserver on vcan0..."
++    cd mtt_test_tools/offline_mockserver/build
++    ./mtt_mock_server -c vcan0 &
++    MOCKSERVER_PID=$!
++    echo $MOCKSERVER_PID > /tmp/mtt_mockserver.pid
++    print_success "Mockserver started with PID $MOCKSERVER_PID"
++    sleep 2  # Give mockserver time to initialize
++    cd ../../..
++}
++
++# Function to test CAN communication
++test_can_communication() {
++    print_status "Testing basic CAN communication..."
++    
++    # Send a test frame and check if mockserver responds
++    timeout 5 candump vcan0 &
++    CANDUMP_PID=$!
++    sleep 1
++    
++    # Send safety unlock command
++    print_status "Sending safety unlock command..."
++    cansend vcan0 100#0080007F00800000
++    
++    sleep 2
++    kill $CANDUMP_PID 2>/dev/null || true
++    
++    print_success "CAN communication test completed"
++}
++
++# Function to monitor CAN traffic
++monitor_can() {
++    print_status "Monitoring CAN traffic (Press Ctrl+C to stop)..."
++    echo ""
++    echo "Key CAN IDs to watch:"
++    echo "- 0x100: Control frames (from ROS driver to mockserver)"
++    echo "- 0x2FF: Main data (from mockserver to ROS driver)"
++    echo "- 0x600-0x602: BMS data (from mockserver to ROS driver)"
++    echo ""
++    
++    candump vcan0
++}
++
++# Function to cleanup processes
++cleanup() {
++    print_status "Cleaning up..."
++    
++    # Kill mockserver if running
++    if [ -f "/tmp/mtt_mockserver.pid" ]; then
++        MOCKSERVER_PID=$(cat /tmp/mtt_mockserver.pid)
++        kill $MOCKSERVER_PID 2>/dev/null || true
++        rm -f /tmp/mtt_mockserver.pid
++        print_status "Stopped mockserver"
++    fi
++    
++    # Kill any remaining CAN monitoring
++    pkill -f "candump vcan0" 2>/dev/null || true
++    
++    print_success "Cleanup completed"
++}
++
++# Trap to cleanup on exit
++trap cleanup EXIT
++
++# Main execution
++print_status "Starting MTT ROS 2 driver test setup..."
++echo ""
++
++# Check prerequisites
++if ! command -v cansend &> /dev/null; then
++    print_error "can-utils not found. Install with: sudo apt install can-utils"
++    exit 1
++fi
++
++if ! command -v colcon &> /dev/null; then
++    print_error "colcon not found. Install with: pip3 install colcon-common-extensions"
++    exit 1
++fi
++
++# Execute setup steps
++setup_vcan
++build_mockserver
++build_ros_driver
++start_mockserver
++test_can_communication
++
++print_success "MTT ROS 2 driver test environment is ready!"
++echo ""
++echo "==================== NEXT STEPS ===================="
++echo ""
++echo "1. In Terminal 1 (Monitor CAN traffic):"
++echo "   ./test_mtt_ros_driver.sh monitor"
++echo ""
++echo "2. In Terminal 2 (Launch ROS 2 driver):"
++echo "   cd mtt_ws"
++echo "   source install/setup.bash"
++echo "   ros2 launch mtt_driver mtt_teleop.launch.py"
++echo ""
++echo "3. In Terminal 3 (Test with manual commands):"
++echo "   cd mtt_ws"
++echo "   source install/setup.bash"
++echo "   ros2 topic pub /cmd_vel geometry_msgs/msg/Twist '{linear: {x: 0.5}}' --once"
++echo "   ros2 topic pub /mtt_aux_cmd mtt_driver/msg/MttAuxCommand '{dead_man_switch: true}' --once"
++echo ""
++echo "4. Monitor topics:"
++echo "   ros2 topic echo /mtt_tachometer"
++echo "   ros2 topic echo /mtt_speed"
++echo ""
++echo "Press Ctrl+C to stop mockserver and cleanup"
++echo "=================================================="
++
++# If argument provided, handle specific commands
++if [ "$1" = "monitor" ]; then
++    monitor_can
++elif [ "$1" = "cleanup" ]; then
++    cleanup
++    exit 0
++else
++    # Keep script running to maintain mockserver
++    wait
++fi
