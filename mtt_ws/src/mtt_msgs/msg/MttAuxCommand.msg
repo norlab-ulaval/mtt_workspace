@@ -13,3 +13,6 @@ uint8 WINCH_NEUTRAL = 0
 uint8 WINCH_IN = 1
 uint8 WINCH_OUT = 2
 uint8 winch_command
+
+# Light light_state
+int32 light_state  # 0=off, 1=on
