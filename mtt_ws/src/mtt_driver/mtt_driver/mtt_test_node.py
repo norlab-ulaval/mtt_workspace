@@ -9,7 +9,7 @@ Sends test commands and monitors responses.
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
-from mtt_driver.msg import MttAuxCommand, MttTachometerData
+from mtt_msgs.msg import MttAuxCommand, MttTachometerData
 from std_msgs.msg import Float64
 import time
 
@@ -41,8 +41,8 @@ class MTTTestNode(Node):
         """Handle tachometer data feedback."""
         self.last_tachometer = msg
         self.get_logger().info(f"Tachometer: Speed={msg.speed_kmh:.2f} km/h, "
-                              f"Distance={msg.distance_m:.2f}m, "
-                              f"Temp A={msg.temp_a}°C, Temp B={msg.temp_b}°C")
+                              f"Distance={msg.distance_km:.3f}km, "
+                              f"Temp A={msg.main_sensor_temp_a}°C, Temp B={msg.main_sensor_temp_b}°C")
 
     def speed_callback(self, msg: Float64):
         """Handle speed data feedback."""

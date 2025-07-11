@@ -2,10 +2,10 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import Twist
-from mtt_driver.msg import MttAuxCommand
+from mtt_msgs.msg import MttAuxCommand
 
 class MTTTeleopJoy(Node):
-    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd."""
+    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd, including light toggle."""
 
     def __init__(self):
         super().__init__('mtt_teleop_joy')
@@ -15,7 +15,9 @@ class MTTTeleopJoy(Node):
         self.get_logger().info("MTT Teleop Node started.")
         
         self.axis_map = {'left_v': 1, 'right_h': 3, 'brake': 5, 'dpad_v': 7}
-        self.button_map = {'dead_man': 5}
+        self.button_map = {'dead_man': 5, 'light_toggle': 4}  # Button 4 for light toggle
+        self.prev_light_btn = 0
+        self.light_state = False  # False = off, True = on
 
     def joy_callback(self, msg: Joy):
         twist_msg = Twist()
@@ -33,6 +35,17 @@ class MTTTeleopJoy(Node):
             aux_msg.winch_command = MttAuxCommand.WINCH_OUT
         else: 
             aux_msg.winch_command = MttAuxCommand.WINCH_NEUTRAL
+
+        # Light toggle logic (rising edge detection)
+        light_btn = msg.buttons[self.button_map['light_toggle']]
+        if light_btn == 1 and self.prev_light_btn == 0:
+            self.light_state = not self.light_state
+        self.prev_light_btn = light_btn
+        
+        # Only set light_state if the field exists (after message rebuild)
+        if hasattr(aux_msg, 'light_state'):
+            aux_msg.light_state = int(self.light_state)  # 0=off, 1=on
+
         self.aux_cmd_pub.publish(aux_msg)
 
 def main(args=None):

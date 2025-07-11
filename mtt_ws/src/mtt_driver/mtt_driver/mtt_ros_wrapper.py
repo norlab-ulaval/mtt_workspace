@@ -19,8 +19,8 @@ from sensor_msgs.msg import Temperature
 from std_msgs.msg import Float64, Float64MultiArray
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Point, Pose, Quaternion, Vector3
-from mtt_driver.msg import MttAuxCommand, MttTachometerData
-from mtt_driver.mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState
+from mtt_msgs.msg import MttAuxCommand, MttTachometerData
+from .mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState
 
 class MTTRosWrapper(Node):
     """ROS 2 node that provides standard interfaces for MTT-154 control.
@@ -83,7 +83,8 @@ class MTTRosWrapper(Node):
         self.driver.set_throttle(throttle)
         
         # Convert angular velocity to steering (0-255 range, 128 is center)
-        steer = int((-msg.angular.z + 1.0) * 127.5)
+        # INVERTED: Positive angular.z (left turn) now maps to higher values (right turn in hardware)
+        steer = int((msg.angular.z + 1.0) * 127.5)
         self.driver.set_steer(steer)
         
         # Set direction based on linear velocity sign
@@ -91,7 +92,7 @@ class MTTRosWrapper(Node):
         self.driver.set_direction(direction)
 
     def aux_cmd_callback(self, msg: MttAuxCommand):
-        """Handle auxiliary commands (brake, winch, dead man's switch)."""
+        """Handle auxiliary commands (brake, winch, dead man's switch, light toggle)."""
         if not msg.dead_man_switch and not self.is_estopped:
             self.is_estopped = True
             self.driver.reset_motion_commands()
@@ -113,6 +114,14 @@ class MTTRosWrapper(Node):
             self.driver.set_winch_state(WinchState.WinchOut)
         else: 
             self.driver.set_winch_state(WinchState.WinchNeutral)
+
+        # Light state handling (0=off, 1=on)
+        if hasattr(msg, 'light_state'):
+            from .mtt_driver import LightState
+            if msg.light_state == 1:
+                self.driver.set_light_state(LightState.On)
+            else:
+                self.driver.set_light_state(LightState.Off)
 
     def control_loop(self):
         """Main control loop - sends CAN frames at 20 Hz and publishes tachometer data."""
@@ -208,9 +217,10 @@ class MTTRosWrapper(Node):
     def destroy_node(self):
         """Clean shutdown with emergency stop."""
         self.get_logger().info("Shutting down MTT driver - applying emergency stop")
-        self.driver.emergency_stop()
-        self.driver.send_can_frame()
-        self.driver.shutdown()
+        if hasattr(self, 'driver') and self.driver:
+            self.driver.emergency_stop()
+            self.driver.send_can_frame()
+            self.driver.cleanup()  # Changed from shutdown() to cleanup()
         super().destroy_node()
 
 def main(args=None):
