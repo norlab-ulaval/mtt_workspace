@@ -60,7 +60,7 @@ struct VehicleState {
     bool closed_loop_steer = false;
     
     // Simulated sensor data
-    int16_t instant_tachometer = 0;
+    uint16_t instant_tachometer = 0;  // Unsigned - represents speed magnitude only
     uint32_t cumulative_ticks = 0;
     int8_t temp_a = 25;
     int8_t temp_b = 22;
@@ -103,7 +103,6 @@ void decode_control_frame(const uint8_t* data) {
     
     //TODO Verify if vehicule brake overrides throttle for safety
     if (vehicle_state.safety_unlocked) {
-        int speed_factor = vehicle_state.forward_direction ? 1 : -1;
         int net_force = 0;
         
         if (vehicle_state.brake > 10) {  // threshold to avoid noise
@@ -117,8 +116,10 @@ void decode_control_frame(const uint8_t* data) {
             vehicle_state.battery_current = 0;
         }
         
-        vehicle_state.instant_tachometer = (net_force * speed_factor) / 4;
-        vehicle_state.cumulative_ticks += abs(vehicle_state.instant_tachometer);
+        // Generate realistic tachometer values (unsigned magnitude only)
+        // Scale throttle/brake (0-255) to 0-230 range for encoder ticks per second
+        vehicle_state.instant_tachometer = (abs(net_force) * 230) / 255;  // 0-230 range
+        vehicle_state.cumulative_ticks += vehicle_state.instant_tachometer / 10;  // Slower accumulation
         
     } else {
         vehicle_state.instant_tachometer = 0;
