@@ -1,0 +1,15 @@
+RF_estop.log
+Appuie sur le estop sur le dessus de la RF et j'ai entendu le frein s'activer.
+RF_drive_alternate_FWD_RWD.log
+Inverse selon la logique du code.Comportement identique dans les deux position, pure inversion.
+RF_drive_short_burst_at_max.log
+chercher seulement un coup ou le throttle est au max
+TELEOP_ros2_init_launch_frame_001.log
+RF etais ouvert donc double publishing des message sur le frame 001, strobe light
+TELEOP_ros2_init_launch_wihtout_RF_frame_001.log
+winch en action et lumiere a ouvert et a rester ouvert apres la fermeture du noeud
+TELEOP_ros2_init_launch_winch_down_wihtout_RF_frame_001.log
+winch unlocked et on entendais le moteur alterner dans sont duty donc deux commande differente
+TELEOP_ros2_init_Winch_0x00_wihtout_RF_frame_001.log
+force la winch a 0x00, locked, le cable avait le comportement d'un winch up
+
