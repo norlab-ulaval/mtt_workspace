@@ -15,9 +15,9 @@ class MTTTeleopJoy(Node):
         self.get_logger().info("MTT Teleop Node started.")
         
         self.axis_map = {'left_v': 1, 'right_h': 3, 'brake': 5, 'dpad_v': 7}
-        self.button_map = {'dead_man': 5, 'light_toggle': 4}  # Button 4 for light toggle
+        self.button_map = {'dead_man': 5, 'light_toggle': 4}
         self.prev_light_btn = 0
-        self.light_state = False  # False = off, True = on
+        self.light_state = False
 
     def joy_callback(self, msg: Joy):
         twist_msg = Twist()
@@ -42,9 +42,9 @@ class MTTTeleopJoy(Node):
             self.light_state = not self.light_state
         self.prev_light_btn = light_btn
         
-        # Only set light_state if the field exists (after message rebuild)
+        # Set light state if supported
         if hasattr(aux_msg, 'light_state'):
-            aux_msg.light_state = int(self.light_state)  # 0=off, 1=on
+            aux_msg.light_state = int(self.light_state)
 
         self.aux_cmd_pub.publish(aux_msg)
 

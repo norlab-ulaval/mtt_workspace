@@ -83,7 +83,6 @@ class MTTRosWrapper(Node):
         self.driver.set_throttle(throttle)
         
         # Convert angular velocity to steering (0-255 range, 128 is center)
-        # INVERTED: Positive angular.z (left turn) now maps to higher values (right turn in hardware)
         steer = int((msg.angular.z + 1.0) * 127.5)
         self.driver.set_steer(steer)
         
@@ -124,11 +123,11 @@ class MTTRosWrapper(Node):
                 self.driver.set_light_state(LightState.Off)
 
     def control_loop(self):
-        """Main control loop - sends CAN frames at 20 Hz and publishes tachometer data."""
+        """Main control loop - publishes tachometer data and manages safety state."""
         if self.is_estopped:
             self.driver.set_security_switch(SecuritySwitchState.SafetyLocked)
         
-        self.driver.send_can_frame()
+        # CAN frames are sent automatically by the driver's keepalive thread
         
         # Publish tachometer data if available
         self._publish_tachometer_data()
@@ -175,34 +174,25 @@ class MTTRosWrapper(Node):
 
     def _publish_odometry(self, odometry_data):
         """Publish standard ROS2 odometry message"""
-        # TODO: Complete odometry integration with vehicle kinematic models
-        # Current: simplified straight-line motion (distance tracking only)
-        # Vehicle configurations:
-        # - Single track: Reverse bicycle model kinematic implementation needed or more complex Articulated Steering Vehicles
-        # - Side-by-side: Skid-steer drive model implementation needed
-        # Implementation will be done at higher ROS controller level using ros_controllers
-        
         odom_msg = Odometry()
         odom_msg.header.stamp = self.get_clock().now().to_msg()
         odom_msg.header.frame_id = "odom"
         odom_msg.child_frame_id = "mtt_base_link"
 
-        # Position calculation - currently straight-line distance only
-        # TODO: Replace with proper kinematic model at ros_controllers level
+        # Position calculation - straight-line distance only
         actual_distance = odometry_data['total_distance_m']
         if odometry_data['direction'] == 'Reverse':
             actual_distance = -odometry_data['total_distance_m']
 
         odom_msg.pose.pose.position.x = actual_distance
-        odom_msg.pose.pose.position.y = 0.0  # TODO: Will be calculated by kinematic model
+        odom_msg.pose.pose.position.y = 0.0
         odom_msg.pose.pose.position.z = 0.0
 
-        # Orientation - currently no rotation
-        # TODO: Will be calculated by kinematic model using steering data
+        # Orientation - no rotation
         odom_msg.pose.pose.orientation.x = 0.0
         odom_msg.pose.pose.orientation.y = 0.0
-        odom_msg.pose.pose.orientation.z = 0.0  # TODO: From kinematic model
-        odom_msg.pose.pose.orientation.w = 1.0  # TODO: From kinematic model
+        odom_msg.pose.pose.orientation.z = 0.0
+        odom_msg.pose.pose.orientation.w = 1.0
 
         # Velocity
         odom_msg.twist.twist.linear.x = odometry_data['speed_ms']
@@ -210,7 +200,7 @@ class MTTRosWrapper(Node):
         odom_msg.twist.twist.linear.z = 0.0
         odom_msg.twist.twist.angular.x = 0.0
         odom_msg.twist.twist.angular.y = 0.0
-        odom_msg.twist.twist.angular.z = 0.0  # TODO: From kinematic model
+        odom_msg.twist.twist.angular.z = 0.0
 
         self.odometry_pub.publish(odom_msg)
 
@@ -220,7 +210,7 @@ class MTTRosWrapper(Node):
         if hasattr(self, 'driver') and self.driver:
             self.driver.emergency_stop()
             self.driver.send_can_frame()
-            self.driver.cleanup()  # Changed from shutdown() to cleanup()
+            self.driver.cleanup()
         super().destroy_node()
 
 def main(args=None):

@@ -131,44 +131,34 @@ class MTTCanDriver:
     - Direction is controlled by master system
     """
 
-    # --- Real-World Frame Examples (From RF Remote Logs) ---
-    # These are examples of frames observed, not fixed templates:
-    # Idle frame when deadman NOT pressed: 00 60 19 7F 29 7F 00 7F
-    # Idle frame when deadman IS pressed:  00 68 19 7F 29 7F 00 7F
-    # Light toggle action:                 00 28 19 7F 29 7F 00 7F
-    # Winch in action:                     00 68 19 E5 29 7F 00 7F
-    # Winch out action:                    00 68 19 18 29 7F 00 7F
-    # Note: 0x19 (throttle) and 0x29 (brake) are just the idle positions, not fixed values
+    # Template frame for reference - not used in actual operation
     idle_frame_template = [
         0x00,  # [0] Vehicle type: Single Track
-        0x68,  # [1] Global switches: deadman pressed (bit 3=1), security unlocked (bit 7=1), light off (bit 6=0)
-        0x19,  # [2] Throttle: idle value (25 decimal) - THIS IS NOT FIXED, just RF remote idle position
+        0x68,  # [1] Global switches: deadman pressed, security unlocked, light off
+        0x19,  # [2] Throttle: idle value (25 decimal)
         0x7F,  # [3] Winch: neutral (127 decimal)
-        0x29,  # [4] Brake: idle value (41 decimal) - THIS IS NOT FIXED, just RF remote idle position
+        0x29,  # [4] Brake: idle value (41 decimal)
         0x7F,  # [5] Steer: center (127 decimal)
         0x00,  # [6] Direction mode: open loop
-        0x7F   # [7] Reserved (matches RF remote)
+        0x7F   # [7] Reserved
     ]
 
     def __init__(self, can_interface='can0'):
-        # CAN ID Configuration
-        # Reference: CANBus_Specification.md Section 3.1.2
-        # Using 0x001 instead of 0x100 due to corruption issues
         self.node_id = 0x001
         
-        # Initialize can_array with proper starting values
+        # Initialize CAN frame with safe starting values
         self.can_array = [
             0x00,  # [0] Vehicle type: Single Track
-            0x68,  # [1] Global switches: deadman pressed, security unlocked, light OFF (bit 6=1)
+            0x68,  # [1] Global switches: deadman pressed, security unlocked, light OFF
             0x00,  # [2] Throttle: minimum (0)
-            0x7F,  # [3] Winch: neutral (127 decimal)
+            0x7F,  # [3] Winch: neutral (127)
             0x00,  # [4] Brake: minimum (0)
-            0x7F,  # [5] Steer: center (127 decimal)
+            0x7F,  # [5] Steer: center (127)
             0x00,  # [6] Direction mode: open loop
             0x7F   # [7] Reserved
         ]
         
-        # CAN bus initialization with interface checking
+        # CAN bus initialization
         timeout_seconds = 10
         check_interval = 0.5
         elapsed = 0.0
@@ -190,6 +180,7 @@ class MTTCanDriver:
             log.error(f"Failed to initialize CAN bus: {e}")
             raise
 
+        # Initialize state variables
         self.vehicle_type = None
         self.steer_value = None
         self.throttle_value = None
@@ -200,71 +191,41 @@ class MTTCanDriver:
         self.direction_mode = None
         self.light_state = None
         
-        # Winch auto-reset control
-        self.winch_timer = None
-        self.winch_timer_lock = threading.Lock()
-
-        # Odometry and Tachometer Data
+        # Odometry and tachometer data
         self.tachometer_data = TachometerData()
-        self.encoder_final_ratio = 0.0
-        self.last_cumulative_ticks = 0
-        self.total_distance = 0.0  # in meters
-        self.current_direction = DirectionState.Forward  # Track current direction for odometry
-        
-        # Calculate gear ratio once at startup
         self.encoder_final_ratio = self._calculate_gear_ratio()
+        self.last_cumulative_ticks = 0
+        self.total_distance = 0.0
+        self.current_direction = DirectionState.Forward
         
-        # CAN listener thread for tachometer data (0x2FF frames)
+        # Start CAN threads
         self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
         self.can_listener_running = True
         self.can_listener_thread.start()
+        
+        self.frame_lock = threading.Lock()
+        self.sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
+        self.sender_running = True
+        self.sender_thread.start()
 
-        # Safety Configuration
-        # Reference: CANBus_Specification.md Section 3.1 - Critical safety patches
-        # - Security switch MUST be unlocked (MTT_DEF_SAFETY_UNLOCKED) for operation
-        # - Light state acts as emergency stop due to test modifications
-        # - One light state = stop, other = operational (test both to determine)
-        # - Direction is controlled by master system (us) via direction bit
-
-        # MTT_SWITCHES_VEHICLE_TYPE
+        # Initialize vehicle state
         self.set_vehicle_type(VehicleType.VehicleSingleTrack)
-
-        # MTT_SWITCHES_GLOBAL - SAFETY CRITICAL
-        # Security switch must be unlocked for system to function
-        self.set_security_switch(SecuritySwitchState.SafetyLocked)  # Start locked for safety
-        
-        # Set initial direction (controlled by master system)
+        self.set_security_switch(SecuritySwitchState.SafetyLocked)
         self.set_direction(DirectionState.Forward)
-        
-        # Light state - emergency stop mechanism added for testing
-        # Start with light OFF (safer initial state) 
-        self.set_light_state(LightState.Off)  # This sets bit 6=1 (light OFF)
-
-        # MTT_ANALOG_THROTTLE
+        self.set_light_state(LightState.Off)
         self.set_throttle(0)
-        # self.set_throttle(60)
-
-        # MTT_ANALOG_WINCH - Set to proper neutral state
         self.set_winch_state(WinchState.WinchNeutral)
-
-        # MTT_ANALOG_BRAKE
         self.set_brake(0)
-
-        # MTT_ANALOG_STEER - Use same center value as RF remote
-        self.set_steer(127)  # Center position (0x7F, same as RF remote)
-
-        # MTT_SWITCHES_DIRECTION_MODE
+        self.set_steer(127)
         self.set_direction_mode(DirectionMode.OpenLoop)
-        # self.set_direction_mode(DirectionMode.CloseLoop)
 
     def reset_motion_commands(self):
-        """Resets all motion commands to a safe, stopped state (RF idle template)."""
+        """Resets all motion commands to a safe, stopped state."""
         self.set_throttle(0)
-        self.set_steer(127)  # Center position (same as RF remote)
+        self.set_steer(127)  # Center position
         self.set_brake(255)  # Full brake
         self.set_direction(DirectionState.Forward)
-        self.set_winch_state(WinchState.WinchNeutral)  # Always set winch to neutral for idle
-        # Optionally, set other fields to match RF idle if needed
+        self.set_winch_state(WinchState.WinchNeutral)
 
     def build_can_frame(self, **kwargs):
         """
@@ -385,30 +346,12 @@ class MTTCanDriver:
                 f"Temp A: {temp_a}°C, Temp B: {temp_b}°C"
             )
 
-    def get_speed_kmh(self):
-        """Convert tachometer instant reading to km/h"""
-        if self.tachometer_data['tachimeter_instant'] > 0:
-            rps = float(self.tachometer_data['tachimeter_instant'])
-            return (rps / self.final_ratio) * self.MTT_TRACK_LENGTH_KM * 3600
-        return 0.0
-
-    def get_cumulative_distance_km(self):
-        """Get cumulative distance in kilometers from tachometer data"""
-        if self.tachometer_data['tachimeter_cumulative'] > 0:
-            ticks = float(self.tachometer_data['tachimeter_cumulative'])
-            return (ticks / self.final_ratio) * self.MTT_TRACK_LENGTH_KM
-        return 0.0
-
-    def get_tachometer_data(self):
-        """Get all tachometer data"""
-        return self.tachometer_data.copy()
-
     def emergency_stop(self):
-        """Emergency stop function - sets all motion controls to safe values"""
+        """Emergency stop - sets all motion controls to safe values"""
         self.set_throttle(0)
-        self.set_brake(255)  # Maximum brake
-        self.set_steer(127)  # Center steering (same as RF remote)
-        self.set_winch_state(WinchState.WinchNeutral)  # Standard neutral
+        self.set_brake(255)
+        self.set_steer(127)
+        self.set_winch_state(WinchState.WinchNeutral)
         log.warn("EMERGENCY STOP ACTIVATED")
 
     def is_system_ready(self):
@@ -478,159 +421,79 @@ class MTTCanDriver:
         }
 
     def set_deadman_switch(self, pressed=True):
-        """
-        Set deadman switch state based on real RF remote behavior
-        
-        From RF remote logs:
-        - Deadman NOT pressed: Global switches = 0x60 (bit 3=0)
-        - Deadman pressed: Global switches = 0x68 (bit 3=1)
-        
-        Bit 3 (0x08) controls deadman switch:
-        - 0 = not pressed (idle state)
-        - 1 = pressed (active state)
-        """
-        if pressed:
-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000  # Set bit 3 (0x08)
-        else:
-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3 (0x08)
-        
-        # Send frame with updated state
-        self.send_can_frame()
+        """Set deadman switch state"""
+        with self.frame_lock:
+            if pressed:
+                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000  # Set bit 3
+            else:
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
 
     # --- Control Methods ---
     def set_steer(self, steer_value):
+        """Set steering value (0-255, 127 is center)"""
         if not isinstance(steer_value, int):
             log.error(f"steer_value is not an integer: {steer_value}")
             return
 
-        # out of bound values are set to the closest bound
-        # TODO: ignore out of bound values instead
-        if steer_value > 255:
-            log.warning(f"out of bound value {steer_value} for steer_value")
-            steer_value = 255
-
-        if steer_value < 0:
-            log.warning(f"out of bound value {steer_value} for steer_value")
-            steer_value = 0
-
-        if steer_value >= 0 and steer_value <= 255:
+        steer_value = max(0, min(255, steer_value))
+        with self.frame_lock:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
-            # Send frame with updated state
-            self.send_can_frame()
 
     def set_throttle(self, throttle_value):
+        """Set throttle value (0-230)"""
         if not isinstance(throttle_value, int):
             log.error(f"throttle_value is not an integer: {throttle_value}")
             return
 
-        # TODO: ignore out of bound values instead
-        if throttle_value > 230:
-            log.warning(f"out of bound value {throttle_value} for throttle_value")
-            throttle_value = 230
-
-        if throttle_value < 0:
-            log.warning(f"out of bound value {throttle_value} for throttle_value")
-            throttle_value = 0
-
-        if throttle_value >= 0 and throttle_value <= 230:
+        throttle_value = max(0, min(230, throttle_value))
+        with self.frame_lock:
             self.throttle_value = throttle_value
             self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
-            # Send frame with updated state
-            self.send_can_frame()
 
     def set_brake(self, brake_value):
+        """Set brake value (0-255)"""
         if not isinstance(brake_value, int):
             log.error(f"brake_value is not an integer: {brake_value}")
             return
             
-        if brake_value > 255:
-            log.warning(f"out of bound value {brake_value} for brake_value")
-            brake_value = 255
-
-        if brake_value < 0:
-            log.warning(f"out of bound value {brake_value} for brake_value")
-            brake_value = 0
-
-        if brake_value >= 0 and brake_value <= 255:
+        brake_value = max(0, min(255, brake_value))
+        with self.frame_lock:
             self.brake_value = brake_value
             self.can_array[MTT_ANALOG_BRAKE] = brake_value
-            # Send frame with updated state
-            self.send_can_frame()
 
     def set_winch_state(self, winch_state):
-        """
-        Set the winch state for the next CAN frame. Always returns to neutral (0x7F) after IN/OUT, matching RF remote idle behavior.
-        """
-        with self.winch_timer_lock:
-            # Cancel any existing timer
-            if self.winch_timer is not None:
-                self.winch_timer.cancel()
-                self.winch_timer = None
-            
-            if winch_state == WinchState.WinchNeutral:
+        """Set winch state - holds the state until explicitly changed"""
+        if winch_state == WinchState.WinchNeutral:
+            with self.frame_lock:
                 self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchNeutral.value
                 self.winch_state = WinchState.WinchNeutral
-                # Send frame with updated state
-                self.send_can_frame()
-            elif winch_state == WinchState.WinchIn:
+                    
+        elif winch_state == WinchState.WinchIn:
+            with self.frame_lock:
                 self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchIn.value
                 self.winch_state = WinchState.WinchIn
-                # Send frame with winch in
-                self.send_can_frame()
-                # Schedule return to neutral after 50ms
-                self.winch_timer = threading.Timer(0.05, self._winch_auto_neutral)
-                self.winch_timer.start()
-            elif winch_state == WinchState.WinchOut:
+                    
+        elif winch_state == WinchState.WinchOut:
+            with self.frame_lock:
                 self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchOut.value
                 self.winch_state = WinchState.WinchOut
-                # Send frame with winch out
-                self.send_can_frame()
-                # Schedule return to neutral after 50ms
-                self.winch_timer = threading.Timer(0.05, self._winch_auto_neutral)
-                self.winch_timer.start()
-            else:
-                log.error(f"invalid value for winch_state: {winch_state}")
-                return
+                    
+        else:
+            log.error(f"invalid value for winch_state: {winch_state}")
+            return
     
-    def _winch_auto_neutral(self):
-        """Internal method to automatically return winch to neutral (called by timer)"""
-        with self.winch_timer_lock:
-            if self.winch_timer is not None:
-                self.winch_timer = None
-                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchNeutral.value
-                self.winch_state = WinchState.WinchNeutral
-                self.send_can_frame()
-                log.debug("Winch auto-returned to neutral")
-
     def set_security_switch(self, switch_value):
-        """
-        CRITICAL: Security switch must be unlocked for system to function
-        
-        From CANBus_Specification.md v1.1:
-        void MTT_SetSecuritySwitch(uint8_t SwitchValue)
-        - MTT_DEF_SAFETY_LOCKED (0x00): MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] &= 0b01111111
-        - MTT_DEF_SAFETY_UNLOCKED (0x01): MttControl.CAN_Array[MTT_SWITCHES_GLOBAL] |= 0b10000000
-        
-        Bit 7 (0x80) controls security switch:
-        - 0 = locked (system cannot function)
-        - 1 = unlocked (system can function)
-        
-        Real-world behavior from RF remote logs:
-        - Security locked: Global switches = 0x60 (bit 7=0)
-        - Security unlocked: Global switches = 0x68 (bit 7=0, but bit 3=1 for deadman)
-        """
+        """Set security switch state"""
         if switch_value == SecuritySwitchState.SafetyLocked:
-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7 (0x80)
-            self.security_switch_state = SecuritySwitchState.SafetyLocked
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7
+                self.security_switch_state = SecuritySwitchState.SafetyLocked
 
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7 (0x80)
-            self.security_switch_state = SecuritySwitchState.SafetyUnlocked
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
+                self.security_switch_state = SecuritySwitchState.SafetyUnlocked
 
         else:
             log.error(f"invalid value for switch_value: {switch_value}")
@@ -638,21 +501,18 @@ class MTTCanDriver:
 
 
     def set_direction(self, direction):
-        """Set vehicle direction and track for odometry (INVERTED: Forward/Reverse logic swapped)"""
-        # Inverted logic: Forward sets reverse bit, Reverse clears it
+        """Set vehicle direction"""
         if direction == DirectionState.Forward:
-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000  # Set bit 5 (reverse)
-            self.direction_state = DirectionState.Forward
-            self.current_direction = DirectionState.Forward  # Track for odometry
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000  # Set bit 5
+                self.direction_state = DirectionState.Forward
+                self.current_direction = DirectionState.Forward
 
         elif direction == DirectionState.Reverse:
-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111  # Clear bit 5 (forward)
-            self.direction_state = DirectionState.Reverse
-            self.current_direction = DirectionState.Reverse  # Track for odometry
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111  # Clear bit 5
+                self.direction_state = DirectionState.Reverse
+                self.current_direction = DirectionState.Reverse
 
         else:
             log.error(f"invalid value for direction: {direction}")
@@ -660,141 +520,68 @@ class MTTCanDriver:
 
 
     def set_light_state(self, light_state):
-        """
-        Set light state based on real RF remote behavior
-        
-        From RF remote logs:
-        - Light OFF: Global switches = 0x68 (bit 6=1)
-        - Light ON: Global switches = 0x28 (bit 6=0)
-        
-        Note: The behavior appears inverted from spec - bit 6=1 means light OFF
-        """
+        """Set light state"""
         if light_state == LightState.Off:
-            self.light_state = LightState.Off
-            self.can_array[MTT_SWITCHES_GLOBAL] |= 0b01000000  # Set bit 6 (light OFF)
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.light_state = LightState.Off
+                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b01000000  # Set bit 6
 
         elif light_state == LightState.On:
-            self.light_state = LightState.On
-            self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111  # Clear bit 6 (light ON)
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.light_state = LightState.On
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111  # Clear bit 6
         else:
             log.error(f"invalid value for light_state: {light_state}")
             return
 
 
     def set_direction_mode(self, direction_mode):
+        """Set direction mode"""
         if direction_mode == DirectionMode.CloseLoop:
-            self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
-            self.direction_mode = DirectionMode.CloseLoop
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
+                self.direction_mode = DirectionMode.CloseLoop
 
         elif direction_mode == DirectionMode.OpenLoop:
-            self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
-            self.direction_mode = DirectionMode.OpenLoop
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
+                self.direction_mode = DirectionMode.OpenLoop
         else:
             log.error(f"invalid value for direction_mode: {direction_mode}")
             return
 
 
     def set_vehicle_type(self, vehicle_type):
+        """Set vehicle type"""
         if vehicle_type == VehicleType.VehicleSingleTrack:
-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
-            self.vehicle_type = VehicleType.VehicleSingleTrack
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+                self.vehicle_type = VehicleType.VehicleSingleTrack
 
         elif vehicle_type == VehicleType.VehicleSbsLeft:
-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
-            self.vehicle_type = VehicleType.VehicleSbsLeft
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+                self.vehicle_type = VehicleType.VehicleSbsLeft
              
         elif vehicle_type == VehicleType.VehicleSbsRight:
-            self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
-            self.vehicle_type = VehicleType.VehicleSbsRight
-            # Send frame with updated state
-            self.send_can_frame()
+            with self.frame_lock:
+                self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
+                self.vehicle_type = VehicleType.VehicleSbsRight
 
         else:
             log.error(f"invalid value for vehicle_type: {vehicle_type}")
             return
 
-    def test_real_world_behavior(self):
-        """
-        Test method that demonstrates all real-world behaviors matching RF remote logs
-        
-        This method sends the exact same CAN frames as observed from the RF remote:
-        - Idle (deadman NOT pressed): 00 60 19 7F 29 7F 00 7F
-        - Idle (deadman pressed):  00 68 19 7F 29 7F 00 7F
-        - Light toggle: 00 28 19 7F 29 7F 00 7F
-        - Winch in: 00 68 19 E5 29 7F 00 7F
-        - Winch out: 00 68 19 18 29 7F 00 7F
-        """
-        log.info("Testing real-world behavior patterns...")
-        
-        # Test 1: Idle with deadman NOT pressed (RF remote idle)
-        log.info("Test 1: Idle with deadman NOT pressed")
-        self.set_deadman_switch(pressed=False)
-        time.sleep(0.1)
-        
-        # Test 2: Idle with deadman pressed (RF remote active idle)
-        log.info("Test 2: Idle with deadman pressed")
-        self.set_deadman_switch(pressed=True)
-        time.sleep(0.1)
-        
-        # Test 3: Light toggle action
-        log.info("Test 3: Light toggle")
-        self.set_light_state(LightState.On)  # This should send 0x28 for global switches
-        time.sleep(0.1)
-        self.set_light_state(LightState.Off)  # This should send 0x68 for global switches
-        time.sleep(0.1)
-        
-        # Test 4: Winch in action
-        log.info("Test 4: Winch in")
-        self.set_winch_state(WinchState.WinchIn)  # Should send 0xE5 for winch, then auto-neutral
-        time.sleep(0.2)
-        
-        # Test 5: Winch out action
-        log.info("Test 5: Winch out")
-        self.set_winch_state(WinchState.WinchOut)  # Should send 0x18 for winch, then auto-neutral
-        time.sleep(0.2)
-        
-        # Test 6: Throttle variation
-        log.info("Test 6: Throttle variation")
-        self.set_throttle(50)  # Should change from 0x19 to 0x32
-        time.sleep(0.1)
-        self.set_throttle(25)  # Back to RF remote default 0x19
-        time.sleep(0.1)
-        
-        # Test 7: Brake variation
-        log.info("Test 7: Brake variation")
-        self.set_brake(100)  # Should change from 0x29 to 0x64
-        time.sleep(0.1)
-        self.set_brake(41)  # Back to RF remote default 0x29
-        time.sleep(0.1)
-        
-        log.info("Real-world behavior test completed")
-
     def cleanup(self):
         """Clean up resources before shutting down"""
-        # Cancel any pending winch timer
-        with self.winch_timer_lock:
-            if self.winch_timer is not None:
-                self.winch_timer.cancel()
-                self.winch_timer = None
+        self.sender_running = False
+        if hasattr(self, 'sender_thread'):
+            self.sender_thread.join(timeout=1.0)
         
-        # Stop CAN listener
         self.can_listener_running = False
         if hasattr(self, 'can_listener_thread'):
             self.can_listener_thread.join(timeout=1.0)
         
-        # Close CAN bus
         if hasattr(self, 'bus') and self.bus:
             self.bus.shutdown()
             log.info("CAN driver cleaned up")
@@ -802,4 +589,25 @@ class MTTCanDriver:
     def get_current_frame_hex(self):
         """Get the current CAN frame as hex string for debugging"""
         return " ".join([f"{b:02X}" for b in self.can_array])
+
+    def _sender_loop(self):
+        """Continuously sends keepalive frames at 20Hz to maintain communication"""
+        while self.sender_running:
+            try:
+                with self.frame_lock:
+                    # Send current frame state as keepalive
+                    frame_data = self.can_array.copy()
+                
+                message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
+                self.bus.send(message)
+                log.debug(f"Keepalive frame: {' '.join([f'{b:02X}' for b in frame_data])}")
+                
+            except can.CanError as e:
+                if self.sender_running:
+                    log.error(f"Keepalive send failed: {e}")
+            except Exception as e:
+                if self.sender_running:
+                    log.error(f"Keepalive error: {e}")
+            
+            time.sleep(0.05)  # Send at 20 Hz (50ms interval) for reliable keepalive
 
