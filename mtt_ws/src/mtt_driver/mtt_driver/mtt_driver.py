@@ -121,8 +121,8 @@ class MttDriver(Node):
         self.set_direction(DirectionState.Forward)
         # self.set_direction(DirectionState.Reverse)
         
+        # self.set_light_state(LightState.Off)
         self.set_light_state(LightState.On)
-        # self.set_light_state(LightState.On)
 
         # MTT_ANALOG_THROTTLE
         self.set_throttle(0)
