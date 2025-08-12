@@ -14,6 +14,8 @@ install(
   rviz
   meshes
   launch
+  models
+  urdf
   DESTINATION share/${PROJECT_NAME}/
 )
 

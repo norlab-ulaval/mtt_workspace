@@ -13,15 +13,12 @@
   <test_depend>ament_lint_common</test_depend>
 
   <depend>urdf</depend>
-  <depend>xacro</depend>
   <depend>ros2_control</depend>
 
-  <!-- for nav2 tutorial might be kept or deleted-->
-  <exec_depend>joint_state_publisher</exec_depend>
-  <exec_depend>joint_state_publisher_gui</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>rviz</exec_depend>
-
+  <exec_depend>robot_state_publisher</exec_depend>  
+  <exec_depend>sdformat_urdf</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  
   <export>
     <build_type>ament_cmake</build_type>
   </export>
