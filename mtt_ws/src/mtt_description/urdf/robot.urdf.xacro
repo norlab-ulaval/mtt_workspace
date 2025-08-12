@@ -1427,10 +1427,88 @@
     </gazebo>
 
     
-    <gazebo>
-        <plugin filename="libgazebo_ros2_control.so" name="gazebo_ros2_control">
-            <parameters>$(find the_mtt_bringup)/config/control.yaml</parameters>
-        </plugin>
-    </gazebo>
+<!-- LiDAR Link -->
+<link name="lidar_link">
+  <pose>0 0 0.2 0 0 0</pose>
+
+  <visual>
+    <geometry>
+      <cylinder length="0.05" radius="0.02"/>
+    </geometry>
+    <material name="green">
+      <color rgba="0 1 0 1"/>
+    </material>
+  </visual>
+
+  <collision>
+    <geometry>
+      <cylinder length="0.05" radius="0.02"/>
+    </geometry>
+  </collision>
+
+  <inertial>
+    <mass value="0.1"/>
+    <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+             iyy="0.0001" iyz="0.0"
+             izz="0.0001"/>
+  </inertial>
+</link>
+
+<!-- Joint to attach LiDAR to base_footprint -->
+<joint name="lidar_joint" type="fixed">
+  <parent link="base_footprint"/>
+  <child link="lidar_link"/>
+  <origin xyz="0 0 0.8" rpy="0 0 0"/>
+</joint>
+
+<!-- Gazebo sensor plugin -->
+<gazebo reference="lidar_link">
+  <sensor name="lidar" type="gpu_lidar">
+    <pose>0 0 0 0 0 0</pose>
+    <update_rate>10</update_rate>
+    <ray>
+      <scan>
+        <horizontal>
+          <samples>360</samples>
+          <resolution>1.0</resolution>
+          <min_angle>-3.14</min_angle>
+          <max_angle>3.14</max_angle>
+        </horizontal>
+      </scan>
+      <range>
+        <min>0.1</min>
+        <max>30.0</max>
+      </range>
+    </ray>
+    <plugin name="gz_ros_lidar" filename="gz-ros2-laser-scan-system">
+        <ros_topic>/scan</ros_topic>
+        <ros_type>sensor_msgs/msg/LaserScan</ros_type>
+        <gz_type>gz.msgs.LaserScan</gz_type>
+        <frame_name>lidar_link</frame_name>
+    </plugin>
+  </sensor>
+</gazebo>
+
+
+<gazebo>
+  <plugin name="p3d_base_odom" filename="libgazebo_ros_p3d.so">
+    <ros>
+      <remapping>odom:=/odom</remapping>
+    </ros>
+    <robotNamespace>/</robotNamespace>
+    <bodyName>base_link</bodyName>   <!-- Or base_footprint, if that’s your main body -->
+    <frameName>odom</frameName>
+    <updateRate>50.0</updateRate>
+    <gaussianNoise>0.01</gaussianNoise>
+    <alwaysOn>true</alwaysOn>
+  </plugin>
+
+  <plugin
+    filename="gz-sim-pose-publisher-system"
+    name="gz::sim::systems::PosePublisher">
+  <publish_model_pose>true</publish_model_pose>
+</plugin>
+
+</gazebo>
 
 </robot>
