@@ -93,12 +93,6 @@
             <max>30</max>
           </range>
         </ray>
-        <plugin name='gz_ros_lidar' filename='gz-ros2-laser-scan-system'>
-          <ros_topic>/scan</ros_topic>
-          <ros_type>sensor_msgs/msg/LaserScan</ros_type>
-          <gz_type>gz.msgs.LaserScan</gz_type>
-          <frame_name>lidar_link</frame_name>
-        </plugin>
         <pose>0 0 0.80000000000000004 0 0 0</pose>
       </sensor>
     </link>
@@ -1733,16 +1727,8 @@
         </material>
       </visual>
     </link>
-    <plugin name='p3d_base_odom' filename='libgazebo_ros_p3d.so'>
-      <ros>
-        <remapping>odom:=/odom</remapping>
-      </ros>
-      <robotNamespace>/</robotNamespace>
-      <bodyName>base_link</bodyName>
-      <frameName>odom</frameName>
-      <updateRate>50.0</updateRate>
-      <gaussianNoise>0.01</gaussianNoise>
-      <alwaysOn>true</alwaysOn>
+    <plugin name='gz_ros2_control::GazeboSimROS2ControlPlugin' filename='gz_ros2_control-system'>
+      <parameters>$(find mtt_bringup)/config/control_config.yaml</parameters>
     </plugin>
     <plugin name='gz::sim::systems::PosePublisher' filename='gz-sim-pose-publisher-system'>
       <publish_model_pose>true</publish_model_pose>

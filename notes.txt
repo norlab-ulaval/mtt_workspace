@@ -3,3 +3,20 @@ sudo ip link set can0 up type can bitrate 250000
 candump can0
 candump can0 -xct z -n 10
 [0, 64, 0, 127, 0, 128, 0, 0]
+
+
+gz topic --echo --topic /world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan
+
+gz topic --list
+
+gz sdf -p robot.urdf.xacro > robot.sdf
+
+
+<parameters>file://control_config.yaml</parameters>
+<plugin name="gz_ros2_control::GazeboSimROS2ControlPlugin" filename="gz_ros2_control-system">
+
+
+ros2 control list_controllers
+
+ros2 topic pub /forward_position_controller/commands std_msgs/msg/Float64MultiArray "data: [-0.5]"
+ros2 topic pub /wheel_group_controller/commands std_msgs/msg/Float64MultiArray "data: [-2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5]"

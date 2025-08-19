@@ -1195,10 +1195,10 @@
     </physics>
     </joint>
 
-    <ros2_control name="RobotSystem" type="system">
+    <ros2_control name="RobotController" type="system">
 
         <hardware>
-          <plugin>gazebo_ros2_control/GazeboSystem</plugin> 
+          <plugin>gz_ros2_control/GazeboSimSystem</plugin>
         </hardware>
 
         <joint name="1_continuous">
@@ -1314,6 +1314,7 @@
                 <param name="max">10</param>
             </command_interface>
             <state_interface name="position"/>
+            <state_interface name="velocity"/>
         </joint> 
             
         <joint name="14_continuous">
@@ -1407,7 +1408,6 @@
     <xacro:default_transmission joint_name="18_continuous"/>
     <xacro:default_transmission joint_name="19_continuous"/>
     <xacro:default_transmission joint_name="20_continuous"/>
-    <xacro:default_transmission joint_name="20_continuous"/>
     <xacro:default_transmission joint_name="yaw"/>
 
     <gazebo reference="MTT_body">
@@ -1461,6 +1461,12 @@
   <origin xyz="0 0 0.8" rpy="0 0 0"/>
 </joint>
 
+<gazebo>
+    <plugin filename="gz_ros2_control-system" name="gz_ros2_control::GazeboSimROS2ControlPlugin"> 
+    <parameters> $(find mtt_bringup)/config/control_config.yaml</parameters>
+</plugin>
+</gazebo>
+
 <!-- Gazebo sensor plugin -->
 <gazebo reference="lidar_link">
   <sensor name="lidar" type="gpu_lidar">
@@ -1480,29 +1486,12 @@
         <max>30.0</max>
       </range>
     </ray>
-    <plugin name="gz_ros_lidar" filename="gz-ros2-laser-scan-system">
-        <ros_topic>/scan</ros_topic>
-        <ros_type>sensor_msgs/msg/LaserScan</ros_type>
-        <gz_type>gz.msgs.LaserScan</gz_type>
-        <frame_name>lidar_link</frame_name>
-    </plugin>
+
   </sensor>
 </gazebo>
 
 
 <gazebo>
-  <plugin name="p3d_base_odom" filename="libgazebo_ros_p3d.so">
-    <ros>
-      <remapping>odom:=/odom</remapping>
-    </ros>
-    <robotNamespace>/</robotNamespace>
-    <bodyName>base_link</bodyName>   <!-- Or base_footprint, if that’s your main body -->
-    <frameName>odom</frameName>
-    <updateRate>50.0</updateRate>
-    <gaussianNoise>0.01</gaussianNoise>
-    <alwaysOn>true</alwaysOn>
-  </plugin>
-
   <plugin
     filename="gz-sim-pose-publisher-system"
     name="gz::sim::systems::PosePublisher">
