@@ -17,7 +17,6 @@ install(
   DIRECTORY
   launch
   config
-  tutorial
   DESTINATION share/${PROJECT_NAME}/
 )
 
