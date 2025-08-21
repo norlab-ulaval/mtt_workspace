@@ -9,7 +9,7 @@ import time
 import socket
 import fcntl
 import struct
-from mtt_interfaces.srv import SetBrakeSrv, SetDirectionModeSrv, SetDirectionSrv, SetLightStateSrv, SetSecuritySwitchSrv, SetSteerSrv, SetThrottleSrv, SetVehiculeTypeSrv, SetWinchStateSrv
+# from mtt_interfaces.srv import SetBrakeSrv, SetDirectionModeSrv, SetDirectionSrv, SetLightStateSrv, SetSecuritySwitchSrv, SetSteerSrv, SetThrottleSrv, SetVehiculeTypeSrv, SetWinchStateSrv
 
 
 MTT_SWITCHES_VEHICLE_TYPE = 0
@@ -25,8 +25,8 @@ class DirectionMode(Enum):
     CloseLoop = 1
 
 class DirectionState(Enum):
-    Reverse = 0x00
-    Forward = 0x01
+    Forward = 0x00
+    Reverse = 0x01
 
 class WinchState(Enum):
     WinchNeutral = 0x7f # 127
@@ -119,9 +119,9 @@ class MttDriver(Node):
         # self.set_security_switch(SecuritySwitchState.SafetyUnlocked)
 
         self.set_direction(DirectionState.Forward)
-        # self.set_direction(DirectionState.Reverse)
+        # self.set_direction(DirectionState.Reverse) 
         
-        self.set_light_state(LightState.On)
+        self.set_light_state(LightState.Off)
         # self.set_light_state(LightState.On)
 
         # MTT_ANALOG_THROTTLE
@@ -139,8 +139,8 @@ class MttDriver(Node):
         self.set_steer(128)
 
         # MTT_SWITCHES_DIRECTION_MODE
-        self.set_direction_mode(DirectionMode.OpenLoop)
-        # self.set_direction_mode(DirectionMode.CloseLoop)
+        # self.set_direction_mode(DirectionMode.OpenLoop)
+        self.set_direction_mode(DirectionMode.CloseLoop)
 
         self.send_frame_period = 0.1
         self.count = 0
@@ -148,15 +148,15 @@ class MttDriver(Node):
         self.timer = self.create_timer(self.send_frame_period, self.send_can_frame)
 
         # Some of these services might be deleted in the future to limit access to some low level functionalities
-        self.set_vehicle_type_srv = self.create_service(SetVehiculeTypeSrv, 'mtt_driver/set_vehicule_type', self.set_vehicle_type_service)
-        self.set_security_switch_srv = self.create_service(SetSecuritySwitchSrv, 'mtt_driver/set_security_switch_service', self.set_security_switch_service)
-        self.set_direction_srv = self.create_service(SetDirectionSrv, 'mtt_driver/set_direction_service', self.set_direction_service)
-        self.set_light_state_srv = self.create_service(SetLightStateSrv, 'mtt_driver/set_light_state_service', self.set_light_state_service)
-        self.set_throttle_srv = self.create_service(SetThrottleSrv, 'mtt_driver/set_throttle_service', self.set_throttle_service)
-        self.set_winch_state_srv = self.create_service(SetWinchStateSrv, 'mtt_driver/set_winch_state_service', self.set_winch_state_service)
-        self.set_brake_srv = self.create_service(SetBrakeSrv, 'mtt_driver/set_brake_service', self.set_brake_service)
-        self.set_steer_srv = self.create_service(SetSteerSrv, 'mtt_driver/set_steer_service', self.set_steer_service)
-        self.set_direction_mode_srv = self.create_service(SetDirectionModeSrv, 'mtt_driver/set_direction_mode_service', self.set_direction_mode_service)
+        # self.set_vehicle_type_srv = self.create_service(SetVehiculeTypeSrv, 'mtt_driver/set_vehicule_type', self.set_vehicle_type_service)
+        # self.set_security_switch_srv = self.create_service(SetSecuritySwitchSrv, 'mtt_driver/set_security_switch_service', self.set_security_switch_service)
+        # self.set_direction_srv = self.create_service(SetDirectionSrv, 'mtt_driver/set_direction_service', self.set_direction_service)
+        # self.set_light_state_srv = self.create_service(SetLightStateSrv, 'mtt_driver/set_light_state_service', self.set_light_state_service)
+        # self.set_throttle_srv = self.create_service(SetThrottleSrv, 'mtt_driver/set_throttle_service', self.set_throttle_service)
+        # self.set_winch_state_srv = self.create_service(SetWinchStateSrv, 'mtt_driver/set_winch_state_service', self.set_winch_state_service)
+        # self.set_brake_srv = self.create_service(SetBrakeSrv, 'mtt_driver/set_brake_service', self.set_brake_service)
+        # self.set_steer_srv = self.create_service(SetSteerSrv, 'mtt_driver/set_steer_service', self.set_steer_service)
+        # self.set_direction_mode_srv = self.create_service(SetDirectionModeSrv, 'mtt_driver/set_direction_mode_service', self.set_direction_mode_service)
 
 
 
