@@ -71,11 +71,14 @@ def generate_launch_description():
                 # Lidar Scan
                 '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
                 '/model/mtt_robot/pose@geometry_msgs/msg/Pose[gz.msgs.Pose',
+                # Ground-truth Odometry from OdometryPublisher (gz.msgs.Odometry <-> nav_msgs/Odometry)
+                '/model/mtt_robot/odometry@nav_msgs/msg/Odometry[gz.msgs.Odometry',
 
                 # ROS remappings
                 '--ros-args', '-r',
                 '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan:=/gz_scan',
                 '-r', '/model/mtt_robot/pose:=/gz_pose',
+                '-r', '/model/mtt_robot/odometry:=/ground_truth_odom',
 
                 # # If only one remap this form works:
                 # '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
@@ -90,12 +93,7 @@ def generate_launch_description():
             executable='scan_frame_remapper.py',
             name='scan_frame_remapper',
             output='screen')
-        
-        odom_publisher_node = Node(
-            package='mtt_bringup',
-            executable='odom_publisher_simul.py',
-            name='odom_publisher_simul',
-            output='screen')
+    # Removed custom odom_publisher_simul: now using Gazebo OdometryPublisher plugin bridged above.
 
     else:
         bridge = Node(
@@ -148,7 +146,14 @@ def generate_launch_description():
 
     if mode == "mtt":
         ld.add_action(remapper_node)
-        ld.add_action(odom_publisher_node)
+        ld.add_action(Node(
+            package='mtt_bringup',
+            executable='ground_truth_odom_tf_broadcaster.py',
+            name='ground_truth_odom_tf_broadcaster',
+            output='screen',
+            parameters=[{'odom_topic': '/ground_truth_odom', 'odom_frame': 'odom', 'base_frame': 'base_link'}]
+        ))
+    # Note: we republish to /odom inside the broadcaster node to avoid external dependency on topic_tools
 
         
     return ld

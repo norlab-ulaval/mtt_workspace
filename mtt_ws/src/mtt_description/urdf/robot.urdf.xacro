@@ -1,5 +1,5 @@
 <?xml version="1.0"?>
-<robot name="onshape"  xmlns:xacro="https://www.ros.org/wiki/xacro">
+<robot name="mtt_robot"  xmlns:xacro="https://www.ros.org/wiki/xacro">
 
     <xacro:macro name="default_transmission" params="joint_name">
         <transmission name="transmission_${joint_name}">
@@ -11,7 +11,14 @@
         </transmission>
     </xacro:macro>
 
-    <link name="base_footprint"/>
+        <link name="base_footprint"/>
+        <!-- Add a base_link alias (Nav2 expects base_link). base_link coincides with base_footprint origin. -->
+        <link name="base_link"/>
+        <joint name="base_link_joint" type="fixed">
+            <parent link="base_footprint"/>
+            <child link="base_link"/>
+            <origin xyz="0 0 0" rpy="0 0 0"/>
+        </joint>
 
     <link name="MTT_body">
     <visual>
@@ -1498,6 +1505,20 @@
   <publish_model_pose>true</publish_model_pose>
 </plugin>
 
+</gazebo>
+
+<!-- Ground-truth odometry publisher -->
+<gazebo>
+        <plugin filename="gz-sim-odometry-publisher-system" name="gz::sim::systems::OdometryPublisher">
+            <odom_frame>odom</odom_frame>
+            <!-- Publish odom->base_link -->
+            <robot_base_frame>base_link</robot_base_frame>
+        <odom_publish_frequency>50</odom_publish_frequency>
+        <dimensions>3</dimensions>
+        <xyz_offset>0 0 0</xyz_offset>
+        <rpy_offset>0 0 0</rpy_offset>
+        <gaussian_noise>0</gaussian_noise>
+    </plugin>
 </gazebo>
 
 </robot>

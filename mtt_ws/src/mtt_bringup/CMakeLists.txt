@@ -23,8 +23,8 @@ install(
 
 install(PROGRAMS
   ${PROJECT_NAME}/scan_frame_remapper.py
-  ${PROJECT_NAME}/odom_publisher_simul.py
   ${PROJECT_NAME}/mtt_controller_interface.py
   ${PROJECT_NAME}/mtt_joy_mapper.py
+  ${PROJECT_NAME}/ground_truth_odom_tf_broadcaster.py
   DESTINATION lib/${PROJECT_NAME})
 ament_package()

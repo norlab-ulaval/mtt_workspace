@@ -2,6 +2,7 @@ import os
 import tempfile
 
 from launch import LaunchDescription
+import logging
 from launch.actions import (
     IncludeLaunchDescription,
     DeclareLaunchArgument,
@@ -20,6 +21,9 @@ from launch.substitutions import LaunchConfiguration, PythonExpression
 
 
 def generate_launch_description():
+    # reduce Python-level logging verbosity from INFO to WARN to declutter launch output
+    logging.getLogger().setLevel(logging.WARN)
+
     # mode = "turtle"
     mode = "mtt"
 
