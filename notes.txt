@@ -20,3 +20,7 @@ ros2 control list_controllers
 
 ros2 topic pub /forward_position_controller/commands std_msgs/msg/Float64MultiArray "data: [-0.5]"
 ros2 topic pub /wheel_group_controller/commands std_msgs/msg/Float64MultiArray "data: [-2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5, -2.5]"
+
+
+ros2 launch mtt_bringup mtt_simulation.launch.py
+ros2 launch mtt_bringup mtt_teleop_controller.launch.py

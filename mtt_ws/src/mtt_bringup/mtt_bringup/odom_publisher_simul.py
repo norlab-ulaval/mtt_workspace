@@ -19,10 +19,12 @@ class OdomPublisher(Node):
         self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
         self.sub = self.create_subscription(Pose, '/gz_pose', self.callback, 10)
 
+        self.tf_broadcaster = TransformBroadcaster(self)
+
+
     def callback(self, pose_msg):
 
         current_time = self.get_clock().now().to_msg()
-        self.tf_broadcaster = TransformBroadcaster(self)
 
         # Publish TF from odom -> base_link
         t = TransformStamped()

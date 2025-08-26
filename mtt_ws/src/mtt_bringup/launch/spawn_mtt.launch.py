@@ -68,6 +68,7 @@ def generate_launch_description():
                 }
             ],
             arguments=[
+                '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
                 # Lidar Scan
                 '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
                 '/model/mtt_robot/pose@geometry_msgs/msg/Pose[gz.msgs.Pose',

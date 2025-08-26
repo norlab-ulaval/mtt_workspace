@@ -36,6 +36,8 @@ class JoyMapper(Node):
         self.last_wheel_speed_multiplier_command = 0
         self.yaw_speed_multiplier = 1
         self.last_yaw_speed_multiplier_command = 0
+        self.wheel_speed_threshold = 0.2
+        self.yaw_speed_threshold = 0.2
 
 
 
@@ -196,6 +198,16 @@ class JoyMapper(Node):
         msg.buttons[11]
 
         # The following part could eventually be a function on its own
+
+        # ignoring small values to prevent unwillingly moving the robot 
+        # in a direction due joystick not being perfectly oriented on an axis
+        if abs(wheel_speed) < self.wheel_speed_threshold:
+            wheel_speed = 0.0
+
+        if abs(yaw_speed) < self.yaw_speed_threshold:
+            yaw_speed = 0.0
+
+
         cmd_vel_msg = Twist()
 
         if nav_deadman_switch:

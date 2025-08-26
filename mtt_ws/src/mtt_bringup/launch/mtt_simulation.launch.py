@@ -17,6 +17,7 @@ from launch_ros.actions import Node
 from launch.event_handlers import OnShutdown, OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration, PythonExpression
+import xacro
 
 
 def generate_launch_description():
@@ -186,10 +187,10 @@ def generate_launch_description():
 
     
     if mode == "mtt":
-        # urdf = os.path.join(sim_dir, 'urdf', 'turtlebot3_waffle.urdf')
         urdf = os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro')
-        with open(urdf, 'r') as infp:
-            robot_description = infp.read()
+
+        robot_description = xacro.process_file(urdf).toxml()
+
     else:
         urdf = os.path.join(sim_dir, 'urdf', 'turtlebot3_waffle.urdf')
         with open(urdf, 'r') as infp:
@@ -212,6 +213,7 @@ def generate_launch_description():
         remappings=remappings,
     )
     if mode == "mtt":
+        # not necessary when used with the controller_manager joint_state_broadcaster (launched in mtt_controller)
         joint_state_publisher_node = Node(
             package='joint_state_publisher',
             executable='joint_state_publisher',
@@ -391,7 +393,8 @@ def generate_launch_description():
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)
     if mode == "mtt":
-        ld.add_action(joint_state_publisher_node)
+        # ld.add_action(joint_state_publisher_node)
+        pass
 
     ld.add_action(rviz_cmd)
     # temp zone
