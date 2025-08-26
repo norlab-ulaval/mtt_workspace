@@ -30,7 +30,13 @@ RUN apt-get update -y && apt-get install -y \
     ssh \
     git \
     python3-pip \
-    python3-tk && \
+    python3-tk \
+    # Following packages are installed to accelerate container spin up
+    ros-${ROS_DISTRO}-ros2-control \
+    ros-${ROS_DISTRO}-gz-ros2-control \
+    ros-${ROS_DISTRO}-controller-manager \
+    ros-${ROS_DISTRO}-nav2-bringup \
+    ros-${ROS_DISTRO}-forward-command-controller && \
     rm -rf /var/lib/apt/lists/*
 
 RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash && source /home/ws/install/setup.bash" >> /home/$USERNAME/.bashrc
