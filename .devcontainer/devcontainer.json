@@ -84,30 +84,31 @@
         },
 
         // ROS
-        "ros.distro": "humble",
+        "ros.distro": "jazzy",
         "python.autoComplete.extraPaths": [
-          "/opt/ros/humble/lib/python3.10/site-packages",
-          "/opt/ros/humble/local/lib/python3.10/dist-packages"
+          "/opt/ros/jazzy/lib/python3.10/site-packages",
+          "/opt/ros/jazzy/local/lib/python3.10/dist-packages"
         ],
         "python.analysis.extraPaths": [
-          "/opt/ros/humble/lib/python3.10/site-packages",
-          "/opt/ros/humble/local/lib/python3.10/dist-packages"
+          "/opt/ros/jazzy/lib/python3.10/site-packages",
+          "/opt/ros/jazzy/local/lib/python3.10/dist-packages"
         ]
       }
     }
   },
   "containerEnv": {
-    "DISPLAY": "unix:0",
     "ROS_DOMAIN_ID": "42",
     "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
-    "SSH_AUTH_SOCK": "${localEnv:SSH_AUTH_SOCK}"
+    "SSH_AUTH_SOCK": "${localEnv:SSH_AUTH_SOCK}",
+    "DISPLAY": "${localEnv:DISPLAY}",
+		"WAYLAND_DISPLAY": "${localEnv:WAYLAND_DISPLAY}",  
+		"XDG_RUNTIME_DIR": "${localEnv:XDG_RUNTIME_DIR}",
+		"PULSE_SERVER": "${localEnv:PULSE_SERVER}"
   },
   "runArgs": [
     "--net=host",
     "--pid=host",
-    "--ipc=host",
-    "-e",
-    "DISPLAY=${env:DISPLAY}"
+    "--ipc=host"
   ],
 
   "mounts": [
