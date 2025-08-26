@@ -32,7 +32,7 @@ code .
 
 ![](documentations/img/vscode-opened-in-devcontainer.png)
 
-6. You can now try to launch the simulation
+6. You can now try to launch the simulation in a vscode terminal
 ```bash
 ros2 launch mtt_bringup mtt_bringup.launch.py
 ```
