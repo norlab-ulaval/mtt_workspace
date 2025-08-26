@@ -34,7 +34,7 @@ code .
 
 6. You can now try to launch the simulation in a vscode terminal
 ```bash
-ros2 launch mtt_bringup mtt_bringup.launch.py
+ros2 launch mtt_bringup mtt_simulation.launch.py
 ```
 
 7. If you want to rebuild the workspace, do Ctrl+Shift+B and select "colcon: Colcon Build with compile_commands"
