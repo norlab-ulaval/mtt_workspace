@@ -2,7 +2,10 @@ import launch
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.event_handlers import OnProcessStart
-from launch.actions import RegisterEventHandler
+from launch.actions import (
+    DeclareLaunchArgument,
+)
+
 import launch_ros
 import os
 import xacro
@@ -90,6 +93,7 @@ def generate_launch_description():
             "true"])
     
 
+    # TODO: put the one from mtt_simulation here instead
     # robot state publisher node
     robot_state_publisher_node = launch_ros.actions.Node(
         package='robot_state_publisher', 
@@ -157,14 +161,18 @@ def generate_launch_description():
     
     ld = launch.LaunchDescription()
     ld.add_action(declared_arguments[0])
+
+    # Only necessary when this launch is launched alone
+    # ld.add_action(robot_state_publisher_node)
+    ld.add_action(joint_state_broadcaster_spawner)
+
+
     # ld.add_action(gazebo)
     # ld.add_action(gazebo_headless)
     # ld.add_action(gazebo_bridge)
     # ld.add_action(gz_spawn_entity)
-    ld.add_action(robot_state_publisher_node)
     # ld.add_action(rviz_node)
     # ld.add_action(control_node)
-    ld.add_action(joint_state_broadcaster_spawner)
     ld.add_action(robot_controller_spawner)
     if mode == "mtt":
         ld.add_action(mtt_controller_interface)
