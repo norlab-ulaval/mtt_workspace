@@ -34,7 +34,7 @@
         "ranch-hand-robotics.rde-ros-2"
       ],
       "settings": {
-        "editor.formatOnSave": true,
+        "editor.formatOnSave": false,
         "editor.defaultFormatter": "esbenp.prettier-vscode",
         "files.exclude": {
           "**/build": true,
