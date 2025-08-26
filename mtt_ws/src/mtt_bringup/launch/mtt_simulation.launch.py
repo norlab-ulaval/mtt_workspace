@@ -232,8 +232,7 @@ def generate_launch_description():
     )
 
     model_path = os.path.join(
-    os.getenv('AMENT_PREFIX_PATH').split(':')[0],
-    '..', '..', 'src', 'mtt_description', 'models'
+        get_package_share_directory("mtt_description"), 'models'
     )
 
     model_path = os.path.abspath(model_path)
