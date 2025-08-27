@@ -97,7 +97,7 @@
     }
   },
   "containerEnv": {
-    "ROS_DOMAIN_ID": "42",
+    "ROS_DOMAIN_ID": "${localEnv:ROS_DOMAIN_ID}",
     "ROS_AUTOMATIC_DISCOVERY_RANGE": "LOCALHOST",
     "SSH_AUTH_SOCK": "${localEnv:SSH_AUTH_SOCK}",
     "DISPLAY": "${localEnv:DISPLAY}",
@@ -115,7 +115,8 @@
     "source=/tmp/.X11-unix,target=/tmp/.X11-unix,type=bind,consistency=cached",
     "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/mtt/.ssh,type=bind,consistency=cached", // To forward ssh agent and git properly, see https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials
-    "source=${localEnv:HOME}/.gitconfig,target=/home/mtt/.gitconfig,type=bind"
+    "source=${localEnv:HOME}/.gitconfig,target=/home/mtt/.gitconfig,type=bind",
+    "source=/run/user/1000,target=/run/user/1000,type=bind,consistency=cached"
   ],
   "onCreateCommand": ".devcontainer/on_create.bash",
   "updateContentCommand": ".devcontainer/on_update.bash"
