@@ -1,20 +1,20 @@
 <sdf version='1.11'>
   <model name='onshape'>
-    <link name='base_footprint'>
+    <link name='base_link'>
       <inertial>
-        <pose>-0.077863512481969974 -0.045475056286235993 0.30071250299806379 0 0 0</pose>
+        <pose>-0.077863512481969974 -0.045475056286235979 0.20077912524989591 0 0 0</pose>
         <mass>150.09999999999999</mass>
         <inertia>
-          <ixx>11.07325235560636</ixx>
+          <ixx>11.08423743932388</ixx>
           <ixy>-0.00035432081778363772</ixy>
-          <ixz>-0.0038902195773733439</ixz>
-          <iyy>58.294452096505921</iyy>
-          <iyz>-0.002272026378053571</iyz>
+          <ixz>-0.0046688547021935811</ixz>
+          <iyy>58.30543718022345</iyy>
+          <iyz>-0.002726776940915387</iyz>
           <izz>63.680913612779193</izz>
         </inertia>
       </inertial>
-      <collision name='base_footprint_fixed_joint_lump__MTT_body_collision'>
-        <pose>-0.0034808381178577409 -0.051022168970358453 0.59330103716210747 0 0 3.1415926535897931</pose>
+      <collision name='base_link_collision'>
+        <pose>-0.0034808381178577409 -0.051022168970358453 0.49330103716210749 0 0 3.1415926535897931</pose>
         <geometry>
           <mesh>
             <scale>1 1 1</scale>
@@ -30,7 +30,7 @@
           </friction>
         </surface>
       </collision>
-      <collision name='base_footprint_fixed_joint_lump__lidar_link_collision_1'>
+      <collision name='base_link_fixed_joint_lump__lidar_link_collision_1'>
         <pose>0 0 0.80000000000000004 0 0 0</pose>
         <geometry>
           <cylinder>
@@ -47,8 +47,8 @@
           </friction>
         </surface>
       </collision>
-      <visual name='base_footprint_fixed_joint_lump__MTT_body_visual'>
-        <pose>-0.0034808381178577409 -0.051022168970358453 0.59330103716210747 0 0 3.1415926535897931</pose>
+      <visual name='base_link_visual'>
+        <pose>-0.0034808381178577409 -0.051022168970358453 0.49330103716210749 0 0 3.1415926535897931</pose>
         <geometry>
           <mesh>
             <scale>1 1 1</scale>
@@ -64,7 +64,7 @@
           <ambient>1 0.892156899 0.00490196096 1</ambient>
         </material>
       </visual>
-      <visual name='base_footprint_fixed_joint_lump__lidar_link_visual_1'>
+      <visual name='base_link_fixed_joint_lump__lidar_link_visual_1'>
         <pose>0 0 0.80000000000000004 0 0 0</pose>
         <geometry>
           <cylinder>
@@ -97,8 +97,8 @@
       </sensor>
     </link>
     <joint name='10_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.042674791204848093 -0.30260966897135838 0.23720533291369941 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.042674791204848093 -0.30260966897135838 0.13720533291369941 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_10</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -152,8 +152,8 @@
       </visual>
     </link>
     <joint name='11_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.1298179530678156 -0.30260966897135838 0.2372153534695029 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.1298179530678156 -0.30260966897135838 0.13721535346950289 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_11</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -207,8 +207,8 @@
       </visual>
     </link>
     <joint name='12_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.21696111493078299 -0.30260966897135833 0.2372253740253053 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.21696111493078299 -0.30260966897135833 0.1372253740253053 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_12</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -262,8 +262,8 @@
       </visual>
     </link>
     <joint name='13_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.30410427679375029 -0.30260966897135821 0.23723539458110779 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.30410427679375029 -0.30260966897135821 0.13723539458110781 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_13</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -317,8 +317,8 @@
       </visual>
     </link>
     <joint name='14_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.39124743865671768 -0.30260966897135821 0.2372454151369103 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.39124743865671768 -0.30260966897135821 0.1372454151369103 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_14</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -372,8 +372,8 @@
       </visual>
     </link>
     <joint name='15_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.47839060051968407 -0.30260966897135821 0.23725543569271271 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.47839060051968407 -0.30260966897135821 0.1372554356927127 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_15</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -427,8 +427,8 @@
       </visual>
     </link>
     <joint name='16_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.56553376238265152 -0.30260966897135799 0.23726545624851519 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.56553376238265152 -0.30260966897135799 0.13726545624851519 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_16</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -482,8 +482,8 @@
       </visual>
     </link>
     <joint name='17_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.65267692424561885 -0.30260966897135799 0.2372754768043176 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.65267692424561885 -0.30260966897135799 0.13727547680431759 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_17</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -537,8 +537,8 @@
       </visual>
     </link>
     <joint name='18_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.73982008610858641 -0.30260966897135788 0.23728549736012011 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.73982008610858641 -0.30260966897135788 0.13728549736012011 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_18</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -592,8 +592,8 @@
       </visual>
     </link>
     <joint name='19_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.825954608947019 -0.30260966897135783 0.24666682073043031 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.825954608947019 -0.30260966897135783 0.1466668207304303 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_19</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -647,8 +647,8 @@
       </visual>
     </link>
     <joint name='1_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.70146757632194523 -0.30260966897135899 0.39942602155526369 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.70146757632194523 -0.30260966897135899 0.29942602155526382 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_1</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -702,8 +702,8 @@
       </visual>
     </link>
     <joint name='20_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>-0.91110403062049183 -0.30260966897135783 0.26520075578373009 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-0.91110403062049183 -0.30260966897135783 0.1652007557837302 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_20</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -757,8 +757,8 @@
       </visual>
     </link>
     <joint name='2_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.63021293776953013 -0.30260966897135899 0.3492592273116939 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.63021293776953013 -0.30260966897135899 0.24925922731169389 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_2</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -812,8 +812,8 @@
       </visual>
     </link>
     <joint name='3_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.55767703136521962 -0.30260966897135888 0.30171053820694732 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.55767703136521962 -0.30260966897135888 0.2017105382069472 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_3</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -867,8 +867,8 @@
       </visual>
     </link>
     <joint name='4_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.4743441239043048 -0.30260966897135888 0.27622412429685811 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.4743441239043048 -0.30260966897135888 0.1762241242968581 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_4</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -922,8 +922,8 @@
       </visual>
     </link>
     <joint name='5_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.39101121644338022 -0.30260966897135883 0.25073771038676879 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.39101121644338022 -0.30260966897135883 0.15073771038676889 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_5</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -977,8 +977,8 @@
       </visual>
     </link>
     <joint name='6_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.30589785624702448 -0.30260966897135871 0.2371652506904896 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.30589785624702448 -0.30260966897135871 0.1371652506904896 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_6</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1032,8 +1032,8 @@
       </visual>
     </link>
     <joint name='7_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.2187546943840542 -0.30260966897135871 0.23717527124629201 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.2187546943840542 -0.30260966897135871 0.137175271246292 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_7</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1087,8 +1087,8 @@
       </visual>
     </link>
     <joint name='8_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.13161153252108559 -0.30260966897135871 0.23718529180209449 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.13161153252108559 -0.30260966897135871 0.13718529180209449 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_8</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1142,8 +1142,8 @@
       </visual>
     </link>
     <joint name='9_continuous' type='revolute'>
-      <pose relative_to='base_footprint'>0.044468370658119268 -0.30260966897135849 0.23719531235789701 1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>0.044468370658119268 -0.30260966897135849 0.13719531235789689 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Rouleau_track_9</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1197,8 +1197,8 @@
       </visual>
     </link>
     <joint name='pitch' type='revolute'>
-      <pose relative_to='base_footprint'>-1.051187837601858 0.2125028310306423 0.45775105114691778 -1.5707963267948959 0 -7.563394355258877e-16</pose>
-      <parent>base_footprint</parent>
+      <pose relative_to='base_link'>-1.051187837601858 0.2125028310306423 0.35775105114691791 -1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_link</parent>
       <child>Frame_fixation_articule</child>
       <axis>
         <xyz>0 0 1</xyz>
@@ -1733,13 +1733,13 @@
     <plugin name='gz::sim::systems::PosePublisher' filename='gz-sim-pose-publisher-system'>
       <publish_model_pose>true</publish_model_pose>
     </plugin>
-    <frame name='base_joint' attached_to='base_footprint'>
+    <frame name='base_joint' attached_to='base_link'>
       <pose>0 0 0.10000000000000001 0 0 0</pose>
     </frame>
-    <frame name='MTT_body' attached_to='base_joint'>
+    <frame name='base_footprint' attached_to='base_joint'>
       <pose>0 0 0 0 0 0</pose>
     </frame>
-    <frame name='lidar_joint' attached_to='base_footprint'>
+    <frame name='lidar_joint' attached_to='base_link'>
       <pose>0 0 0.80000000000000004 0 0 0</pose>
     </frame>
     <frame name='lidar_link' attached_to='lidar_joint'>
