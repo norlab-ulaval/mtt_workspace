@@ -13,7 +13,7 @@
 
     <link name="base_footprint"/>
 
-    <link name="MTT_body">
+    <link name="base_link">
     <visual>
     <origin xyz="-0.0034808381178577409154 -0.051022168970358453 0.49330103716210749187" rpy="0 -0 3.1415926535897926719" />
     <geometry>
@@ -37,8 +37,8 @@
     </link>
 
    <joint name="base_joint" type="fixed">
-    <parent link="base_footprint"/>
-    <child link="MTT_body"/>
+    <parent link="base_link"/>
+    <child link="base_footprint"/>
     <origin xyz="0 0 0.1" rpy="0 0 0"/>
     </joint>
 
@@ -68,7 +68,7 @@
 
     <joint name="1_continuous" type="continuous">
     <origin xyz="0.7014675763219452298 -0.30260966897135904707 0.29942602155526376606" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_1" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -109,7 +109,7 @@
 
     <joint name="2_continuous" type="continuous">
     <origin xyz="0.63021293776953013488 -0.30260966897135899156 0.24925922731169392055" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_2" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -149,7 +149,7 @@
 
     <joint name="3_continuous" type="continuous">
     <origin xyz="0.55767703136521962204 -0.30260966897135893605 0.20171053820694723191" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_3" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -189,7 +189,7 @@
 
     <joint name="4_continuous" type="continuous">
     <origin xyz="0.47434412390430480411 -0.30260966897135888054 0.17622412429685807567" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_4" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -229,7 +229,7 @@
 
     <joint name="5_continuous" type="continuous">
     <origin xyz="0.39101121644338021621 -0.30260966897135876952 0.15073771038676886391" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_5" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -269,7 +269,7 @@
 
     <joint name="6_continuous" type="continuous">
     <origin xyz="0.30589785624702453548 -0.30260966897135871401 0.13716525069048957075" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_6" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -309,7 +309,7 @@
 
     <joint name="7_continuous" type="continuous">
     <origin xyz="0.21875469438405417688 -0.3026096689713586585 0.13717527124629197433" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_7" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -349,7 +349,7 @@
 
     <joint name="8_continuous" type="continuous">
     <origin xyz="0.13161153252108562239 -0.3026096689713586585 0.13718529180209448892" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_8" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -389,7 +389,7 @@
 
     <joint name="9_continuous" type="continuous">
     <origin xyz="0.044468370658119274474 -0.30260966897135854747 0.13719531235789694801" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_9" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -429,7 +429,7 @@
 
     <joint name="10_continuous" type="continuous">
     <origin xyz="-0.042674791204848093462 -0.30260966897135843645 0.13720533291369940709" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_10" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -469,7 +469,7 @@
 
     <joint name="11_continuous" type="continuous">
     <origin xyz="-0.12981795306781560018 -0.30260966897135843645 0.13721535346950286538" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_11" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -509,7 +509,7 @@
 
     <joint name="12_continuous" type="continuous">
     <origin xyz="-0.21696111493078301669 -0.30260966897135832543 0.13722537402530532447" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_12" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -549,7 +549,7 @@
 
     <joint name="13_continuous" type="continuous">
     <origin xyz="-0.30410427679375034993 -0.30260966897135821441 0.13723539458110778355" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_13" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -589,7 +589,7 @@
 
     <joint name="14_continuous" type="continuous">
     <origin xyz="-0.39124743865671768317 -0.30260966897135821441 0.13724541513691029815" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_14" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -629,7 +629,7 @@
 
     <joint name="15_continuous" type="continuous">
     <origin xyz="-0.47839060051968412823 -0.30260966897135821441 0.13725543569271270172" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_15" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -669,7 +669,7 @@
 
     <joint name="16_continuous" type="continuous">
     <origin xyz="-0.56553376238265151699 -0.30260966897135799236 0.13726545624851521632" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_16" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -709,7 +709,7 @@
 
     <joint name="17_continuous" type="continuous">
     <origin xyz="-0.65267692424561885023 -0.30260966897135799236 0.13727547680431761989" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_17" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -749,7 +749,7 @@
 
     <joint name="18_continuous" type="continuous">
     <origin xyz="-0.73982008610858640552 -0.30260966897135788134 0.13728549736012013449" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_18" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -789,7 +789,7 @@
 
     <joint name="19_continuous" type="continuous">
     <origin xyz="-0.82595460894701899779 -0.30260966897135777032 0.14666682073043030288" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_19" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -829,7 +829,7 @@
 
     <joint name="20_continuous" type="continuous">
     <origin xyz="-0.91110403062049183376 -0.30260966897135777032 0.16520075578373016878" rpy="1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Rouleau_track_20" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" />
@@ -1180,7 +1180,7 @@
    
     <joint name="pitch" type="revolute">
     <origin xyz="-1.0511878376018575221 0.21250283103064232515 0.35775105114691785335" rpy="-1.570796326794896558 -0 -7.5633943552588769595e-16" />
-    <parent link="MTT_body" />
+    <parent link="base_link" />
     <child link="Frame_fixation_articule" />
     <axis xyz="0 0 1"/>
     <limit effort="-1" velocity="20" lower="-1.570796326794896558" upper="1.570796326794896558"/>
@@ -1410,7 +1410,7 @@
     <xacro:default_transmission joint_name="20_continuous"/>
     <xacro:default_transmission joint_name="yaw"/>
 
-    <gazebo reference="MTT_body">
+    <gazebo reference="base_link">
         <material>Gazebo/Orange</material>
     </gazebo>
 
@@ -1456,7 +1456,7 @@
 
 <!-- Joint to attach LiDAR to base_footprint -->
 <joint name="lidar_joint" type="fixed">
-  <parent link="base_footprint"/>
+  <parent link="base_link"/>
   <child link="lidar_link"/>
   <origin xyz="0 0 0.8" rpy="0 0 0"/>
 </joint>

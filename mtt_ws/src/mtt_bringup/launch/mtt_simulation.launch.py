@@ -1,6 +1,7 @@
 import os
 import tempfile
 
+import logging
 from launch import LaunchDescription
 from launch.actions import (
     IncludeLaunchDescription,
@@ -21,6 +22,7 @@ import xacro
 
 
 def generate_launch_description():
+    # logging.getLogger().setLevel(logging.WARN)
     # mode = "turtle"
     mode = "mtt"
 
@@ -29,12 +31,14 @@ def generate_launch_description():
 
     nav2_bringup_dir = get_package_share_directory('nav2_bringup')
     launch_dir = os.path.join(nav2_bringup_dir, 'launch')
+    
 
     
     sim_dir = get_package_share_directory('nav2_minimal_tb3_sim')
 
     mtt_description_dir = get_package_share_directory('mtt_description')
     mtt_bringup_dir = get_package_share_directory('mtt_bringup')
+    mtt_bringup_launch_dir = os.path.join(mtt_bringup_dir, 'launch')
 
     use_rviz = LaunchConfiguration('use_rviz', default='True')
     rviz_config_file = LaunchConfiguration('rviz_config_file')
@@ -52,6 +56,11 @@ def generate_launch_description():
     robot_name = LaunchConfiguration('robot_name')
     robot_sdf = LaunchConfiguration('robot_sdf')
 
+    log_level = LaunchConfiguration("log_level")
+
+    declare_log_level_cmd = DeclareLaunchArgument(
+        "log_level", default_value="warn", description="Logging level"
+    )
     ######### Temp zone
 
     namespace = LaunchConfiguration('namespace')
@@ -223,13 +232,14 @@ def generate_launch_description():
 
     # RVIZ
     rviz_cmd = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(os.path.join(launch_dir, 'rviz_launch.py')),
+        PythonLaunchDescriptionSource(os.path.join(mtt_bringup_launch_dir, 'mtt_rviz.launch.py')),
         condition=IfCondition(use_rviz),
         launch_arguments={
             'namespace': namespace,
             'use_namespace': use_namespace,
             'use_sim_time': use_sim_time,
             'rviz_config': rviz_config_file,
+            'log_level': log_level,
         }.items(),
     )
 
@@ -347,6 +357,8 @@ def generate_launch_description():
     
 
     ld = LaunchDescription()
+    ld.add_action(declare_log_level_cmd)
+
     # Optionnals
     # temp zone
     ld.add_action(declare_namespace_cmd)
