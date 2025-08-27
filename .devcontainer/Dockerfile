@@ -21,6 +21,11 @@ RUN groupadd --gid $USER_GID $USERNAME \
     && echo $USERNAME ALL=\(root\) NOPASSWD:ALL > /etc/sudoers.d/$USERNAME \
     && chmod 0440 /etc/sudoers.d/$USERNAME
 
+# Create XDG runtime directory and set permissions
+RUN mkdir -p /run/user/$USER_UID \
+    && chown $USER_UID:$USER_GID /run/user/$USER_UID \
+    && chmod 700 /run/user/$USER_UID
+
 # Install dependencies
 RUN apt-get update -y && apt-get install -y \
     ros-${ROS_DISTRO}-rviz2 \
@@ -40,6 +45,9 @@ RUN apt-get update -y && apt-get install -y \
     rm -rf /var/lib/apt/lists/*
 
 RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash && source /home/ws/install/setup.bash" >> /home/$USERNAME/.bashrc
+
+# Set XDG_RUNTIME_DIR environment variable
+ENV XDG_RUNTIME_DIR=/run/user/$USER_UID
 ENV SHELL /bin/bash
 
 USER $USERNAME
