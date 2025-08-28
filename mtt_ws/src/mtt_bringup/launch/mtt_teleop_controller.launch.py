@@ -8,7 +8,11 @@ def generate_launch_description():
         package='joy',
         executable='joy_node',
         name='joy_node',
-        output='screen')
+        output='screen',
+        parameters=[{'dev': '/dev/input/js0'}]
+    )
+
+
     
     mtt_joy_mapper = Node(
         package='mtt_bringup',
