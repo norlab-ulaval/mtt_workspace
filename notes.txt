@@ -11,11 +11,6 @@ gz topic --list
 
 gz sdf -p robot.urdf.xacro > robot.sdf
 
-
-<parameters>file://control_config.yaml</parameters>
-<plugin name="gz_ros2_control::GazeboSimROS2ControlPlugin" filename="gz_ros2_control-system">
-
-
 ros2 control list_controllers
 
 ros2 topic pub /forward_position_controller/commands std_msgs/msg/Float64MultiArray "data: [-0.5]"
