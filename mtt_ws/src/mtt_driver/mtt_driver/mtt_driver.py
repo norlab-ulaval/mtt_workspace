@@ -17,14 +17,16 @@ import fcntl
 import struct
 import threading
 from dataclasses import dataclass
-from typing import Optional
+
 
 log = logging.getLogger('MTTCanDriver')
+# TODO: set logging as parameter through launch
 log.setLevel(logging.INFO)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
 if not log.handlers:
     log.addHandler(handler)
+
 
 # MTT-154 Encoder and Odometry Constants
 # Reference: CANBus_Specification.md Section 5.1 - Gearing Constants
@@ -34,7 +36,8 @@ MTT_GEAR3 = 15
 MTT_GEAR4 = 32
 MTT_GEAR_DRIVE = 8
 MTT_GEAR_TRACK = 54
-MTT_ENCODER_TEETH = 5  # MTT_Encoder_TEET in firmware
+# Option A fix for 2x overscale: double encoder teeth from 5 -> 10 so FinalRatio doubles (324 -> 648)
+MTT_ENCODER_TEETH = 10  # was 5
 MTT_TRACK_LENGTH_CM = 393
 MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000.0  # Firmware: MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000
 MTT_TRACK_LENGTH_M = MTT_TRACK_LENGTH_CM / 100.0  # For convenience in Python
@@ -50,13 +53,14 @@ MTT_ANALOG_BRAKE = 4
 MTT_ANALOG_STEER = 5
 MTT_SWITCHES_DIRECTION_MODE = 6
 
+
 class DirectionMode(Enum):
     OpenLoop = 0
     CloseLoop = 1
 
 class DirectionState(Enum):
-    Reverse = 0x00
-    Forward = 0x01
+    Forward = 0x00
+    Reverse = 0x01
 
 class WinchState(Enum):
     WinchNeutral = 0x7F  # 127 - matches RF remote idle frame
@@ -76,6 +80,7 @@ class LightState(Enum):
     Off = 0x00
     On = 0x01
 
+
 @dataclass
 class TachometerData:
     """Data structure for tachometer information from CAN 0x2FF
@@ -89,6 +94,7 @@ class TachometerData:
     timestamp: float = 0.0           # Time when data was received
     new_data_available: bool = False # Flag indicating fresh data
 
+
     def get_speed_ms(self, final_ratio: float) -> float:
         """Calculate speed in m/s from encoder data (firmware-compatible)"""
         if final_ratio == 0.0:
@@ -99,6 +105,7 @@ class TachometerData:
         speed_ms = speed_kmh / 3.6
         return speed_ms
 
+
     def get_speed_kmh(self, final_ratio: float) -> float:
         """Calculate speed in km/h from encoder data (exact firmware implementation)"""
         if final_ratio == 0.0:
@@ -106,10 +113,13 @@ class TachometerData:
         # Firmware RPS_to_KMh: return ((float)RPS / FinalRatio) * (float)MTT_TRACK_LENGTH_KM *3600;
         return (self.tachometer_instant / final_ratio) * MTT_TRACK_LENGTH_KM * 3600
 
+
     def __str__(self):
         return (f"TachometerData(TempA={self.main_sensor_temp_a}°C, TempB={self.main_sensor_temp_b}°C, "
                 f"Speed={self.tachometer_instant} RPS, Cumulative={self.tachometer_cumulative}, "
                 f"Timestamp={self.timestamp:.3f}, NewData={self.new_data_available})")
+
+
 
 def interface_exists(ifname):
     """Check if a network interface exists (e.g. 'can0')."""
@@ -120,6 +130,7 @@ def interface_exists(ifname):
         return True
     except OSError:
         return False
+
 
 class MTTCanDriver:
     """Non-ROS driver for controlling the MTT-154 via CAN bus.
@@ -137,34 +148,14 @@ class MTTCanDriver:
     - Direction is controlled by master system
     """
 
-    # Template frame for reference - not used in actual operation
-    idle_frame_template = [
-        0x00,  # [0] Vehicle type: Single Track
-        0x68,  # [1] Global switches: deadman pressed, security unlocked, light off
-        0x19,  # [2] Throttle: idle value (25 decimal)
-        0x7F,  # [3] Winch: neutral (127 decimal)
-        0x29,  # [4] Brake: idle value (41 decimal)
-        0x7F,  # [5] Steer: center (127 decimal)
-        0x00,  # [6] Direction mode: open loop
-        0x7F   # [7] Reserved
-    ]
-
     def __init__(self, can_interface='can0'):
-        self.node_id = 0x001
+
+        self.node_id = 0x001 # remote controller id
+        # self.node_id = 0x100 # is supposed to work according to documentation but it doesn't
         
-        # Initialize CAN frame with safe starting values
-        self.can_array = [
-            0x00,  # [0] Vehicle type: Single Track
-            0x68,  # [1] Global switches: deadman pressed, security unlocked, light OFF
-            0x00,  # [2] Throttle: minimum (0)
-            0x7F,  # [3] Winch: neutral (127)
-            0x00,  # [4] Brake: minimum (0)
-            0x7F,  # [5] Steer: center (127)
-            0x00,  # [6] Direction mode: open loop
-            0x7F   # [7] Reserved
-        ]
-        
-        # CAN bus initialization
+        # can bus initialization
+        self.can_interface = can_interface
+        self.send_frame_period = 0.05
         timeout_seconds = 10
         check_interval = 0.5
         elapsed = 0.0
@@ -186,6 +177,20 @@ class MTTCanDriver:
             log.error(f"Failed to initialize CAN bus: {e}")
             raise
 
+
+        self.frame_lock = threading.Lock()
+
+        # TODO: Initialize CAN frame with safe starting values
+        # Template frame for reference - not used in actual operation
+        # can_array = [MTT_SWITCHES_VEHICLE_TYPE = 0
+        # MTT_SWITCHES_GLOBAL = 1
+        # MTT_ANALOG_THROTTLE = 2
+        # MTT_ANALOG_WINCH = 3
+        # MTT_ANALOG_BRAKE = 4
+        # MTT_ANALOG_STEER = 5
+        # MTT_SWITCHES_DIRECTION_MODE = 6]
+        self.can_array = [0] * 8
+
         # Initialize state variables
         self.vehicle_type = None
         self.steer_value = None
@@ -197,6 +202,16 @@ class MTTCanDriver:
         self.direction_mode = None
         self.light_state = None
         
+        self.set_vehicle_type(VehicleType.VehicleSingleTrack)
+        self.set_security_switch(SecuritySwitchState.SafetyLocked)
+        self.set_direction(DirectionState.Forward)
+        self.set_light_state(LightState.Off)
+        self.set_throttle(0)
+        self.set_winch_state(WinchState.WinchNeutral)
+        self.set_brake(0)
+        self.set_steer(127)
+        self.set_direction_mode(DirectionMode.OpenLoop)
+
         # Odometry and tachometer data
         self.tachometer_data = TachometerData()
         self.encoder_final_ratio = self._calculate_gear_ratio()
@@ -209,21 +224,13 @@ class MTTCanDriver:
         self.can_listener_running = True
         self.can_listener_thread.start()
         
-        self.frame_lock = threading.Lock()
         self.sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
         self.sender_running = True
         self.sender_thread.start()
 
-        # Initialize vehicle state
-        self.set_vehicle_type(VehicleType.VehicleSingleTrack)
-        self.set_security_switch(SecuritySwitchState.SafetyLocked)
-        self.set_direction(DirectionState.Forward)
-        self.set_light_state(LightState.Off)
-        self.set_throttle(0)
-        self.set_winch_state(WinchState.WinchNeutral)
-        self.set_brake(0)
-        self.set_steer(127)
-        self.set_direction_mode(DirectionMode.OpenLoop)
+
+    def __del__(self):
+        self.cleanup()
 
     def reset_motion_commands(self):
         """Resets all motion commands to a safe, stopped state."""
@@ -233,62 +240,6 @@ class MTTCanDriver:
         self.set_direction(DirectionState.Forward)
         self.set_winch_state(WinchState.WinchNeutral)
 
-    def build_can_frame(self, **kwargs):
-        """
-        Build a CAN frame starting from the idle template, only altering fields specified in kwargs.
-        Example: build_can_frame(throttle=60, winch=WinchState.WinchIn.value)
-        """
-        frame = self.idle_frame_template.copy()
-        if 'vehicle_type' in kwargs:
-            frame[MTT_SWITCHES_VEHICLE_TYPE] = kwargs['vehicle_type']
-        if 'global_switches' in kwargs:
-            frame[MTT_SWITCHES_GLOBAL] = kwargs['global_switches']
-        if 'throttle' in kwargs:
-            frame[MTT_ANALOG_THROTTLE] = kwargs['throttle']
-        if 'winch' in kwargs:
-            frame[MTT_ANALOG_WINCH] = kwargs['winch']
-        if 'brake' in kwargs:
-            frame[MTT_ANALOG_BRAKE] = kwargs['brake']
-        if 'steer' in kwargs:
-            frame[MTT_ANALOG_STEER] = kwargs['steer']
-        if 'direction_mode' in kwargs:
-            frame[MTT_SWITCHES_DIRECTION_MODE] = kwargs['direction_mode']
-        # Reserved byte (7) can be set if needed
-        return frame
-
-    def send_can_frame(self, **kwargs):
-        """
-        Sends a CAN frame using the current can_array state, with only specified fields altered.
-        Usage: send_can_frame(throttle=60, winch=WinchState.WinchIn.value)
-        """
-        if not self.bus:
-            return
-        
-        # Start with current state
-        frame = self.can_array.copy()
-        
-        # Apply any overrides from kwargs
-        if 'vehicle_type' in kwargs:
-            frame[MTT_SWITCHES_VEHICLE_TYPE] = kwargs['vehicle_type']
-        if 'global_switches' in kwargs:
-            frame[MTT_SWITCHES_GLOBAL] = kwargs['global_switches']
-        if 'throttle' in kwargs:
-            frame[MTT_ANALOG_THROTTLE] = kwargs['throttle']
-        if 'winch' in kwargs:
-            frame[MTT_ANALOG_WINCH] = kwargs['winch']
-        if 'brake' in kwargs:
-            frame[MTT_ANALOG_BRAKE] = kwargs['brake']
-        if 'steer' in kwargs:
-            frame[MTT_ANALOG_STEER] = kwargs['steer']
-        if 'direction_mode' in kwargs:
-            frame[MTT_SWITCHES_DIRECTION_MODE] = kwargs['direction_mode']
-        
-        try:
-            message = can.Message(arbitration_id=self.node_id, data=frame, is_extended_id=False)
-            self.bus.send(message)
-            log.debug(f"Sent CAN frame: {' '.join([f'{b:02X}' for b in frame])}")
-        except can.CanError as e:
-            log.error(f"Error sending CAN frame: {e}")
 
     def _calculate_gear_ratio(self):
         """Calculate the final gear ratio for speed conversion (exact firmware implementation)"""
@@ -307,6 +258,7 @@ class MTTCanDriver:
         log.info(f"Encoder final ratio calculated: {final_ratio} (firmware-exact calculation, used for speed only)")
         return final_ratio
 
+
     def _can_listener(self):
         """CAN listener thread for tachometer data (0x2FF frames)"""
         while self.can_listener_running:
@@ -318,6 +270,7 @@ class MTTCanDriver:
                 if self.can_listener_running:  # Only log if we're still supposed to be running
                     log.debug(f"CAN listener error: {e}")
                     time.sleep(0.1)
+
 
     def _process_tachometer_data(self, data):
         """Process tachometer data from 0x2FF frame (MSB-first byte order)"""
@@ -344,15 +297,16 @@ class MTTCanDriver:
         self.tachometer_data.timestamp = time.time()
         self.tachometer_data.new_data_available = True
 
+
         # Calculate distance traveled since last reading
         if self.last_cumulative_ticks > 0:
             tick_diff = tachimeter_cumulative - self.last_cumulative_ticks
             if tick_diff > 0:  # Avoid negative values due to overflow
-                # Direct calculation from real-world measurement:
-                # 15160 ticks = 1 track turn = 3.93m (corrected measurement)
-                # Therefore: distance = ticks * (3.93m / 15160 ticks)
-                distance_per_tick = MTT_TRACK_LENGTH_M / 15160.0  # Empirically measured
-                distance_increment = tick_diff * distance_per_tick
+                # Distance calculation: ticks * (track_length / gear_ratio)
+                # The firmware gear ratio includes the *2 factor for speed (RPS to km/h conversion)
+                # For distance, we need to use the gear ratio without the *2 factor
+                gear_ratio_for_distance = self.encoder_final_ratio / 2
+                distance_increment = (tick_diff / gear_ratio_for_distance) * MTT_TRACK_LENGTH_M
                 
                 # Odometry always accumulates positive distance regardless of direction
                 # Direction is only used for speed calculation, not odometry
@@ -369,30 +323,34 @@ class MTTCanDriver:
                 f"Temp A: {temp_a}°C, Temp B: {temp_b}°C"
             )
 
+
     def emergency_stop(self):
         """Emergency stop - sets all motion controls to safe values"""
         self.set_throttle(0)
         self.set_brake(255)
         self.set_steer(127)
         self.set_winch_state(WinchState.WinchNeutral)
-        log.warn("EMERGENCY STOP ACTIVATED")
+        log.warning("EMERGENCY STOP ACTIVATED")
+
 
     def is_system_ready(self):
         """Check if system is ready for operation"""
         if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
-            log.warn("System not ready: Security switch is locked")
+            log.warning("System not ready: Security switch is locked")
             return False
         
         if not hasattr(self, 'bus') or not self.bus:
-            log.warn("System not ready: CAN bus not initialized")
+            log.warning("System not ready: CAN bus not initialized")
             return False
             
         return True
 
+    
     def get_direction_for_calculation(self):
         """Get direction for distance/speed calculations"""
         # Since tachometer doesn't provide direction, we use our control direction
         return 1 if self.direction_state == DirectionState.Forward else -1
+    
 
     def get_current_speed_ms(self) -> float:
         """Get current speed in m/s, considering direction"""
@@ -407,6 +365,7 @@ class MTTCanDriver:
         
         return speed
     
+
     def get_current_speed_kmh(self) -> float:
         """Get current speed in km/h, considering direction"""
         if not self.tachometer_data.new_data_available:
@@ -420,10 +379,12 @@ class MTTCanDriver:
         
         return speed
     
+
     def get_tachometer_data(self) -> TachometerData:
         """Get complete tachometer data structure"""
         return self.tachometer_data
-    
+
+
     def get_odometry_data(self) -> dict:
         """Get complete odometry data dictionary"""
         # TODO: Add steering angle data for higher-level kinematic models
@@ -442,7 +403,9 @@ class MTTCanDriver:
             'data_age_ms': (time.time() - self.tachometer_data.timestamp) * 1000 if self.tachometer_data.timestamp > 0 else 0,
             # TODO: Add steering_angle_rad and vehicle_type for kinematic models
         }
+    
 
+    # TODO check if fucntion is used - also, funciton should use the setters
     def set_deadman_switch(self, pressed=True):
         """Set deadman switch state"""
         with self.frame_lock:
@@ -451,17 +414,29 @@ class MTTCanDriver:
             else:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
 
-    # --- Control Methods ---
+
     def set_steer(self, steer_value):
         """Set steering value (0-255, 127 is center)"""
-        if not isinstance(steer_value, int):
-            log.error(f"steer_value is not an integer: {steer_value}")
-            return
 
-        steer_value = max(0, min(255, steer_value))
+        if not isinstance(steer_value, int):
+            print("ERROR: steer_value is not an integer: " + str(steer_value))
+            return False
+
+        # out of bound values are ignored
+        if steer_value > 255:
+            print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
+            return False
+
+        if steer_value < 0:
+            print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
+            return False
+
         with self.frame_lock:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
+
+            return True
+
 
     def set_throttle(self, throttle_value):
         """Set throttle value (0-230)"""
@@ -469,21 +444,46 @@ class MTTCanDriver:
             log.error(f"throttle_value is not an integer: {throttle_value}")
             return
 
-        throttle_value = max(0, min(230, throttle_value))
-        with self.frame_lock:
-            self.throttle_value = throttle_value
-            self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
+
+        # ignoring out of bounds values instead of truncking
+        if throttle_value > 230:
+            print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
+            return False
+
+        if throttle_value < 0:
+            print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
+            return False
+
+        if throttle_value >= 0 and throttle_value <= 230:
+            with self.frame_lock:
+                self.throttle_value = throttle_value  
+                self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
+
+            return True
+
 
     def set_brake(self, brake_value):
         """Set brake value (0-255)"""
         if not isinstance(brake_value, int):
             log.error(f"brake_value is not an integer: {brake_value}")
-            return
+            return False
             
-        brake_value = max(0, min(255, brake_value))
-        with self.frame_lock:
-            self.brake_value = brake_value
-            self.can_array[MTT_ANALOG_BRAKE] = brake_value
+        # ignoring out of bounds values instead of truncking
+        if brake_value > 255:
+            print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
+            return False
+
+        if brake_value < 0:
+            print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
+            return False
+
+        if brake_value >= 0 and brake_value <= 255:
+            with self.frame_lock:
+                self.brake_value = brake_value
+                self.can_array[MTT_ANALOG_BRAKE] = brake_value
+
+            return True
+
 
     def set_winch_state(self, winch_state):
         """Set winch state - holds the state until explicitly changed"""
@@ -506,6 +506,7 @@ class MTTCanDriver:
             log.error(f"invalid value for winch_state: {winch_state}")
             return
     
+
     def set_security_switch(self, switch_value):
         """Set security switch state"""
         if switch_value == SecuritySwitchState.SafetyLocked:
@@ -513,15 +514,19 @@ class MTTCanDriver:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7
                 self.security_switch_state = SecuritySwitchState.SafetyLocked
 
+            return True
+
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
 
+            return True
+
         else:
             log.error(f"invalid value for switch_value: {switch_value}")
-            return
-
+            return False
+        
 
     def set_direction(self, direction):
         """Set vehicle direction"""
@@ -531,11 +536,15 @@ class MTTCanDriver:
                 self.direction_state = DirectionState.Forward
                 self.current_direction = DirectionState.Forward
 
+            return True
+
         elif direction == DirectionState.Reverse:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111  # Clear bit 5
                 self.direction_state = DirectionState.Reverse
                 self.current_direction = DirectionState.Reverse
+
+            return True
 
         else:
             log.error(f"invalid value for direction: {direction}")
@@ -548,6 +557,8 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.light_state = LightState.Off
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b01000000  # Set bit 6
+
+            return True
 
         elif light_state == LightState.On:
             with self.frame_lock:
@@ -565,6 +576,8 @@ class MTTCanDriver:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
                 self.direction_mode = DirectionMode.CloseLoop
 
+            return True
+
         elif direction_mode == DirectionMode.OpenLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
@@ -581,6 +594,8 @@ class MTTCanDriver:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
                 self.vehicle_type = VehicleType.VehicleSingleTrack
 
+            return True
+
         elif vehicle_type == VehicleType.VehicleSbsLeft:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
@@ -591,9 +606,12 @@ class MTTCanDriver:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
                 self.vehicle_type = VehicleType.VehicleSbsRight
 
+            return True
+
         else:
             log.error(f"invalid value for vehicle_type: {vehicle_type}")
-            return
+            return False
+
 
     def cleanup(self):
         """Clean up resources before shutting down"""
@@ -609,12 +627,19 @@ class MTTCanDriver:
             self.bus.shutdown()
             log.info("CAN driver cleaned up")
 
+
     def get_current_frame_hex(self):
         """Get the current CAN frame as hex string for debugging"""
         return " ".join([f"{b:02X}" for b in self.can_array])
 
+
     def _sender_loop(self):
         """Continuously sends keepalive frames at 20Hz to maintain communication"""
+
+        if self.bus is None:
+            log.warning("CAN bus not initialized")
+            return
+
         while self.sender_running:
             try:
                 with self.frame_lock:
@@ -622,15 +647,33 @@ class MTTCanDriver:
                     frame_data = self.can_array.copy()
                 
                 message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
-                self.bus.send(message)
-                log.debug(f"Keepalive frame: {' '.join([f'{b:02X}' for b in frame_data])}")
+                # self.bus.send(message)
+                print("ok")
+                print("here ", frame_data)
+                # log.debug(f"Keepalive frame: {' '.join([f'{b:02X}' for b in frame_data])}")
                 
-            except can.CanError as e:
-                if self.sender_running:
-                    log.error(f"Keepalive send failed: {e}")
-            except Exception as e:
-                if self.sender_running:
-                    log.error(f"Keepalive error: {e}")
+            except (OSError, can.CanOperationError) as e:
+                log.error(f"CAN send failed: {e}")
+                # attempt to reinitialize the CAN bus
+                try:
+                    self.bus.shutdown()
+                except Exception:
+                    pass
+                try:
+                    self.bus = can.interface.Bus(self.can_interface, bustype="socketcan")
+                    log.info("Reinitialized CAN bus.")
+                except Exception as init_e:
+                    log.error(f"Failed to reinitialize CAN bus: {init_e}")
+                    self.bus = None
             
-            time.sleep(0.05)  # Send at 20 Hz (50ms interval) for reliable keepalive
+            time.sleep(self.send_frame_period)  # Send at 20 Hz (50ms interval) for reliable keepalive
 
+
+
+def main(args=None):
+
+    mtt_driver = MTTCanDriver()
+
+
+if __name__ == '__main__':
+    main()
