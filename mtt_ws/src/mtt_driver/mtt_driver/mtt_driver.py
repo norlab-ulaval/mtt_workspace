@@ -1,12 +1,5 @@
 #!/usr/bin/env python3
-"""
-MTT-154 CAN Driver
-
-Pure Python interface for controlling the MTT-154 via CAN bus.
-Implements CANBus_Specification.md v1.1 (2025-07-03).
-
-This module provides low-level CAN communication without ROS dependencies.
-"""
+"""MTT-154 CAN driver: low-level CAN control + tachometer parsing (no ROS deps)."""
 
 import can
 from enum import Enum
@@ -26,21 +19,19 @@ handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s -
 if not log.handlers:
     log.addHandler(handler)
 
-# MTT-154 Encoder and Odometry Constants
-# Reference: CANBus_Specification.md Section 5.1 - Gearing Constants
+# Gearing / track constants
 MTT_GEAR1 = 16
 MTT_GEAR2 = 36
 MTT_GEAR3 = 15
 MTT_GEAR4 = 32
 MTT_GEAR_DRIVE = 8
 MTT_GEAR_TRACK = 54
-MTT_ENCODER_TEETH = 5  # MTT_Encoder_TEET in firmware
+MTT_ENCODER_TEETH = 10
 MTT_TRACK_LENGTH_CM = 393
 MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000.0  # Firmware: MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000
 MTT_TRACK_LENGTH_M = MTT_TRACK_LENGTH_CM / 100.0  # For convenience in Python
 
-# CAN IDs - Reference: CANBus_Specification.md Section 3.0
-CAN_MAIN_TELEMETRY = 0x2FF  # Main controller data (encoder, temperature)
+CAN_MAIN_TELEMETRY = 0x2FF
 
 MTT_SWITCHES_VEHICLE_TYPE = 0
 MTT_SWITCHES_GLOBAL = 1
@@ -78,19 +69,16 @@ class LightState(Enum):
 
 @dataclass
 class TachometerData:
-    """Data structure for tachometer information from CAN 0x2FF
-    
-    Reference: CANBus_Specification.md Section 3.2.1 - MSB-first byte order
-    """
-    main_sensor_temp_a: float = 0.0  # Temperature sensor A in °C
-    main_sensor_temp_b: float = 0.0  # Temperature sensor B in °C
-    tachometer_instant: int = 0      # Instantaneous speed in raw encoder ticks per second (RPS)
-    tachometer_cumulative: int = 0   # Cumulative distance in raw encoder ticks
-    timestamp: float = 0.0           # Time when data was received
-    new_data_available: bool = False # Flag indicating fresh data
+    """Tachometer state (temps, raw ticks, timestamp)."""
+    main_sensor_temp_a: float = 0.0
+    main_sensor_temp_b: float = 0.0
+    tachometer_instant: int = 0
+    tachometer_cumulative: int = 0
+    timestamp: float = 0.0
+    new_data_available: bool = False
 
     def get_speed_ms(self, final_ratio: float) -> float:
-        """Calculate speed in m/s from encoder data (firmware-compatible)"""
+        """Speed m/s from raw RPS."""
         if final_ratio == 0.0:
             return 0.0
         # Firmware RPS_to_KMh: return ((float)RPS / FinalRatio) * (float)MTT_TRACK_LENGTH_KM *3600;
@@ -100,7 +88,7 @@ class TachometerData:
         return speed_ms
 
     def get_speed_kmh(self, final_ratio: float) -> float:
-        """Calculate speed in km/h from encoder data (exact firmware implementation)"""
+        """Speed km/h from raw RPS."""
         if final_ratio == 0.0:
             return 0.0
         # Firmware RPS_to_KMh: return ((float)RPS / FinalRatio) * (float)MTT_TRACK_LENGTH_KM *3600;
@@ -122,22 +110,9 @@ def interface_exists(ifname):
         return False
 
 class MTTCanDriver:
-    """Non-ROS driver for controlling the MTT-154 via CAN bus.
-    
-    Implements CANBus_Specification.md v1.1 for complete vehicle control.
-    
-    CAN Communication:
-    - 0x001: Joystick/remote controller
-    - 0x100: Auxiliary control (this driver) - overrides 0x001 when active
-    - 0x2ff: Tachometer data (receive only)
-    
-    Safety Requirements:
-    - Security switch (bit 7) must be unlocked for operation
-    - Light state acts as emergency stop (temporary firmware behavior)
-    - Direction is controlled by master system
-    """
+    """CAN driver (frame build, send, tachometer parse, safety helpers)."""
 
-    # Template frame for reference - not used in actual operation
+    # Reference template (not mutated directly)
     idle_frame_template = [
         0x00,  # [0] Vehicle type: Single Track
         0x68,  # [1] Global switches: deadman pressed, security unlocked, light off
@@ -149,36 +124,52 @@ class MTTCanDriver:
         0x7F   # [7] Reserved
     ]
 
-    def __init__(self, can_interface='can0'):
+    def __init__(self, can_interface='can0', *,
+                 winch_auto_neutral_ms: int = 300,
+                 start_forward: bool = True,
+                 steer_center: int = 128,
+                 initial_global_switches: int = 0x40,
+                 reserved_byte: int = 0x00):
+        """Construct driver.
+        Args:
+            can_interface: socketcan interface name.
+            winch_auto_neutral_ms: auto-neutral timeout for winch (0 disables feature).
+            start_forward: choose initial direction bit (bit5) if True.
+            steer_center: value used as steering center (firmware tolerates 127/128).
+            initial_global_switches: baseline global switch byte (wrapper used 0x40).
+            reserved_byte: value forced into byte[7].
+        """
         self.node_id = 0x001
-        
-        # Initialize CAN frame with safe starting values
+        self.winch_auto_neutral_ms = winch_auto_neutral_ms
+        self.last_winch_command_time = 0.0
+        self.estop_active = False
+
+        # Prepare locking early (we build frame before any threads)
+        self.frame_lock = threading.Lock()
+
+    # Deterministic baseline frame
         self.can_array = [
-            0x00,  # [0] Vehicle type: Single Track
-            0x68,  # [1] Global switches: deadman pressed, security unlocked, light OFF
-            0x00,  # [2] Throttle: minimum (0)
-            0x7F,  # [3] Winch: neutral (127)
-            0x00,  # [4] Brake: minimum (0)
-            0x7F,  # [5] Steer: center (127)
-            0x00,  # [6] Direction mode: open loop
-            0x7F   # [7] Reserved
+            0x00,
+            initial_global_switches & 0xFF,
+            0x00,
+            WinchState.WinchNeutral.value,
+            0x00,
+            max(0, min(255, steer_center)),
+            0x00,
+            reserved_byte & 0xFF
         ]
-        
-        # CAN bus initialization
+
+    # CAN init / wait
         timeout_seconds = 10
         check_interval = 0.5
         elapsed = 0.0
-
         log.info(f"Waiting for CAN interface '{can_interface}'...")
-
         while not interface_exists(can_interface) and elapsed < timeout_seconds:
             time.sleep(check_interval)
             elapsed += check_interval
-
         if not interface_exists(can_interface):
             log.error(f"CAN interface '{can_interface}' not found after {timeout_seconds} seconds.")
             raise Exception(f"CAN interface '{can_interface}' not available")
-
         try:
             self.bus = can.interface.Bus(can_interface, bustype="socketcan")
             log.info(f"Successfully initialized CAN bus on '{can_interface}'")
@@ -186,47 +177,70 @@ class MTTCanDriver:
             log.error(f"Failed to initialize CAN bus: {e}")
             raise
 
-        # Initialize state variables
-        self.vehicle_type = None
-        self.steer_value = None
-        self.throttle_value = None
-        self.brake_value = None
-        self.winch_state = None
-        self.security_switch_state = None
-        self.direction_state = None
-        self.direction_mode = None
-        self.light_state = None
-        
-        # Odometry and tachometer data
+        # State variables
+        self.vehicle_type = VehicleType.VehicleSingleTrack
+        self.steer_value = self.can_array[MTT_ANALOG_STEER]
+        self.throttle_value = 0
+        self.brake_value = 0
+        self.winch_state = WinchState.WinchNeutral
+        self.security_switch_state = SecuritySwitchState.SafetyLocked  # bit7 cleared in 0x40
+        self.direction_state = DirectionState.Forward if start_forward else DirectionState.Reverse
+        self.direction_mode = DirectionMode.OpenLoop
+        self.light_state = LightState.Off
+
+    # Initial direction bit
+        if start_forward:
+            self._set_global_bit(5, True)
+        else:
+            self._set_global_bit(5, False)
+
+    # Odometry state
         self.tachometer_data = TachometerData()
         self.encoder_final_ratio = self._calculate_gear_ratio()
         self.last_cumulative_ticks = 0
         self.total_distance = 0.0
-        self.current_direction = DirectionState.Forward
-        
-        # Start CAN threads
-        self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
-        self.can_listener_running = True
-        self.can_listener_thread.start()
-        
-        self.frame_lock = threading.Lock()
-        self.sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
-        self.sender_running = True
-        self.sender_thread.start()
+        self.current_direction = self.direction_state
 
-        # Initialize vehicle state
-        self.set_vehicle_type(VehicleType.VehicleSingleTrack)
+        # Threads (start only after full state prepared)
+        self.can_listener_running = True
+        self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
+        self.can_listener_thread.start()
+        self.sender_running = True
+        self.sender_thread = threading.Thread(target=self._sender_loop, daemon=True)
+        self.sender_thread.start()
+    log.info("MTTCanDriver ready")
+
+    # ---------------- Internal helpers -----------------
+    def _set_global_bit(self, bit_index: int, value: bool):
+        with self.frame_lock:
+            if value:
+                self.can_array[MTT_SWITCHES_GLOBAL] |= (1 << bit_index)
+            else:
+                self.can_array[MTT_SWITCHES_GLOBAL] &= ~(1 << bit_index)
+
+    def apply_estop(self):
+        """Latch E-stop."""
+        with self.frame_lock:
+            self.estop_active = True
         self.set_security_switch(SecuritySwitchState.SafetyLocked)
-        self.set_direction(DirectionState.Forward)
-        self.set_light_state(LightState.Off)
         self.set_throttle(0)
+        self.set_brake(255)
         self.set_winch_state(WinchState.WinchNeutral)
-        self.set_brake(0)
-        self.set_steer(127)
-        self.set_direction_mode(DirectionMode.OpenLoop)
+        self.set_steer(self.steer_value if self.steer_value is not None else 128)
+        log.warning("Local E-STOP applied in driver")
+
+    def release_estop(self):
+        with self.frame_lock:
+            self.estop_active = False
+        self.set_security_switch(SecuritySwitchState.SafetyUnlocked)
+        log.info("Local E-STOP released in driver")
+
+    def set_reserved(self, value: int):
+        with self.frame_lock:
+            self.can_array[7] = max(0, min(255, int(value)))
 
     def reset_motion_commands(self):
-        """Resets all motion commands to a safe, stopped state."""
+        """Set motion to safe stop."""
         self.set_throttle(0)
         self.set_steer(127)  # Center position
         self.set_brake(255)  # Full brake
@@ -234,10 +248,7 @@ class MTTCanDriver:
         self.set_winch_state(WinchState.WinchNeutral)
 
     def build_can_frame(self, **kwargs):
-        """
-        Build a CAN frame starting from the idle template, only altering fields specified in kwargs.
-        Example: build_can_frame(throttle=60, winch=WinchState.WinchIn.value)
-        """
+        """Return new frame from template with provided overrides."""
         frame = self.idle_frame_template.copy()
         if 'vehicle_type' in kwargs:
             frame[MTT_SWITCHES_VEHICLE_TYPE] = kwargs['vehicle_type']
@@ -257,10 +268,7 @@ class MTTCanDriver:
         return frame
 
     def send_can_frame(self, **kwargs):
-        """
-        Sends a CAN frame using the current can_array state, with only specified fields altered.
-        Usage: send_can_frame(throttle=60, winch=WinchState.WinchIn.value)
-        """
+        """Send one-off frame override (doesn't change internal can_array)."""
         if not self.bus:
             return
         
@@ -291,24 +299,17 @@ class MTTCanDriver:
             log.error(f"Error sending CAN frame: {e}")
 
     def _calculate_gear_ratio(self):
-        """Calculate the final gear ratio for speed conversion (exact firmware implementation)"""
-        # Firmware RPS_to_KMh_Precalc() function:
-        # ratio1 = ((float)MTT_GEAR2 / (float)MTT_GEAR1) * (float)MTT_Encoder_TEET;
-        # ratio2 = ((float)MTT_GEAR4 / (float)MTT_GEAR3) * ratio1;
-        # FinalRatio = (((float)MTT_GEAR_TRACK / (float)MTT_GEAR_DRIVE) * ratio2) * 2;
-        
-        # NOTE: This ratio is used for SPEED calculation only (RPS to km/h)
-        # For DISTANCE calculation, we use empirical measurement: 15160 ticks = 1 track turn = 3.93m
+        """Compute final gear ratio (matches firmware)."""
         
         ratio1 = (MTT_GEAR2 / MTT_GEAR1) * MTT_ENCODER_TEETH
         ratio2 = (MTT_GEAR4 / MTT_GEAR3) * ratio1
         final_ratio = ((MTT_GEAR_TRACK / MTT_GEAR_DRIVE) * ratio2) * 2
         
-        log.info(f"Encoder final ratio calculated: {final_ratio} (firmware-exact calculation, used for speed only)")
+        log.info(f"Encoder final ratio calculated: {final_ratio} (firmware-exact calculation)")
         return final_ratio
 
     def _can_listener(self):
-        """CAN listener thread for tachometer data (0x2FF frames)"""
+        """Listener thread: processes 0x2FF frames."""
         while self.can_listener_running:
             try:
                 message = self.bus.recv(timeout=0.1)
@@ -320,21 +321,13 @@ class MTTCanDriver:
                     time.sleep(0.1)
 
     def _process_tachometer_data(self, data):
-        """Process tachometer data from 0x2FF frame (MSB-first byte order)"""
+        """Decode 0x2FF frame into tachometer state."""
         if len(data) != 8:
             return
-
-        # Parse data according to specification (MSB-first byte order)
-        # Bytes 0-1: Temperature sensors (signed bytes)
-        temp_a = struct.unpack('b', data[0:1])[0]  # signed byte
-        temp_b = struct.unpack('b', data[1:2])[0]  # signed byte
-        
-        # Bytes 2-3: Instantaneous tachometer (RPS) - MSB first (Big Endian)
-        tachimeter_instant = struct.unpack('>H', data[2:4])[0]  # big-endian uint16
-        
-        # Bytes 4-7: Cumulative RPS (distance in ticks) - MSB first (Big Endian)
-        # Firmware: RxData_3[4]<<24 | RxData_3[5]<<16 | RxData_3[6]<<8 | RxData_3[7]
-        tachimeter_cumulative = struct.unpack('>I', data[4:8])[0]  # big-endian uint32
+        temp_a = struct.unpack('b', data[0:1])[0]
+        temp_b = struct.unpack('b', data[1:2])[0]
+        tachimeter_instant = struct.unpack('>H', data[2:4])[0]
+        tachimeter_cumulative = struct.unpack('>I', data[4:8])[0]
 
         # Update tachometer data structure
         self.tachometer_data.main_sensor_temp_a = float(temp_a)
@@ -344,23 +337,15 @@ class MTTCanDriver:
         self.tachometer_data.timestamp = time.time()
         self.tachometer_data.new_data_available = True
 
-        # Calculate distance traveled since last reading
         if self.last_cumulative_ticks > 0:
             tick_diff = tachimeter_cumulative - self.last_cumulative_ticks
-            if tick_diff > 0:  # Avoid negative values due to overflow
-                # Direct calculation from real-world measurement:
-                # 15160 ticks = 1 track turn = 3.93m (corrected measurement)
-                # Therefore: distance = ticks * (3.93m / 15160 ticks)
-                distance_per_tick = MTT_TRACK_LENGTH_M / 15160.0  # Empirically measured
-                distance_increment = tick_diff * distance_per_tick
-                
-                # Odometry always accumulates positive distance regardless of direction
-                # Direction is only used for speed calculation, not odometry
+            if tick_diff > 0:
+                gear_ratio_for_distance = self.encoder_final_ratio / 2
+                distance_increment = (tick_diff / gear_ratio_for_distance) * MTT_TRACK_LENGTH_M
                 self.total_distance += distance_increment
 
         self.last_cumulative_ticks = tachimeter_cumulative
 
-        # Log periodically (every 50 messages to avoid spam)
         if tachimeter_cumulative % 50 == 0:
             speed_ms = self.get_current_speed_ms()
             log.info(
@@ -370,7 +355,7 @@ class MTTCanDriver:
             )
 
     def emergency_stop(self):
-        """Emergency stop - sets all motion controls to safe values"""
+        """Immediate stop (max brake, zero throttle/winch)."""
         self.set_throttle(0)
         self.set_brake(255)
         self.set_steer(127)
@@ -378,7 +363,7 @@ class MTTCanDriver:
         log.warn("EMERGENCY STOP ACTIVATED")
 
     def is_system_ready(self):
-        """Check if system is ready for operation"""
+        """Return True if security unlocked and bus OK."""
         if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
             log.warn("System not ready: Security switch is locked")
             return False
@@ -390,12 +375,11 @@ class MTTCanDriver:
         return True
 
     def get_direction_for_calculation(self):
-        """Get direction for distance/speed calculations"""
-        # Since tachometer doesn't provide direction, we use our control direction
+        """Numeric direction multiplier."""
         return 1 if self.direction_state == DirectionState.Forward else -1
 
     def get_current_speed_ms(self) -> float:
-        """Get current speed in m/s, considering direction"""
+        """Signed speed (m/s)."""
         if not self.tachometer_data.new_data_available:
             return 0.0
         
@@ -408,7 +392,7 @@ class MTTCanDriver:
         return speed
     
     def get_current_speed_kmh(self) -> float:
-        """Get current speed in km/h, considering direction"""
+        """Signed speed (km/h)."""
         if not self.tachometer_data.new_data_available:
             return 0.0
         
@@ -421,15 +405,11 @@ class MTTCanDriver:
         return speed
     
     def get_tachometer_data(self) -> TachometerData:
-        """Get complete tachometer data structure"""
+        """Return tachometer snapshot."""
         return self.tachometer_data
     
     def get_odometry_data(self) -> dict:
-        """Get complete odometry data dictionary"""
-        # TODO: Add steering angle data for higher-level kinematic models
-        # Single track (VehicleSingleTrack): Reverse bicycle model
-        # Side-by-side (VehicleSbsLeft/Right): Skid-steer drive model
-        # Implementation will be done at ROS controller level using ros_controllers
+        """Return odometry dict (distance always positive)."""
         return {
             'speed_ms': self.get_current_speed_ms(),
             'speed_kmh': self.get_current_speed_kmh(),
@@ -444,7 +424,7 @@ class MTTCanDriver:
         }
 
     def set_deadman_switch(self, pressed=True):
-        """Set deadman switch state"""
+        """Set deadman bit."""
         with self.frame_lock:
             if pressed:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000  # Set bit 3
@@ -453,7 +433,7 @@ class MTTCanDriver:
 
     # --- Control Methods ---
     def set_steer(self, steer_value):
-        """Set steering value (0-255, 127 is center)"""
+        """Steer 0-255 (center ~127/128)."""
         if not isinstance(steer_value, int):
             log.error(f"steer_value is not an integer: {steer_value}")
             return
@@ -464,7 +444,7 @@ class MTTCanDriver:
             self.can_array[MTT_ANALOG_STEER] = steer_value
 
     def set_throttle(self, throttle_value):
-        """Set throttle value (0-230)"""
+        """Throttle 0-230."""
         if not isinstance(throttle_value, int):
             log.error(f"throttle_value is not an integer: {throttle_value}")
             return
@@ -475,7 +455,7 @@ class MTTCanDriver:
             self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
 
     def set_brake(self, brake_value):
-        """Set brake value (0-255)"""
+        """Brake 0-255."""
         if not isinstance(brake_value, int):
             log.error(f"brake_value is not an integer: {brake_value}")
             return
@@ -486,28 +466,25 @@ class MTTCanDriver:
             self.can_array[MTT_ANALOG_BRAKE] = brake_value
 
     def set_winch_state(self, winch_state):
-        """Set winch state - holds the state until explicitly changed"""
-        if winch_state == WinchState.WinchNeutral:
-            with self.frame_lock:
-                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchNeutral.value
-                self.winch_state = WinchState.WinchNeutral
-                    
-        elif winch_state == WinchState.WinchIn:
-            with self.frame_lock:
-                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchIn.value
-                self.winch_state = WinchState.WinchIn
-                    
-        elif winch_state == WinchState.WinchOut:
-            with self.frame_lock:
-                self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchOut.value
-                self.winch_state = WinchState.WinchOut
-                    
-        else:
-            log.error(f"invalid value for winch_state: {winch_state}")
+        """Set winch state (auto-neutral watchdog optional)."""
+        # Accept raw int or Enum for robustness
+        if isinstance(winch_state, int):
+            try:
+                # Map int to enum if matches value else error
+                winch_state = WinchState(winch_state)
+            except ValueError:
+                log.error(f"invalid raw int for winch_state: {winch_state}")
+                return
+        if not isinstance(winch_state, WinchState):
+            log.error(f"invalid type for winch_state: {winch_state}")
             return
+        with self.frame_lock:
+            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+            self.winch_state = winch_state
+            self.last_winch_command_time = time.time()
     
     def set_security_switch(self, switch_value):
-        """Set security switch state"""
+        """Set security switch (bit7)."""
         if switch_value == SecuritySwitchState.SafetyLocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111  # Clear bit 7
@@ -524,7 +501,7 @@ class MTTCanDriver:
 
 
     def set_direction(self, direction):
-        """Set vehicle direction"""
+        """Set direction bit."""
         if direction == DirectionState.Forward:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000  # Set bit 5
@@ -543,7 +520,7 @@ class MTTCanDriver:
 
 
     def set_light_state(self, light_state):
-        """Set light state"""
+        """Set light bit."""
         if light_state == LightState.Off:
             with self.frame_lock:
                 self.light_state = LightState.Off
@@ -559,7 +536,7 @@ class MTTCanDriver:
 
 
     def set_direction_mode(self, direction_mode):
-        """Set direction mode"""
+        """Set open/close loop bit0 of byte6."""
         if direction_mode == DirectionMode.CloseLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
@@ -575,7 +552,7 @@ class MTTCanDriver:
 
 
     def set_vehicle_type(self, vehicle_type):
-        """Set vehicle type"""
+        """Set vehicle type byte0."""
         if vehicle_type == VehicleType.VehicleSingleTrack:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
@@ -596,7 +573,7 @@ class MTTCanDriver:
             return
 
     def cleanup(self):
-        """Clean up resources before shutting down"""
+        """Stop threads + shutdown bus."""
         self.sender_running = False
         if hasattr(self, 'sender_thread'):
             self.sender_thread.join(timeout=1.0)
@@ -610,17 +587,22 @@ class MTTCanDriver:
             log.info("CAN driver cleaned up")
 
     def get_current_frame_hex(self):
-        """Get the current CAN frame as hex string for debugging"""
+        """Hex dump of current frame."""
         return " ".join([f"{b:02X}" for b in self.can_array])
 
     def _sender_loop(self):
-        """Continuously sends keepalive frames at 20Hz to maintain communication"""
+        """Keepalive thread (20Hz)."""
         while self.sender_running:
             try:
                 with self.frame_lock:
-                    # Send current frame state as keepalive
+                    # Auto-neutral winch after timeout if feature enabled
+                    if self.winch_auto_neutral_ms > 0 and self.winch_state != WinchState.WinchNeutral:
+                        if (time.time() - self.last_winch_command_time) * 1000.0 > self.winch_auto_neutral_ms:
+                            self.can_array[MTT_ANALOG_WINCH] = WinchState.WinchNeutral.value
+                            self.winch_state = WinchState.WinchNeutral
+                            log.debug("Winch auto-neutral applied by driver watchdog")
                     frame_data = self.can_array.copy()
-                
+
                 message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
                 self.bus.send(message)
                 log.debug(f"Keepalive frame: {' '.join([f'{b:02X}' for b in frame_data])}")
@@ -632,5 +614,5 @@ class MTTCanDriver:
                 if self.sender_running:
                     log.error(f"Keepalive error: {e}")
             
-            time.sleep(0.05)  # Send at 20 Hz (50ms interval) for reliable keepalive
+            time.sleep(0.05)
 
