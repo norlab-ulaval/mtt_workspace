@@ -54,8 +54,6 @@ class DirectionMode(Enum):
 class DirectionState(Enum):
     Forward = 0x00
     Reverse = 0x01
-    Forward = 0x00
-    Reverse = 0x01
 
 class WinchState(Enum):
     WinchNeutral = 0x7F  # 127 - matches RF remote idle frame

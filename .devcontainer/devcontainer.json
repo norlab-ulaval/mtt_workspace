@@ -111,8 +111,7 @@
     "--ipc=host",
 
     // Joystick devices
-    "--device=/dev/input/js0",
-    "--device=/dev/input/event0",
+    "--device=/dev/input",
 
     // Give container user access to input devices
     "--group-add=input",

@@ -26,10 +26,13 @@ def generate_launch_description():
         can_interface_arg,
         
         Node(
-            package='joy',
-            executable='joy_node',
+            package='joy_linux',
+            executable='joy_linux_node',
             name='joy_node',
-            parameters=[{'deadzone': 0.15}]
+            parameters=[{
+                'deadzone': 0.15,
+                'device_name': '/dev/input/js0'
+            }]
         ),
         Node(
             package='mtt_driver',
