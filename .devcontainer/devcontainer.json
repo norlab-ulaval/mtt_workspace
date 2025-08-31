@@ -131,4 +131,3 @@
   "onCreateCommand": ".devcontainer/on_create.bash",
   "updateContentCommand": ".devcontainer/on_update.bash"
 }
-

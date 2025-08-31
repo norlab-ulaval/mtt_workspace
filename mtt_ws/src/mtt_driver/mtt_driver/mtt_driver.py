@@ -54,6 +54,8 @@ class DirectionMode(Enum):
 class DirectionState(Enum):
     Forward = 0x00
     Reverse = 0x01
+    Forward = 0x00
+    Reverse = 0x01
 
 class WinchState(Enum):
     WinchNeutral = 0x7F  # 127 - matches RF remote idle frame
@@ -241,6 +243,18 @@ class MTTCanDriver:
         self.set_security_switch(SecuritySwitchState.SafetyUnlocked)
         log.info("Local E-STOP released in driver")
 
+        # Some of these services might be deleted in the future to limit access to some low level functionalities
+        # self.set_vehicle_type_srv = self.create_service(SetVehiculeTypeSrv, 'mtt_driver/set_vehicule_type', self.set_vehicle_type_service)
+        # self.set_security_switch_srv = self.create_service(SetSecuritySwitchSrv, 'mtt_driver/set_security_switch_service', self.set_security_switch_service)
+        # self.set_direction_srv = self.create_service(SetDirectionSrv, 'mtt_driver/set_direction_service', self.set_direction_service)
+        # self.set_light_state_srv = self.create_service(SetLightStateSrv, 'mtt_driver/set_light_state_service', self.set_light_state_service)
+        # self.set_throttle_srv = self.create_service(SetThrottleSrv, 'mtt_driver/set_throttle_service', self.set_throttle_service)
+        # self.set_winch_state_srv = self.create_service(SetWinchStateSrv, 'mtt_driver/set_winch_state_service', self.set_winch_state_service)
+        # self.set_brake_srv = self.create_service(SetBrakeSrv, 'mtt_driver/set_brake_service', self.set_brake_service)
+        # self.set_steer_srv = self.create_service(SetSteerSrv, 'mtt_driver/set_steer_service', self.set_steer_service)
+        # self.set_direction_mode_srv = self.create_service(SetDirectionModeSrv, 'mtt_driver/set_direction_mode_service', self.set_direction_mode_service)
+
+
 
     def __del__(self):
         self.cleanup()
@@ -371,19 +385,25 @@ class MTTCanDriver:
         if not isinstance(steer_value, int):
             print("ERROR: steer_value is not an integer: " + str(steer_value))
             return False
+            return False
 
+        # out of bound values are ignored
         # out of bound values are ignored
         if steer_value > 255:
             print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
+            return False
             return False
 
         if steer_value < 0:
             print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
             return False
+            return False
 
         with self.frame_lock:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
+
+            return True
 
             return True
 
@@ -398,15 +418,19 @@ class MTTCanDriver:
         if throttle_value > 230:
             print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
             return False
+            return False
 
         if throttle_value < 0:
             print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
+            return False
             return False
 
         if throttle_value >= 0 and throttle_value <= 230:
             with self.frame_lock:
                 self.throttle_value = throttle_value  
                 self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
+
+            return True
 
             return True
 
@@ -421,15 +445,19 @@ class MTTCanDriver:
         if brake_value > 255:
             print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
             return False
+            return False
 
         if brake_value < 0:
             print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
+            return False
             return False
 
         if brake_value >= 0 and brake_value <= 255:
             with self.frame_lock:
                 self.brake_value = brake_value
                 self.can_array[MTT_ANALOG_BRAKE] = brake_value
+
+            return True
 
             return True
 
@@ -461,10 +489,14 @@ class MTTCanDriver:
 
             return True
 
+            return True
+
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
+
+            return True
 
             return True
 
@@ -523,6 +555,8 @@ class MTTCanDriver:
 
             return True
 
+            return True
+
         elif direction_mode == DirectionMode.OpenLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
@@ -541,6 +575,8 @@ class MTTCanDriver:
 
             return True
 
+            return True
+
         elif vehicle_type == VehicleType.VehicleSbsLeft:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
@@ -550,6 +586,8 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
                 self.vehicle_type = VehicleType.VehicleSbsRight
+
+            return True
 
             return True
 
