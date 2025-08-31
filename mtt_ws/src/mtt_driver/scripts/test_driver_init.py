@@ -39,15 +39,12 @@ def test_driver_initialization(can_interface='vcan0'):
     try:
         # Test 1: Basic initialization
         log.info(f"Test 1: Basic driver initialization on {can_interface}")
-        driver = MTTCanDriver(
-            can_interface=can_interface,
-            winch_auto_neutral_ms=300,
-            start_forward=False,  # Set to False to get byte[1] = 64 instead of 96
-            #start_forward=True,  # Set to True to get byte[1] = 96 instead of 64
-            steer_center=128,
-            initial_global_switches=0x40,
-            reserved_byte=0x00
-        )
+        driver = MTTCanDriver(can_interface=can_interface)
+        
+        # Configure driver to get the desired frame [0, 64, 0, 127, 0, 128, 0, 0]
+        from mtt_driver import DirectionState
+        driver.set_direction(DirectionState.Reverse)  # To get byte 1 = 64 instead of 96
+        driver.set_steer(128)  # To get byte 5 = 128 instead of 127
         log.info("✓ Driver initialized successfully")
         
         # Test 2: Check initial frame

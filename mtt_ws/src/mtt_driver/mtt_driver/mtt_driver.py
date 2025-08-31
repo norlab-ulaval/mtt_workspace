@@ -199,7 +199,7 @@ class MTTCanDriver:
         self.brake_value = 0
         self.winch_state = WinchState.WinchNeutral
         self.security_switch_state = SecuritySwitchState.SafetyLocked  # bit7 cleared in 0x40
-        self.direction_state = DirectionState.Forward if start_forward else DirectionState.Reverse
+        self.direction_state = DirectionState.Forward  # Default to forward
         self.direction_mode = DirectionMode.OpenLoop
         self.light_state = LightState.Off
 
