@@ -13,7 +13,7 @@ def generate_launch_description():
     
     can_interface_arg = DeclareLaunchArgument(
         'can_interface',
-        default_value='can0',
+        default_value='vcan0',
         description='CAN interface to use (can0 for robot, vcan0 for testing)'
     )
     

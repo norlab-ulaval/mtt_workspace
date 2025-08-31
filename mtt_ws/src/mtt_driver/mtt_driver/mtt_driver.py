@@ -188,11 +188,11 @@ class MTTCanDriver:
         self.direction_mode = DirectionMode.OpenLoop
         self.light_state = LightState.Off
 
-    # Initial direction bit
-        if start_forward:
-            self._set_global_bit(5, True)
-        else:
-            self._set_global_bit(5, False)
+    # # Initial direction bit
+    #     if start_forward:
+    #         self._set_global_bit(5, True)
+    #     else:
+    #         self._set_global_bit(5, False)
 
     # Odometry state
         self.tachometer_data = TachometerData()
