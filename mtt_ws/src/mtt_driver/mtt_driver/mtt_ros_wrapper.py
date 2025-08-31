@@ -29,14 +29,7 @@ class MTTRosWrapper(Node):
             self.get_logger().info(f"CAN interface: {can_interface}")
 
         try:
-            self.driver = MTTCanDriver(
-                can_interface,
-                winch_auto_neutral_ms=winch_auto_neutral_ms if winch_auto_neutral_ms >= 0 else 300,
-                start_forward=True,
-                steer_center=128,
-                initial_global_switches=0x40,
-                reserved_byte=0x00
-            )
+            self.driver = MTTCanDriver(can_interface)
             self.get_logger().info("MTT Driver initialized successfully")
         except Exception as e:
             self.get_logger().fatal(f"Could not start driver: {e}")
@@ -45,6 +38,7 @@ class MTTRosWrapper(Node):
         self.is_estopped = True
         self.ros_position_x = 0.0
         self.last_driver_distance = 0.0
+        self.send_frame_period = 0.05
 
         self.create_subscription(Twist, 'cmd_vel', self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, 'mtt_aux_cmd', self.aux_cmd_callback, 10)
@@ -56,6 +50,13 @@ class MTTRosWrapper(Node):
         self.steer_pub = self.create_publisher(UInt8, 'mtt_steer_cmd', 10)
         self.create_timer(0.05, self.control_loop)
         self.get_logger().info("Wrapper ready (E-stop active).")
+
+        self.timer = self.create_timer(self.send_frame_period, self.send_can_frame)
+
+
+    def send_can_frame(self):
+        self.driver.send_can_frame()
+
 
     def cmd_vel_callback(self, msg: Twist):
         """Handle standard ROS velocity commands."""
@@ -77,7 +78,7 @@ class MTTRosWrapper(Node):
         """Handle auxiliary commands (brake, winch, dead man's switch, light toggle)."""
         if not msg.dead_man_switch and not self.is_estopped:
             self.is_estopped = True
-            self.driver.apply_estop()
+            self.driver.emergency_stop()
             self.get_logger().warn("E-STOP ENGAGED (Dead man's switch released).")
         elif msg.dead_man_switch and self.is_estopped:
             self.is_estopped = False
@@ -107,7 +108,7 @@ class MTTRosWrapper(Node):
     def control_loop(self):
         """Main control loop - publishes tachometer data and manages safety state."""
         if self.is_estopped and not self.driver.estop_active:
-            self.driver.apply_estop()
+            self.driver.emergency_stop()
         elif not self.is_estopped and self.driver.estop_active:
             self.driver.release_estop()
         

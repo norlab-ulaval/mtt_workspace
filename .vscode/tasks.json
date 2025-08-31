@@ -1,0 +1,26 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "type": "shell",
+      "command": [
+        "colcon",
+        "build",
+        "--symlink-install",
+        "--event-handlers",
+        "console_cohesion+",
+        "--base-paths",
+        "${workspaceFolder}/mtt_ws",
+        "--cmake-args",
+        "-DCMAKE_BUILD_TYPE=RelWithDebInfo",
+        "-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
+      ],
+      "problemMatcher": ["$colcon-gcc"],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "label": "colcon: Colcon Build with compile_commands"
+    }
+  ]
+}
