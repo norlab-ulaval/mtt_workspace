@@ -378,11 +378,10 @@ class MTTCanDriver:
         """Steer 0-255 (center ~127/128)."""
         if not isinstance(steer_value, int):
             log.error(f"steer_value is not an integer: {steer_value}")
-            return
+            return False
 
         if not isinstance(steer_value, int):
             print("ERROR: steer_value is not an integer: " + str(steer_value))
-            return False
             return False
 
         # out of bound values are ignored
@@ -390,18 +389,14 @@ class MTTCanDriver:
         if steer_value > 255:
             print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
             return False
-            return False
 
         if steer_value < 0:
             print("WARNING: out of bound value " + str(steer_value) + " for steer_value")
-            return False
             return False
 
         with self.frame_lock:
             self.steer_value = steer_value
             self.can_array[MTT_ANALOG_STEER] = steer_value
-
-            return True
 
             return True
 
@@ -416,19 +411,15 @@ class MTTCanDriver:
         if throttle_value > 230:
             print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
             return False
-            return False
 
         if throttle_value < 0:
             print("WARNING: out of bound value " + str(throttle_value) + " for throttle_value")
-            return False
             return False
 
         if throttle_value >= 0 and throttle_value <= 230:
             with self.frame_lock:
                 self.throttle_value = throttle_value  
                 self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
-
-            return True
 
             return True
 
@@ -443,19 +434,15 @@ class MTTCanDriver:
         if brake_value > 255:
             print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
             return False
-            return False
 
         if brake_value < 0:
             print("WARNING: out of bound value " + str(brake_value) + " for brake_value")
             return False
-            return False
-
+        
         if brake_value >= 0 and brake_value <= 255:
             with self.frame_lock:
                 self.brake_value = brake_value
                 self.can_array[MTT_ANALOG_BRAKE] = brake_value
-
-            return True
 
             return True
 
@@ -469,10 +456,10 @@ class MTTCanDriver:
                 winch_state = WinchState(winch_state)
             except ValueError:
                 log.error(f"invalid raw int for winch_state: {winch_state}")
-                return
+                return False
         if not isinstance(winch_state, WinchState):
             log.error(f"invalid type for winch_state: {winch_state}")
-            return
+            return False
         with self.frame_lock:
             self.can_array[MTT_ANALOG_WINCH] = winch_state.value
             self.winch_state = winch_state
@@ -487,14 +474,10 @@ class MTTCanDriver:
 
             return True
 
-            return True
-
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000  # Set bit 7
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
-
-            return True
 
             return True
 
@@ -523,7 +506,7 @@ class MTTCanDriver:
 
         else:
             log.error(f"invalid value for direction: {direction}")
-            return
+            return False
 
 
     def set_light_state(self, light_state):
@@ -541,7 +524,7 @@ class MTTCanDriver:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b10111111  # Clear bit 6
         else:
             log.error(f"invalid value for light_state: {light_state}")
-            return
+            return False
 
 
     def set_direction_mode(self, direction_mode):
@@ -553,15 +536,13 @@ class MTTCanDriver:
 
             return True
 
-            return True
-
         elif direction_mode == DirectionMode.OpenLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
                 self.direction_mode = DirectionMode.OpenLoop
         else:
             log.error(f"invalid value for direction_mode: {direction_mode}")
-            return
+            return False
 
 
     def set_vehicle_type(self, vehicle_type):
@@ -570,8 +551,6 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
                 self.vehicle_type = VehicleType.VehicleSingleTrack
-
-            return True
 
             return True
 
@@ -584,8 +563,6 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_VEHICLE_TYPE] = vehicle_type.value
                 self.vehicle_type = VehicleType.VehicleSbsRight
-
-            return True
 
             return True
 
