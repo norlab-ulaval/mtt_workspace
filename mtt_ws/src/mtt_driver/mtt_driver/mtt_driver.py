@@ -14,6 +14,7 @@ from dataclasses import dataclass, replace
 
 log = logging.getLogger("MTTCanDriver")
 
+
 def setup_logging(level=logging.INFO):
     """Configure system logging for the MTT driver."""
     log.setLevel(level)
@@ -21,6 +22,7 @@ def setup_logging(level=logging.INFO):
         handler = logging.StreamHandler()
         handler.setFormatter(logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s"))
         log.addHandler(handler)
+
 
 # Default logging setup - can be overridden by calling setup_logging()
 setup_logging()
@@ -139,35 +141,16 @@ class MTTCanDriver:
     raw device resolution values from upstream clients.
     """
 
-    def __init__(self, can_interface="can0", log_level=logging.INFO):
+    def __init__(self, can_interface="can0", log_level=logging.INFO, node_id=0x001):
         """Construct driver."""
         # Configure this driver's logging level
         setup_logging(log_level)
-        
-        self.estop_active = True
         self.frame_lock = threading.RLock()  # Re-entrant lock to avoid self-deadlock
-        self.node_id = 0x001
+        self.node_id = node_id
         self.can_interface = can_interface
 
-        timeout_seconds = 10
-        check_interval = 0.5
-        elapsed = 0.0
-        log.debug(f"Waiting for CAN interface '{can_interface}'...")
-        while not interface_exists(can_interface) and elapsed < timeout_seconds:
-            time.sleep(check_interval)
-            elapsed += check_interval
-        if not interface_exists(can_interface):
-            log.error(f"CAN interface '{can_interface}' not found after {timeout_seconds} seconds.")
-            raise Exception(f"CAN interface '{can_interface}' not available")
-        try:
-            self.bus = can.interface.Bus(can_interface, bustype="socketcan")
-            log.info(f"Successfully initialized CAN bus on '{can_interface}'")
-        except OSError as e:
-            log.error(f"Failed to initialize CAN bus: {e}")
-            raise
-
-        self.can_array = [0] * 8
-
+        # Check CAN interface availability and initialize
+        self._check_and_initialize_can_interface()
         self.vehicle_type = None
         self.steer_value = None
         self.throttle_value = None
@@ -177,7 +160,16 @@ class MTTCanDriver:
         self.direction_state = None
         self.direction_mode = None
         self.light_state = None
+        self.can_listener_running = True
+        self.can_array = [0] * 8
+        self._setup_initial_frame()
 
+        self.tachometer_data = TachometerData()
+        self.encoder_final_ratio = self._calculate_gear_ratio()
+        self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
+        self.can_listener_thread.start()
+
+    def _setup_initial_frame(self):
         self.set_vehicle_type(VehicleType.VehicleSingleTrack)
         self.set_security_switch(SecuritySwitchState.SafetyLocked)
         self.set_direction(DirectionState.Forward)
@@ -188,54 +180,46 @@ class MTTCanDriver:
         self.set_steer(STEER_CENTER)
         self.set_direction_mode(DirectionMode.CloseLoop)
 
-        self.tachometer_data = TachometerData()
-        self.encoder_final_ratio = self._calculate_gear_ratio()
-        self.current_direction = self.direction_state
+    def _check_and_initialize_can_interface(self, timeout_seconds=10, check_interval=0.5):
+        """Check CAN interface availability and initialize the bus.
 
-        self.can_listener_running = True
-        self.can_listener_thread = threading.Thread(target=self._can_listener, daemon=True)
-        self.can_listener_thread.start()
-        self._last_sent_frame = None
+        Args:
+            timeout_seconds (int): Maximum time to wait for interface availability
+            check_interval (float): Time between availability checks
 
-    def emergency_stop(self):
-        """Latch E-stop."""
-        with self.frame_lock:
-            if self.estop_active:
-                return
-            self.estop_active = True
-            if self.security_switch_state != SecuritySwitchState.SafetyLocked:
-                self.set_security_switch(SecuritySwitchState.SafetyLocked)
-            self.set_throttle(0)
-            self.set_brake(BRAKE_MAX)
-            self.set_winch_state(WinchState.WinchNeutral)
-            if self.steer_value is None:
-                self.set_steer(STEER_CENTER)
-        log.warning("Local E-STOP applied in driver")
+        Raises:
+            Exception: If CAN interface is not available or initialization fails
+        """
+        elapsed = 0.0
+        log.debug(f"Waiting for CAN interface '{self.can_interface}'...")
 
-    def release_estop(self):
-        """Release E-stop and restore idle command values."""
-        log.debug(f"release_estop() called: estop_active={self.estop_active}")
-        with self.frame_lock:
-            if not self.estop_active:
-                log.debug("release_estop() returning early - already not estopped")
-                return
-            self.estop_active = False
-            if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
-                log.debug(f"Setting security switch to unlocked: before={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
-                self.set_security_switch(SecuritySwitchState.SafetyUnlocked)
-                log.debug(f"Setting security switch to unlocked: after={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
-            else:
-                log.debug("Security switch already unlocked")
-            self.set_brake(0)
-            self.set_throttle(0)
-            self.set_winch_state(WinchState.WinchNeutral)
-            if self.steer_value is None:
-                self.set_steer(STEER_CENTER)
-        
-        log.info("E-STOP released")
+        while not interface_exists(self.can_interface) and elapsed < timeout_seconds:
+            time.sleep(check_interval)
+            elapsed += check_interval
+
+        if not interface_exists(self.can_interface):
+            log.error(f"CAN interface '{self.can_interface}' not found after {timeout_seconds} seconds.")
+            raise Exception(f"CAN interface '{self.can_interface}' not available")
+
+        try:
+            self.bus = can.interface.Bus(self.can_interface, bustype="socketcan")
+            log.info(f"Successfully initialized CAN bus on '{self.can_interface}'")
+        except OSError as e:
+            log.error(f"Failed to initialize CAN bus: {e}")
+            raise
 
     def __del__(self):
-        self.cleanup()
+        self._cleanup()
+
+    def _cleanup(self):
+        """Stop threads + shutdown bus."""
+        self.can_listener_running = False
+        if hasattr(self, "can_listener_thread"):
+            self.can_listener_thread.join(timeout=1.0)
+
+        if hasattr(self, "bus") and self.bus:
+            self.bus.shutdown()
+            log.info("CAN driver cleaned up")
 
     def _calculate_gear_ratio(self):
         """Compute final gear ratio (matches firmware)."""
@@ -250,12 +234,13 @@ class MTTCanDriver:
         """Convert cumulative encoder ticks to absolute distance in meters (hardware specification)."""
         if cumulative_ticks == 0:
             return 0.0
-        
+
         # Use the same formula as the original implementation
         gear_ratio_for_distance = self.encoder_final_ratio / 2
         absolute_distance_m = (cumulative_ticks / gear_ratio_for_distance) * MTT_TRACK_LENGTH_M
         return absolute_distance_m
 
+    #######################
     def _can_listener(self):
         """Listener thread: processes 0x2FF frames."""
         while self.can_listener_running:
@@ -299,7 +284,7 @@ class MTTCanDriver:
                     f"Temp A: {temp_a}°C, Temp B: {temp_b}°C"
                 )
 
-    def get_current_speed_ms(self) -> float:
+    def _get_current_speed_ms(self) -> float:
         """Signed speed (m/s)."""
         with self.frame_lock:
             if not self.tachometer_data.new_data_available:
@@ -309,7 +294,7 @@ class MTTCanDriver:
                 speed = -speed
             return speed
 
-    def get_current_speed_kmh(self) -> float:
+    def _get_current_speed_kmh(self) -> float:
         """Signed speed (km/h)."""
         with self.frame_lock:
             if not self.tachometer_data.new_data_available:
@@ -324,7 +309,7 @@ class MTTCanDriver:
         with self.frame_lock:
             return replace(self.tachometer_data)
 
-    def get_odometry_snapshot(self) -> dict:
+    def _get_odometry_snapshot(self) -> dict:
         """Return a consistent snapshot dict (distance always positive)."""
         with self.frame_lock:
             speed_ms = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
@@ -345,96 +330,100 @@ class MTTCanDriver:
                 "data_age_ms": ((time.time() - ts) * 1000 if ts > 0 else 0),
             }
 
-    def set_steer(self, steer_value):
-        """Set raw steering value (0..STEER_MAX). Center ~STEER_CENTER."""
-        if not isinstance(steer_value, int):
-            log.error(f"steer_value is not an integer: {steer_value}")
-            return False
-
-        if steer_value > STEER_MAX:
-            log.warning(f"out of bound value {steer_value} for steer_value")
-            return False
-        if steer_value < 0:
-            log.warning(f"out of bound value {steer_value} for steer_value")
-            return False
-
+    #########################
+    def emergency_stop(self):
+        """Latch E-stop."""
         with self.frame_lock:
-            self.steer_value = steer_value
-            self.can_array[MTT_ANALOG_STEER] = steer_value
-        return True
+            if self.security_switch_state != SecuritySwitchState.SafetyLocked:
+                self._set_security_switch(SecuritySwitchState.SafetyLocked)
+            self.set_throttle(0)
+            self.set_brake(BRAKE_MAX)
+            self.set_winch_state(WinchState.WinchNeutral)
+        log.warning("Local E-STOP applied in driver")
 
-    def set_throttle(self, throttle_value):
-        """Set raw throttle (0..THROTTLE_MAX)."""
-        if not isinstance(throttle_value, int):
-            log.error(f"throttle_value is not an integer: {throttle_value}")
-            return
-
-        if throttle_value > THROTTLE_MAX:
-            log.warning(f"out of bound value {throttle_value} for throttle_value")
-            return False
-
-        if throttle_value < 0:
-            log.warning(f"out of bound value {throttle_value} for throttle_value")
-            return False
-
-        if throttle_value >= 0 and throttle_value <= THROTTLE_MAX:
-            with self.frame_lock:
-                self.throttle_value = throttle_value
-                self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
-            return True
-
-    def set_brake(self, brake_value):
-        """Set raw brake (0..BRAKE_MAX)."""
-        if not isinstance(brake_value, int):
-            log.error(f"brake_value is not an integer: {brake_value}")
-            return False
-
-        if brake_value > BRAKE_MAX:
-            log.warning(f"out of bound value {brake_value} for brake_value")
-            return False
-        if brake_value < 0:
-            log.warning(f"out of bound value {brake_value} for brake_value")
-            return False
-        if brake_value >= 0 and brake_value <= BRAKE_MAX:
-            with self.frame_lock:
-                self.brake_value = brake_value
-                self.can_array[MTT_ANALOG_BRAKE] = brake_value
-            return True
-
-    def set_winch_state(self, winch_state):
-        """Set winch state."""
-        if isinstance(winch_state, int):
-            try:
-                winch_state = WinchState(winch_state)
-            except ValueError:
-                log.error(f"invalid raw int for winch_state: {winch_state}")
-                return False
-        if not isinstance(winch_state, WinchState):
-            log.error(f"invalid type for winch_state: {winch_state}")
-            return False
+    def release_estop(self):
+        """Release E-stop and restore idle command values."""
+        log.debug(f"release_estop() called: estop_active={self.estop_active}")
         with self.frame_lock:
-            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
-            self.winch_state = winch_state
-        return True
+            if not self.estop_active:
+                log.debug("release_estop() returning early - already not estopped")
+                return
+            self.estop_active = False
+            if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
+                log.debug(f"Setting security switch to unlocked: before={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
+                self._set_security_switch(SecuritySwitchState.SafetyUnlocked)
+                log.debug(f"Setting security switch to unlocked: after={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
+            else:
+                log.debug("Security switch already unlocked")
+            # self.set_brake(0)
+            # self.set_throttle(0)
+            # self.set_winch_state(WinchState.WinchNeutral)
+            # if self.steer_value is None:
+            #     self.set_steer(STEER_CENTER)
 
-    def set_security_switch(self, switch_value):
+        log.info("E-STOP released")
+
+    def _set_security_switch(self, switch_value):
         """Set security switch (bit7)."""
         if switch_value == SecuritySwitchState.SafetyLocked:
             with self.frame_lock:
-                # self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111
-                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111
                 self.security_switch_state = SecuritySwitchState.SafetyLocked
             return True
 
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
-                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
             return True
 
         else:
             log.error(f"invalid value for switch_value: {switch_value}")
+            return False
+
+    def _set_steer(self, steer_value):
+        """Set raw steering value (0..STEER_MAX). Center ~STEER_CENTER."""
+        if not isinstance(steer_value, int):
+            log.error(f"steer_value is not an integer: {steer_value}")
+            return False
+
+        if steer_value >= 0 and steer_value <= STEER_MAX:
+            with self.frame_lock:
+                self.steer_value = steer_value
+                self.can_array[MTT_ANALOG_STEER] = steer_value
+            return True
+        else:
+            log.warning(f"out of bound value {steer_value} for steer_value")
+            return False
+
+    def _set_throttle(self, throttle_value):
+        """Set raw throttle (0..THROTTLE_MAX)."""
+        if not isinstance(throttle_value, int):
+            log.error(f"throttle_value is not an integer: {throttle_value}")
+            return
+
+        if throttle_value >= 0 and throttle_value <= THROTTLE_MAX:
+            with self.frame_lock:
+                self.throttle_value = throttle_value
+                self.can_array[MTT_ANALOG_THROTTLE] = throttle_value
+            return True
+        else:
+            log.warning(f"out of bound value {throttle_value} for throttle_value")
+            return False
+
+    def _set_brake(self, brake_value):
+        """Set raw brake (0..BRAKE_MAX)."""
+        if not isinstance(brake_value, int):
+            log.error(f"brake_value is not an integer: {brake_value}")
+            return False
+
+        if brake_value >= 0 and brake_value <= BRAKE_MAX:
+            with self.frame_lock:
+                self.brake_value = brake_value
+                self.can_array[MTT_ANALOG_BRAKE] = brake_value
+            return True
+        else:
+            log.warning(f"out of bound value {brake_value} for brake_value")
             return False
 
     def set_direction(self, direction):
@@ -455,6 +444,29 @@ class MTTCanDriver:
 
         else:
             log.error(f"invalid value for direction: {direction}")
+            return False
+
+    def set_winch_state(self, winch_state):
+        """Set winch state."""
+        if winch_state == WinchState.WinchNeutral:
+            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+            self.winch_state = WinchState.WinchNeutral
+
+            return True
+
+        elif winch_state == WinchState.WinchIn:
+            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+            self.winch_state = WinchState.WinchIn
+
+            return True
+
+        elif winch_state == WinchState.WinchOut:
+            self.can_array[MTT_ANALOG_WINCH] = winch_state.value
+            self.winch_state = WinchState.WinchOut
+
+            return True
+        else:
+            print("ERROR: invalid value for winch_state: " + str(winch_state))
             return False
 
     def set_light_state(self, light_state):
@@ -515,22 +527,12 @@ class MTTCanDriver:
             log.error(f"invalid value for vehicle_type: {vehicle_type}")
             return False
 
-    def cleanup(self):
-        """Stop threads + shutdown bus."""
-        self.can_listener_running = False
-        if hasattr(self, "can_listener_thread"):
-            self.can_listener_thread.join(timeout=1.0)
-
-        if hasattr(self, "bus") and self.bus:
-            self.bus.shutdown()
-            log.info("CAN driver cleaned up")
-
-    def get_current_frame_hex(self):
+    def _get_current_frame_hex(self):
         """Hex dump of current frame."""
         with self.frame_lock:
             return " ".join(f"{b:02X}" for b in self.can_array)
 
-    def send_can_frame(self):
+    def _send_can_frame(self):
         """Send keepalive frame to maintain communication."""
         if (
             self.vehicle_type == None
@@ -557,9 +559,6 @@ class MTTCanDriver:
 
             message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
             self.bus.send(message)
-            if frame_data != self._last_sent_frame:
-                log.debug("TX frame: %s (estop=%s)" % (" ".join(f"{b:02X}" for b in frame_data), self.estop_active))
-            self._last_sent_frame = frame_data
 
         except (OSError, can.CanOperationError) as e:
             log.error(f"CAN send failed: {e}")
@@ -574,46 +573,43 @@ class MTTCanDriver:
                 log.error(f"Failed to reinitialize CAN bus: {init_e}")
                 self.bus = None
 
-    def set_throttle_percent(self, percent: float):
+    def set_throttle(self, percent: float):
         """Set throttle using percentage 0..1 (values outside range are clamped)."""
-        if percent is None:
-            return None
-        if not isinstance(percent, (int, float)):
-            log.error(f"throttle percent not numeric: {percent}")
-            return None
-        percent = max(0.0, min(1.0, float(percent)))
-        raw = int(round(percent * THROTTLE_MAX))
-        ok = self.set_throttle(raw)
-        return raw if ok else None
-
-    def set_brake_percent(self, percent: float):
-        """Set brake using percentage 0..1 (values outside range are clamped)."""
-        if percent is None:
-            return None
-        if not isinstance(percent, (int, float)):
-            log.error(f"brake percent not numeric: {percent}")
-            return None
-        percent = max(0.0, min(1.0, float(percent)))
-        raw = int(round(percent * BRAKE_MAX))
-        ok = self.set_brake(raw)
-        return raw if ok else None
-
-    def set_steer_normalized(self, value: float):
-        """Set steering using normalized value in [-1, 1]. 0 is center."""
-        if value is None:
-            return None
-        if not isinstance(value, (int, float)):
-            log.error(f"steer normalized not numeric: {value}")
-            return None
-        v = max(-1.0, min(1.0, float(value)))
-        if abs(v) < STEER_DEADBAND:
-            raw = STEER_CENTER
+        if isinstance(percent, float):
+            percent = max(0.0, min(1.0, float(percent)))
+            raw = int(round(percent * THROTTLE_MAX))
+            self._set_throttle(raw)
+            return True
         else:
-            raw = int((v + 1.0) * 0.5 * STEER_MAX)
-            if raw in (STEER_CENTER, STEER_CENTER + 1) and abs(v) < (STEER_DEADBAND * 1.5):
+            log.error(f"throttle percent not numeric: {percent}")
+            return False
+
+    def set_brake(self, percent: float):
+        """Set brake using percentage 0..1 (values outside range are clamped)."""
+        if isinstance(percent, float):
+            percent = max(0.0, min(1.0, float(percent)))
+            raw = int(round(percent * BRAKE_MAX))
+            self._set_brake(raw)
+            return True
+        else:
+            log.error(f"brake percent not numeric: {percent}")
+            return False
+
+    def set_steer(self, steer_value: float):
+        """Set steering using normalized value -1..1 (values outside range are clamped)."""
+        if isinstance(steer_value, float):
+            clamped_value = max(-1.0, min(1.0, float(steer_value)))
+            if abs(clamped_value) < STEER_DEADBAND:
                 raw = STEER_CENTER
-        ok = self.set_steer(raw)
-        return raw if ok else None
+            else:
+                raw = int(round((clamped_value + 1.0) * 0.5 * STEER_MAX))
+                if raw in (STEER_CENTER, STEER_CENTER + 1) and abs(clamped_value) < (STEER_DEADBAND * 1.5):
+                    raw = STEER_CENTER
+            self._set_steer(raw)
+            return True
+        else:
+            log.error(f"steer normalized not numeric: {steer_value}")
+            return False
 
 
 def main(args=None):
