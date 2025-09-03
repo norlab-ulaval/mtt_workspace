@@ -87,7 +87,7 @@ def generate_launch_description():
         ),
         DeclareLaunchArgument(
             'base_frame',
-            default_value='base_link',
+            default_value='base_footprint',
             description='Base frame of the robot (child of odom)'
         ),
         DeclareLaunchArgument(
@@ -118,6 +118,15 @@ def generate_launch_description():
             executable='robot_state_publisher',
             name='robot_state_publisher',
             parameters=[{'robot_description': Command(['xacro ', urdf_path])}],
+            condition=IfCondition(LaunchConfiguration('publish_description'))
+        ),
+
+        # Joint controller: converts cmd_vel to joint movements and publishes joint_states
+        Node(
+            package='mtt_driver',
+            executable='mtt_joint_controller',
+            name='mtt_joint_controller',
+            output='screen',
             condition=IfCondition(LaunchConfiguration('publish_description'))
         ),
 

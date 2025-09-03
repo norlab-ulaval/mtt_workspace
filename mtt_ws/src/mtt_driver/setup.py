@@ -30,6 +30,7 @@ setup(
             'mtt_teleop_joy = mtt_driver.mtt_teleop_joy:main',
             'mtt_test_node = mtt_driver.mtt_test_node:main',
             'mtt_odometry_manager = mtt_driver.mtt_odometry_manager:main',
+            'mtt_joint_controller = mtt_driver.mtt_joint_controller:main',
         ],
     },
 )

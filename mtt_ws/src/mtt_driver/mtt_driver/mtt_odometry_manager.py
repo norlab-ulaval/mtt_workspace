@@ -1,4 +1,23 @@
 #!/usr/bin/env python3
+
+from __future__ import annotations
+from abc import ABC, abstractmethod
+from enum import IntEnum
+from typing import Optional, Dict, Any
+import math
+import time
+
+import rclpy
+from rclpy.node import Node
+from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
+
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
+from mtt_msgs.msg import MttTachometerData, MttDrivingMode
+from std_srvs.srv import Trigger
+from tf2_ros import TransformBroadcaster
+from geometry_msgs.msg import TransformStamped, Quaternion
+
 """
 MTT-154 Multi-Mode Odometry Manager
 
@@ -14,22 +33,6 @@ Features:
 - Sensor-optimized QoS and odometer wrap/reset handling
 - Service interface for odometry reset
 """
-from __future__ import annotations
-
-from abc import ABC, abstractmethod
-from enum import IntEnum
-from typing import Optional, Dict, Any
-import math
-
-import rclpy
-from rclpy.node import Node
-from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
-
-from nav_msgs.msg import Odometry
-from mtt_msgs.msg import MttTachometerData, MttDrivingMode
-from std_srvs.srv import Trigger
-from tf2_ros import TransformBroadcaster  # added
-from geometry_msgs.msg import TransformStamped  # added
 
 
 # --------------------------- Modes --------------------------- #
@@ -50,6 +53,7 @@ class OdometryInterface(ABC):
         base_frame: str,
         distance_multiplier: float,
         wrap_reset_threshold_m: float,
+        angular_velocity: float = 0.0,
     ) -> Odometry:
         pass
 
@@ -117,11 +121,14 @@ class OdometryInterface(ABC):
 
 # ----------------------- Implementations --------------------- #
 class SingleTrailerOdometry(OdometryInterface):
-    """Simple 1D odometry that relays absolute distance with direction."""
+    """Simple 1D odometry that relays absolute distance with direction and steering."""
 
     def __init__(self) -> None:
         self.x = 0.0
+        self.y = 0.0
+        self.yaw = 0.0
         self.last_abs_m: Optional[float] = None  # first-sample sentinel
+        self.last_time: Optional[float] = None
 
     def calculate_odometry(
         self,
@@ -131,56 +138,100 @@ class SingleTrailerOdometry(OdometryInterface):
         base_frame: str,
         distance_multiplier: float,
         wrap_reset_threshold_m: float,
+        angular_velocity: float = 0.0,
     ) -> Odometry:
         odom = self._odom_with_stamp(msg, odom_frame, base_frame)
         # Current absolute distance after unit+scale adjustment
         cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
+        
+        # Get current time for dt calculation
+        current_time = time.time()
 
         if self.last_abs_m is None:
             # Seed, no initial jump
             self.last_abs_m = cur_abs
+            self.last_time = current_time
             delta = 0.0
+            dt = 0.02  # Default dt for first sample
         else:
             delta = cur_abs - self.last_abs_m
+            dt = current_time - self.last_time if self.last_time else 0.02
+            dt = max(dt, 0.001)  # Prevent division by zero
+            
             # Detect wrap/reset (large negative)
             if delta < -abs(wrap_reset_threshold_m):
                 # Re-seed without moving
                 self.last_abs_m = cur_abs
+                self.last_time = current_time
                 delta = 0.0
 
         sign = self._norm_direction(getattr(msg, "direction", None))
-        self.x += sign * delta
+        linear_distance = sign * delta
+        
+        # Update yaw with angular velocity
+        self.yaw += angular_velocity * dt
+        
+        # Update position using current yaw
+        self.x += linear_distance * math.cos(self.yaw)
+        self.y += linear_distance * math.sin(self.yaw)
+        
         self.last_abs_m = cur_abs
+        self.last_time = current_time
 
-        # Pose (1D along x)
+        # Pose (2D with rotation)
         odom.pose.pose.position.x = self.x
-        odom.pose.pose.position.y = 0.0
+        odom.pose.pose.position.y = self.y
         odom.pose.pose.position.z = 0.0
-        odom.pose.pose.orientation.x = 0.0
-        odom.pose.pose.orientation.y = 0.0
-        odom.pose.pose.orientation.z = 0.0
-        odom.pose.pose.orientation.w = 1.0
+        
+        # Convert yaw to quaternion
+        quat = self._yaw_to_quaternion(self.yaw)
+        odom.pose.pose.orientation = quat
 
-        # Velocity (signed)
+        # Velocity (with angular)
         speed_ms = float(getattr(msg, "speed_ms", 0.0))
         odom.twist.twist.linear.x = sign * abs(speed_ms)
         odom.twist.twist.linear.y = 0.0
         odom.twist.twist.linear.z = 0.0
+        odom.twist.twist.angular.x = 0.0
+        odom.twist.twist.angular.y = 0.0
+        odom.twist.twist.angular.z = angular_velocity
 
         self._apply_default_covariances(odom)
         return odom
 
+    def _yaw_to_quaternion(self, yaw: float) -> Quaternion:
+        """Convert yaw angle to quaternion"""
+        quat = Quaternion()
+        quat.x = 0.0
+        quat.y = 0.0
+        quat.z = math.sin(yaw / 2.0)
+        quat.w = math.cos(yaw / 2.0)
+        return quat
+
     def export_state(self) -> Dict[str, Any]:
-        return {"x": self.x, "last_abs_m": self.last_abs_m}
+        return {
+            "x": self.x,
+            "y": self.y, 
+            "yaw": self.yaw,
+            "last_abs_m": self.last_abs_m,
+            "last_time": self.last_time
+        }
 
     def import_state(self, state: Dict[str, Any]) -> None:
         self.x = float(state.get("x", 0.0))
+        self.y = float(state.get("y", 0.0))
+        self.yaw = float(state.get("yaw", 0.0))
         last = state.get("last_abs_m", None)
         self.last_abs_m = float(last) if last is not None else None
+        last_time = state.get("last_time", None)
+        self.last_time = float(last_time) if last_time is not None else None
 
     def reset_odometry(self) -> None:
         self.x = 0.0
+        self.y = 0.0
+        self.yaw = 0.0
         self.last_abs_m = None
+        self.last_time = None
 
     def get_mode_name(self) -> str:
         return "Single Trailer"
@@ -196,12 +247,11 @@ class DualDifferentialOdometry(OdometryInterface):
     Params used (provided by manager): track_width_m
     """
 
-    def __init__(self, track_width_m: float = 1.0) -> None:
-        # 2D pose
+    def __init__(self, *, track_width_m: float, **kwargs) -> None:
+        super().__init__()
         self.x = 0.0
         self.y = 0.0
-        self.th = 0.0  # yaw
-        # Absolute distance per side (m)
+        self.theta = 0.0
         self.last_L_m: Optional[float] = None
         self.last_R_m: Optional[float] = None
         self.track_width_m = float(track_width_m)
@@ -216,139 +266,98 @@ class DualDifferentialOdometry(OdometryInterface):
         base_frame: str,
         distance_multiplier: float,
         wrap_reset_threshold_m: float,
+        angular_velocity: float = 0.0,
     ) -> Odometry:
-        odom = self._odom_with_stamp(msg, odom_frame, base_frame)
-
-        has_L = hasattr(msg, "left_distance_km") or hasattr(msg, "left_speed_ms")
-        has_R = hasattr(msg, "right_distance_km") or hasattr(msg, "right_speed_ms")
-
-        if has_L and has_R:
-            # Prefer distance integration if absolute counters exist
-            if hasattr(msg, "left_distance_km") and hasattr(msg, "right_distance_km"):
-                cur_L = float(getattr(msg, "left_distance_km", 0.0)) * distance_multiplier
-                cur_R = float(getattr(msg, "right_distance_km", 0.0)) * distance_multiplier
-
-                if self.last_L_m is None or self.last_R_m is None:
-                    self.last_L_m, self.last_R_m = cur_L, cur_R
-                    dL = dR = 0.0
-                else:
-                    dL = cur_L - self.last_L_m
-                    dR = cur_R - self.last_R_m
-                    # Wrap/reset detection per side
-                    if dL < -abs(wrap_reset_threshold_m):
-                        dL = 0.0
-                        self.last_L_m = cur_L
-                    if dR < -abs(wrap_reset_threshold_m):
-                        dR = 0.0
-                        self.last_R_m = cur_R
-
-                self.last_L_m, self.last_R_m = cur_L, cur_R
-
-            else:
-                # Instantaneous speeds only; estimate dt from header stamps is non-trivial here.
-                # We keep positions as-is and only set twist from speeds.
-                dL = dR = 0.0
-
-            # Integrate differential kinematics (if any delta exists)
-            dS = 0.5 * (dL + dR)
-            dTh = (dR - dL) / max(self.track_width_m, 1e-6)
-
-            if abs(dTh) < 1e-9:
-                # Straight-ish
-                self.x += dS * math.cos(self.th)
-                self.y += dS * math.sin(self.th)
-            else:
-                # Arc integration
-                R = dS / dTh  # instantaneous curvature radius
-                self.x += R * (math.sin(self.th + dTh) - math.sin(self.th))
-                self.y -= R * (math.cos(self.th + dTh) - math.cos(self.th))
-                self.th = self.th + dTh  # keep unbounded yaw
-
-            # Pose
-            odom.pose.pose.position.x = self.x
-            odom.pose.pose.position.y = self.y
-            odom.pose.pose.position.z = 0.0
-            # Convert yaw to quaternion (no roll/pitch)
-            half = 0.5 * self.th
-            odom.pose.pose.orientation.x = 0.0
-            odom.pose.pose.orientation.y = 0.0
-            odom.pose.pose.orientation.z = math.sin(half)
-            odom.pose.pose.orientation.w = math.cos(half)
-
-            # Twist: if instantaneous speeds exist, compute signed linear & yaw rate
-            if hasattr(msg, "left_speed_ms") and hasattr(msg, "right_speed_ms"):
-                vL = float(getattr(msg, "left_speed_ms", 0.0))
-                vR = float(getattr(msg, "right_speed_ms", 0.0))
-                v = 0.5 * (vL + vR)
-                w = (vR - vL) / max(self.track_width_m, 1e-6)
-                odom.twist.twist.linear.x = v
-                odom.twist.twist.linear.y = 0.0
-                odom.twist.twist.angular.z = w
-            else:
-                # Fallback: signed speed if only aggregate is available
-                sign = self._norm_direction(getattr(msg, "direction", None))
-                v = sign * abs(float(getattr(msg, "speed_ms", 0.0)))
-                odom.twist.twist.linear.x = v
-                odom.twist.twist.angular.z = 0.0
-
-            self._apply_default_covariances(odom)
-            return odom
-
-        # ---- Fallback: behave like SingleTrailer ---- #
-        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
+        # For dual differential, we'd need separate left/right data
+        # Since MttTachometerData only has single tachometer, fallback to 1D mode
+        abs_distance_m = msg.distance_km * 1000.0 * distance_multiplier
+        
+        # Handle wrap-around
+        if self.last_abs_m is not None and abs(abs_distance_m - self.last_abs_m) > wrap_reset_threshold_m:
+            self.last_abs_m = None
+        
         if self.last_abs_m is None:
-            self.last_abs_m = cur_abs
-            delta = 0.0
-        else:
-            delta = cur_abs - self.last_abs_m
-            if delta < -abs(wrap_reset_threshold_m):
-                self.last_abs_m = cur_abs
-                delta = 0.0
-        sign = self._norm_direction(getattr(msg, "direction", None))
-        self.x += sign * delta
-        self.last_abs_m = cur_abs
-
+            self.last_abs_m = abs_distance_m
+            return self._create_simple_odometry_msg(odom_frame, base_frame, msg.header.stamp)
+        
+        # Calculate distance delta
+        delta_distance = abs_distance_m - self.last_abs_m
+        self.last_abs_m = abs_distance_m
+        
+        # Update position using angular velocity for steering
+        self.theta += angular_velocity * (1.0 / 50.0)  # Assuming 50Hz update rate
+        self.x += delta_distance * math.cos(self.theta)
+        self.y += delta_distance * math.sin(self.theta)
+        
+        return self._create_odometry_msg(odom_frame, base_frame, msg.header.stamp)
+    
+    def _create_odometry_msg(self, odom_frame: str, base_frame: str, stamp) -> Odometry:
+        """Create odometry message with current pose"""
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = odom_frame
+        odom.child_frame_id = base_frame
+        
+        # Position
         odom.pose.pose.position.x = self.x
-        odom.pose.pose.position.y = 0.0
+        odom.pose.pose.position.y = self.y
         odom.pose.pose.position.z = 0.0
-        odom.pose.pose.orientation.x = 0.0
-        odom.pose.pose.orientation.y = 0.0
-        odom.pose.pose.orientation.z = 0.0
-        odom.pose.pose.orientation.w = 1.0
-
-        speed_ms = float(getattr(msg, "speed_ms", 0.0))
-        odom.twist.twist.linear.x = sign * abs(speed_ms)
-        odom.twist.twist.angular.z = 0.0
-        self._apply_default_covariances(odom)
+        
+        # Orientation
+        quat = self._yaw_to_quaternion(self.theta)
+        odom.pose.pose.orientation.x = quat.x
+        odom.pose.pose.orientation.y = quat.y 
+        odom.pose.pose.orientation.z = quat.z
+        odom.pose.pose.orientation.w = quat.w
+        
         return odom
-
-    def export_state(self) -> Dict[str, Any]:
-        return {
-            "x": self.x,
-            "y": self.y,
-            "th": self.th,
-            "last_L_m": self.last_L_m,
-            "last_R_m": self.last_R_m,
-            "track_width_m": self.track_width_m,
-            "last_abs_m": self.last_abs_m,
-        }
-
-    def import_state(self, state: Dict[str, Any]) -> None:
-        self.x = float(state.get("x", 0.0))
-        self.y = float(state.get("y", 0.0))
-        self.th = float(state.get("th", 0.0))
-        self.track_width_m = float(state.get("track_width_m", self.track_width_m))
-        self.last_L_m = float(state["last_L_m"]) if state.get("last_L_m") is not None else None
-        self.last_R_m = float(state["last_R_m"]) if state.get("last_R_m") is not None else None
-        self.last_abs_m = float(state["last_abs_m"]) if state.get("last_abs_m") is not None else None
-
-    def reset_odometry(self) -> None:
-        self.x = self.y = self.th = 0.0
-        self.last_L_m = self.last_R_m = None
-        self.last_abs_m = None
-
+    
+    def _create_simple_odometry_msg(self, odom_frame: str, base_frame: str, stamp) -> Odometry:
+        """Create simple odometry message for initialization"""
+        odom = Odometry()
+        odom.header.stamp = stamp
+        odom.header.frame_id = odom_frame
+        odom.child_frame_id = base_frame
+        odom.pose.pose.orientation.w = 1.0  # Identity quaternion
+        return odom
+    
     def get_mode_name(self) -> str:
         return "Dual Differential"
+    
+    def export_state(self) -> dict:
+        return {
+            'x': self.x,
+            'y': self.y, 
+            'theta': self.theta,
+            'last_abs_m': self.last_abs_m,
+            'last_L_m': self.last_L_m,
+            'last_R_m': self.last_R_m
+        }
+    
+    def import_state(self, state: dict) -> None:
+        self.x = state.get('x', 0.0)
+        self.y = state.get('y', 0.0)
+        self.theta = state.get('theta', 0.0)
+        self.last_abs_m = state.get('last_abs_m')
+        self.last_L_m = state.get('last_L_m')
+        self.last_R_m = state.get('last_R_m')
+    
+    def reset_odometry(self) -> None:
+        self.x = 0.0
+        self.y = 0.0
+        self.theta = 0.0
+        self.last_abs_m = None
+        self.last_L_m = None
+        self.last_R_m = None
+    
+    def _yaw_to_quaternion(self, yaw: float) -> Quaternion:
+        """Convert yaw angle to quaternion"""
+        quat = Quaternion()
+        quat.x = 0.0
+        quat.y = 0.0
+        quat.z = math.sin(yaw / 2.0)
+        quat.w = math.cos(yaw / 2.0)
+        return quat
 
 
 class DualSerpentineOdometry(OdometryInterface):
@@ -538,6 +547,15 @@ class MttOdometryManager(Node):
         # Services
         self.reset_srv = self.create_service(Trigger, "/mtt/reset_odometry", self.reset_odometry_cb)
 
+        # Angular velocity from cmd_vel for steering odometry
+        self.current_angular_vel = 0.0
+        self.cmd_vel_sub = self.create_subscription(
+            Twist,
+            '/cmd_vel',
+            self.cmd_vel_callback,
+            10  # Standard QoS for commands
+        )
+
         self.get_logger().info(
             f"MTT Odometry Manager initialized - Mode: {self.odometry_calculator.get_mode_name()} | "
             f"odom_frame={self.odom_frame}, base_frame={self.base_frame}, pub={self.odometry_topic}, sub={self.tachometer_topic}, mode_sub={self.mode_topic}"
@@ -558,6 +576,7 @@ class MttOdometryManager(Node):
                 base_frame=self.base_frame,
                 distance_multiplier=self.distance_multiplier,
                 wrap_reset_threshold_m=self.wrap_reset_threshold_m,
+                angular_velocity=self.current_angular_vel,
             )
             self.tacho_sub_failed_time_fallback(odom)
             self.odom_pub.publish(odom)
@@ -582,6 +601,10 @@ class MttOdometryManager(Node):
             response.success = False
             response.message = str(e)
         return response
+
+    def cmd_vel_callback(self, msg: Twist) -> None:
+        """Store current angular velocity for steering odometry calculations"""
+        self.current_angular_vel = msg.angular.z
 
     # --------------- Mode switching --------------- #
     def _transfer_state(self, src: OdometryInterface, dst: OdometryInterface) -> None:
