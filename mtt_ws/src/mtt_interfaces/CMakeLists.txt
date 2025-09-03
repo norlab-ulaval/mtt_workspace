@@ -17,6 +17,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/SetBrakeSrv.srv"
   "srv/SetDirectionModeSrv.srv"
   "srv/SetDirectionSrv.srv"
+  "srv/GetVehiculeTypeSrv.srv"
   "srv/SetLightStateSrv.srv"
   "srv/SetSecuritySwitchSrv.srv"
   "srv/SetSteerSrv.srv"
