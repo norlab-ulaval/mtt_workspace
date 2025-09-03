@@ -123,8 +123,8 @@ class MTTRosWrapper(Node):
         self.remote_timer = None
         self.ctrl_timer = None
 
-        self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
-        self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
+        # self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
+        # self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
         
         # Single aggregated publisher for all vehicle status
         # Publishers for telemetry data

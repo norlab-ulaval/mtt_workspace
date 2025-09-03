@@ -186,7 +186,7 @@ class MTTCanDriver:
         self.set_winch_state(WinchState.WinchNeutral)
         self.set_brake(0)
         self.set_steer(STEER_CENTER)
-        self.set_direction_mode(DirectionMode.OpenLoop)
+        self.set_direction_mode(DirectionMode.CloseLoop)
 
         self.tachometer_data = TachometerData()
         self.encoder_final_ratio = self._calculate_gear_ratio()
@@ -204,8 +204,7 @@ class MTTCanDriver:
                 return
             self.estop_active = True
             if self.security_switch_state != SecuritySwitchState.SafetyLocked:
-                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111
-                self.security_switch_state = SecuritySwitchState.SafetyLocked
+                self.set_security_switch(SecuritySwitchState.SafetyLocked)
             self.set_throttle(0)
             self.set_brake(BRAKE_MAX)
             self.set_winch_state(WinchState.WinchNeutral)
@@ -223,9 +222,8 @@ class MTTCanDriver:
             self.estop_active = False
             if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
                 log.debug(f"Setting security switch to unlocked: before={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
-                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000
+                self.set_security_switch(SecuritySwitchState.SafetyUnlocked)
                 log.debug(f"Setting security switch to unlocked: after={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
-                self.security_switch_state = SecuritySwitchState.SafetyUnlocked
             else:
                 log.debug("Security switch already unlocked")
             self.set_brake(0)
@@ -423,13 +421,15 @@ class MTTCanDriver:
         """Set security switch (bit7)."""
         if switch_value == SecuritySwitchState.SafetyLocked:
             with self.frame_lock:
-                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111
+                # self.can_array[MTT_SWITCHES_GLOBAL] &= 0b01111111
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
                 self.security_switch_state = SecuritySwitchState.SafetyLocked
             return True
 
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
-                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b10000000
+                self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111  # Clear bit 3
+                self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
             return True
 
