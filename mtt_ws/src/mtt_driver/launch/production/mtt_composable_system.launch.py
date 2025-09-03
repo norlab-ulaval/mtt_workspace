@@ -46,12 +46,10 @@ import os
 
 
 def generate_launch_description():
-    # Package share paths for description (URDF)
     description_share = FindPackageShare(package='mtt_description').find('mtt_description')
     urdf_path = os.path.join(description_share, 'urdf', 'robot.urdf.xacro')
 
     return LaunchDescription([
-        # Launch arguments
         DeclareLaunchArgument(
             'can_interface',
             default_value='can0',
@@ -97,6 +95,21 @@ def generate_launch_description():
             default_value='odom',
             description='Odom frame (parent of base frame)'
         ),
+        DeclareLaunchArgument(
+            'enable_map_frame',
+            default_value='true',
+            description='Publish static map->odom identity transform'
+        ),
+        DeclareLaunchArgument(
+            'use_rviz',
+            default_value='true',
+            description='Launch RViz for visualization'
+        ),
+        DeclareLaunchArgument(
+            'rviz_config',
+            default_value=os.path.join(description_share, 'rviz', 'urdf_config.rviz'),
+            description='RViz config file path'
+        ),
 
         # Core MTT System Nodes
         # Robot description: provides base_link (URDF) needed for TF tree in real hardware launch
@@ -108,7 +121,15 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('publish_description'))
         ),
 
-    # (Static bridge removed: TF now published dynamically by odometry manager)
+        # TF is published dynamically by odometry manager
+        # Optional static map->odom identity for RViz (dead reckoning visualization)
+        Node(
+            package='tf2_ros',
+            executable='static_transform_publisher',
+            name='static_map_odom',
+            arguments=['0','0','0','0','0','0','map', LaunchConfiguration('odom_frame')],
+            condition=IfCondition(LaunchConfiguration('enable_map_frame'))
+        ),
         
         # MTT Driver Wrapper - Hardware abstraction + ROS integration + safety
         Node(
@@ -168,5 +189,15 @@ def generate_launch_description():
             output='screen',
             condition=IfCondition(LaunchConfiguration('enable_teleop')),
             respawn=True
+        ),
+
+        # Optional RViz (mirrors mtt_description launch capability)
+        Node(
+            package='rviz2',
+            executable='rviz2',
+            name='mtt_rviz',
+            arguments=['-d', LaunchConfiguration('rviz_config')],
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('use_rviz'))
         ),
     ])

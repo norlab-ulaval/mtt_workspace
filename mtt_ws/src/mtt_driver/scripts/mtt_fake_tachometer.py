@@ -28,12 +28,12 @@ def main():
     cumulative = 0
     start = time.time()
     period = 0.05  # 20 Hz like real device
-    rps_base = 40  # arbitrary for testing
+    rps_base = 1  # reduced for realistic 1-2 km/h speeds
     try:
         while True:
             t = time.time() - start
             # Vary speed a bit with a sine wave
-            rps = int(max(0, rps_base + 10 * math.sin(t)))
+            rps = int(max(0, rps_base + 0.5 * math.sin(t)))
             cumulative += rps  # simplistic accumulation
             temp_a = 30 + int(5 * math.sin(t / 10))
             temp_b = 31 + int(5 * math.cos(t / 12))

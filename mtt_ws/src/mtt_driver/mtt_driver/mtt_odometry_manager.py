@@ -4,7 +4,7 @@ MTT-154 Multi-Mode Odometry Manager
 
 Provides three driving modes with live switching:
 - Single Trailer: 1D odometry for basic tractor+trailer
-- Dual Differential: 2D skid-steer when left/right sensors available  
+- Dual Differential: 2D skid-steer when left/right sensors available
 - Dual Serpentine: 2D bicycle model with articulation angle
 
 Features:
@@ -34,16 +34,23 @@ from geometry_msgs.msg import TransformStamped  # added
 
 # --------------------------- Modes --------------------------- #
 class DrivingMode(IntEnum):
-    SINGLE_TRAILER = 0      # Single tractor with trailer (slip + central joint)
-    DUAL_DIFFERENTIAL = 1   # Two tractors side-by-side (skid steer)
-    DUAL_SERPENTINE = 2     # Two tractors front/back (articulated)
+    SINGLE_TRAILER = 0  # Single tractor with trailer (slip + central joint)
+    DUAL_DIFFERENTIAL = 1  # Two tractors side-by-side (skid steer)
+    DUAL_SERPENTINE = 2  # Two tractors front/back (articulated)
 
 
 # ---------------------- Interface & Utils -------------------- #
 class OdometryInterface(ABC):
     @abstractmethod
-    def calculate_odometry(self, msg: MttTachometerData, *, odom_frame: str, base_frame: str,
-                           wrap_reset_threshold_m: float) -> Odometry:
+    def calculate_odometry(
+        self,
+        msg: MttTachometerData,
+        *,
+        odom_frame: str,
+        base_frame: str,
+        distance_multiplier: float,
+        wrap_reset_threshold_m: float,
+    ) -> Odometry:
         pass
 
     @abstractmethod
@@ -83,18 +90,18 @@ class OdometryInterface(ABC):
         big = 1e6
         small = 1e-3
         # pose: [x, y, z, roll, pitch, yaw]
-        cov_p = [big]*36
+        cov_p = [big] * 36
         cov_p[0] = small  # x
-        cov_p[7] = big    # y
-        cov_p[14] = big   # z
-        cov_p[35] = big   # yaw
+        cov_p[7] = big  # y
+        cov_p[14] = big  # z
+        cov_p[35] = big  # yaw
         odom.pose.covariance = cov_p
 
-        cov_t = [big]*36
+        cov_t = [big] * 36
         cov_t[0] = small  # vx
-        cov_t[7] = big    # vy
-        cov_t[14] = big   # vz
-        cov_t[35] = big   # wyaw
+        cov_t[7] = big  # vy
+        cov_t[14] = big  # vz
+        cov_t[35] = big  # wyaw
         odom.twist.covariance = cov_t
 
     @staticmethod
@@ -111,15 +118,23 @@ class OdometryInterface(ABC):
 # ----------------------- Implementations --------------------- #
 class SingleTrailerOdometry(OdometryInterface):
     """Simple 1D odometry that relays absolute distance with direction."""
+
     def __init__(self) -> None:
         self.x = 0.0
         self.last_abs_m: Optional[float] = None  # first-sample sentinel
 
-    def calculate_odometry(self, msg: MttTachometerData, *, odom_frame: str, base_frame: str,
-                           wrap_reset_threshold_m: float) -> Odometry:
+    def calculate_odometry(
+        self,
+        msg: MttTachometerData,
+        *,
+        odom_frame: str,
+        base_frame: str,
+        distance_multiplier: float,
+        wrap_reset_threshold_m: float,
+    ) -> Odometry:
         odom = self._odom_with_stamp(msg, odom_frame, base_frame)
-        # Current absolute distance in meters
-        cur_abs = float(getattr(msg, "distance_km", 0.0)) * 1000.0
+        # Current absolute distance after unit+scale adjustment
+        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
 
         if self.last_abs_m is None:
             # Seed, no initial jump
@@ -180,6 +195,7 @@ class DualDifferentialOdometry(OdometryInterface):
       - left_speed_ms, right_speed_ms        (instantaneous)
     Params used (provided by manager): track_width_m
     """
+
     def __init__(self, track_width_m: float = 1.0) -> None:
         # 2D pose
         self.x = 0.0
@@ -192,8 +208,15 @@ class DualDifferentialOdometry(OdometryInterface):
         # Fallback 1D state
         self.last_abs_m: Optional[float] = None
 
-    def calculate_odometry(self, msg: MttTachometerData, *, odom_frame: str, base_frame: str,
-                           wrap_reset_threshold_m: float) -> Odometry:
+    def calculate_odometry(
+        self,
+        msg: MttTachometerData,
+        *,
+        odom_frame: str,
+        base_frame: str,
+        distance_multiplier: float,
+        wrap_reset_threshold_m: float,
+    ) -> Odometry:
         odom = self._odom_with_stamp(msg, odom_frame, base_frame)
 
         has_L = hasattr(msg, "left_distance_km") or hasattr(msg, "left_speed_ms")
@@ -202,8 +225,8 @@ class DualDifferentialOdometry(OdometryInterface):
         if has_L and has_R:
             # Prefer distance integration if absolute counters exist
             if hasattr(msg, "left_distance_km") and hasattr(msg, "right_distance_km"):
-                cur_L = float(getattr(msg, "left_distance_km", 0.0)) * 1000.0
-                cur_R = float(getattr(msg, "right_distance_km", 0.0)) * 1000.0
+                cur_L = float(getattr(msg, "left_distance_km", 0.0)) * distance_multiplier
+                cur_R = float(getattr(msg, "right_distance_km", 0.0)) * distance_multiplier
 
                 if self.last_L_m is None or self.last_R_m is None:
                     self.last_L_m, self.last_R_m = cur_L, cur_R
@@ -239,7 +262,7 @@ class DualDifferentialOdometry(OdometryInterface):
                 R = dS / dTh  # instantaneous curvature radius
                 self.x += R * (math.sin(self.th + dTh) - math.sin(self.th))
                 self.y -= R * (math.cos(self.th + dTh) - math.cos(self.th))
-                self.th = (self.th + dTh)  # keep unbounded yaw
+                self.th = self.th + dTh  # keep unbounded yaw
 
             # Pose
             odom.pose.pose.position.x = self.x
@@ -272,7 +295,7 @@ class DualDifferentialOdometry(OdometryInterface):
             return odom
 
         # ---- Fallback: behave like SingleTrailer ---- #
-        cur_abs = float(getattr(msg, "distance_km", 0.0)) * 1000.0
+        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
         if self.last_abs_m is None:
             self.last_abs_m = cur_abs
             delta = 0.0
@@ -301,8 +324,11 @@ class DualDifferentialOdometry(OdometryInterface):
 
     def export_state(self) -> Dict[str, Any]:
         return {
-            "x": self.x, "y": self.y, "th": self.th,
-            "last_L_m": self.last_L_m, "last_R_m": self.last_R_m,
+            "x": self.x,
+            "y": self.y,
+            "th": self.th,
+            "last_L_m": self.last_L_m,
+            "last_R_m": self.last_R_m,
             "track_width_m": self.track_width_m,
             "last_abs_m": self.last_abs_m,
         }
@@ -312,9 +338,9 @@ class DualDifferentialOdometry(OdometryInterface):
         self.y = float(state.get("y", 0.0))
         self.th = float(state.get("th", 0.0))
         self.track_width_m = float(state.get("track_width_m", self.track_width_m))
-        self.last_L_m = (float(state["last_L_m"]) if state.get("last_L_m") is not None else None)
-        self.last_R_m = (float(state["last_R_m"]) if state.get("last_R_m") is not None else None)
-        self.last_abs_m = (float(state["last_abs_m"]) if state.get("last_abs_m") is not None else None)
+        self.last_L_m = float(state["last_L_m"]) if state.get("last_L_m") is not None else None
+        self.last_R_m = float(state["last_R_m"]) if state.get("last_R_m") is not None else None
+        self.last_abs_m = float(state["last_abs_m"]) if state.get("last_abs_m") is not None else None
 
     def reset_odometry(self) -> None:
         self.x = self.y = self.th = 0.0
@@ -329,6 +355,7 @@ class DualSerpentineOdometry(OdometryInterface):
     """Articulated front-back pair. If an articulation angle is available in the msg (e.g.,
     `articulation_angle_rad`), integrate like a simple car-like model. Otherwise, 1D fallback.
     """
+
     def __init__(self, wheelbase_m: float = 2.0) -> None:
         self.x = 0.0
         self.y = 0.0
@@ -336,12 +363,19 @@ class DualSerpentineOdometry(OdometryInterface):
         self.wheelbase_m = float(wheelbase_m)
         self.last_abs_m: Optional[float] = None
 
-    def calculate_odometry(self, msg: MttTachometerData, *, odom_frame: str, base_frame: str,
-                           wrap_reset_threshold_m: float) -> Odometry:
+    def calculate_odometry(
+        self,
+        msg: MttTachometerData,
+        *,
+        odom_frame: str,
+        base_frame: str,
+        distance_multiplier: float,
+        wrap_reset_threshold_m: float,
+    ) -> Odometry:
         odom = self._odom_with_stamp(msg, odom_frame, base_frame)
 
         # Distance delta (1D along the articulation frame)
-        cur_abs = float(getattr(msg, "distance_km", 0.0)) * 1000.0
+        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
         if self.last_abs_m is None:
             self.last_abs_m = cur_abs
             ds = 0.0
@@ -365,7 +399,7 @@ class DualSerpentineOdometry(OdometryInterface):
         else:
             # Bicycle model integration
             dth = math.tan(steer) / self.wheelbase_m * ds
-            R = ds / dth if abs(dth) > 1e-9 else float('inf')
+            R = ds / dth if abs(dth) > 1e-9 else float("inf")
             if math.isfinite(R):
                 self.x += R * (math.sin(self.th + dth) - math.sin(self.th))
                 self.y -= R * (math.cos(self.th + dth) - math.cos(self.th))
@@ -395,7 +429,9 @@ class DualSerpentineOdometry(OdometryInterface):
 
     def export_state(self) -> Dict[str, Any]:
         return {
-            "x": self.x, "y": self.y, "th": self.th,
+            "x": self.x,
+            "y": self.y,
+            "th": self.th,
             "wheelbase_m": self.wheelbase_m,
             "last_abs_m": self.last_abs_m,
         }
@@ -405,7 +441,7 @@ class DualSerpentineOdometry(OdometryInterface):
         self.y = float(state.get("y", 0.0))
         self.th = float(state.get("th", 0.0))
         self.wheelbase_m = float(state.get("wheelbase_m", self.wheelbase_m))
-        self.last_abs_m = (float(state["last_abs_m"]) if state.get("last_abs_m") is not None else None)
+        self.last_abs_m = float(state["last_abs_m"]) if state.get("last_abs_m") is not None else None
 
     def reset_odometry(self) -> None:
         self.x = self.y = self.th = 0.0
@@ -442,15 +478,27 @@ class MttOdometryManager(Node):
         self.declare_parameter("wrap_reset_threshold_m", 1000.0)
         self.declare_parameter("track_width_m", 1.0)
         self.declare_parameter("wheelbase_m", 2.0)
+        # New: distance unit & scaling
+        self.declare_parameter("distance_unit", "km")  # 'km' or 'm'
+        self.declare_parameter("distance_scale", 1.0)  # additional multiplicative scaling
 
         self.odom_frame: str = self.get_parameter("odom_frame").get_parameter_value().string_value
         self.base_frame: str = self.get_parameter("base_frame").get_parameter_value().string_value
         self.tachometer_topic: str = self.get_parameter("tachometer_topic").get_parameter_value().string_value
         self.odometry_topic: str = self.get_parameter("odometry_topic").get_parameter_value().string_value
         self.mode_topic: str = self.get_parameter("mode_topic").get_parameter_value().string_value
-        self.wrap_reset_threshold_m: float = self.get_parameter("wrap_reset_threshold_m").get_parameter_value().double_value
+        self.wrap_reset_threshold_m: float = (
+            self.get_parameter("wrap_reset_threshold_m").get_parameter_value().double_value
+        )
         self.track_width_m: float = self.get_parameter("track_width_m").get_parameter_value().double_value
         self.wheelbase_m: float = self.get_parameter("wheelbase_m").get_parameter_value().double_value
+        distance_unit: str = self.get_parameter("distance_unit").get_parameter_value().string_value.lower()
+        distance_scale: float = self.get_parameter("distance_scale").get_parameter_value().double_value
+        base_multiplier = 1000.0 if distance_unit == "km" else 1.0
+        self.distance_multiplier = base_multiplier * distance_scale
+        self.get_logger().info(
+            f"Distance conversion: unit={distance_unit} scale={distance_scale} -> multiplier={self.distance_multiplier}"
+        )
 
         # Mode
         self.current_mode = DrivingMode.SINGLE_TRAILER
@@ -508,6 +556,7 @@ class MttOdometryManager(Node):
                 msg,
                 odom_frame=self.odom_frame,
                 base_frame=self.base_frame,
+                distance_multiplier=self.distance_multiplier,
                 wrap_reset_threshold_m=self.wrap_reset_threshold_m,
             )
             self.tacho_sub_failed_time_fallback(odom)
@@ -594,9 +643,7 @@ class MttOdometryManager(Node):
             self._transfer_state(self.odometry_calculator, new_calc)
             self.current_mode = new_mode
             self.odometry_calculator = new_calc
-            self.get_logger().info(
-                f"Switched to {self.odometry_calculator.get_mode_name()} mode (state preserved)"
-            )
+            self.get_logger().info(f"Switched to {self.odometry_calculator.get_mode_name()} mode (state preserved)")
         except Exception as e:
             self.get_logger().error(f"Mode change failed: {e}")
 
@@ -613,9 +660,7 @@ class MttOdometryManager(Node):
                 self._transfer_state(self.odometry_calculator, new_calc)
                 self.current_mode = new_mode
                 self.odometry_calculator = new_calc
-                self.get_logger().info(
-                    f"Switched to {self.odometry_calculator.get_mode_name()} mode (state preserved)"
-                )
+                self.get_logger().info(f"Switched to {self.odometry_calculator.get_mode_name()} mode (state preserved)")
                 return True
             return False
         except ValueError as e:
