@@ -72,10 +72,15 @@ class MTTRosWrapper(Node):
         self.declare_parameter("can_interface", "can0")
         self.declare_parameter("test_mode", False)
         self.declare_parameter("driver_log_level", "INFO")
+        self.declare_parameter("control_frequency_hz", 50.0)
 
         can_interface = self.get_parameter("can_interface").get_parameter_value().string_value
         test_mode = self.get_parameter("test_mode").get_parameter_value().bool_value
         driver_log_level_str = self.get_parameter("driver_log_level").get_parameter_value().string_value
+        control_frequency_hz = self.get_parameter("control_frequency_hz").get_parameter_value().double_value
+        control_period = 1.0 / control_frequency_hz
+        
+        self.get_logger().info(f"Control frequency: {control_frequency_hz}Hz (period: {control_period:.6f}s)")
 
         # Convert string log level to logging constant
         driver_log_level = getattr(logging, driver_log_level_str.upper(), logging.INFO)
@@ -102,7 +107,7 @@ class MTTRosWrapper(Node):
         # Ensure driver starts in estopped state to match safety state machine
         self._apply_safety_state(SafetyState.ESTOPPED)
 
-        self.send_frame_period = 0.05
+        self.send_frame_period = control_period
         # Deadbands to prevent oscillating idle frames
         self.throttle_deadband = 0.01
         self.steer_deadband = 0.01
@@ -137,7 +142,7 @@ class MTTRosWrapper(Node):
         # Keep only essential command feedback
         self.steer_pub = self.create_publisher(UInt8, "mtt_steer_cmd", 10)
 
-        self.ctrl_timer = self.create_timer(0.05, self.control_loop)
+        self.ctrl_timer = self.create_timer(control_period, self.control_loop)
         self.get_logger().info("Wrapper ready (E-stop active - waiting for remote controller).")
 
         self.frame_timer = self.create_timer(self.send_frame_period, self.send_can_frame)
@@ -376,7 +381,7 @@ class MTTRosWrapper(Node):
             status_msg.speed_ms = 0.0
             status_msg.speed_kmh = 0.0
             status_msg.distance_km = 0.0
-            status_msg.direction = 0
+            status_msg.direction = "Unknown"
             status_msg.temperature_a = 0.0
             status_msg.temperature_b = 0.0
             status_msg.tachometer_instant = 0

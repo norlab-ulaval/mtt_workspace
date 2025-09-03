@@ -1,6 +1,15 @@
 #!/usr/bin/env python3
 """
-MTT Composable System Launch File
+MTT Composable System         DeclareLaunchArgument(
+            'driver_log_level',
+            default_value='INFO',
+            description='Log level for MTT driver (DEBUG, INFO, WARNING, ERROR)'
+        ),
+        DeclareLaunchArgument(
+            'control_frequency_hz',
+            default_value='50.0',
+            description='Control loop frequency in Hz (default: 50, configurable for performance)'
+        ),h File
 
 This launch file starts the complete MTT composable architecture including:
 - MTT driver wrapper (hardware abstraction + ROS integration + safety)
@@ -74,6 +83,7 @@ def generate_launch_description():
                 'can_interface': LaunchConfiguration('can_interface'),
                 'test_mode': LaunchConfiguration('test_mode'),
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
+                'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
             }],
             output='screen',
             emulate_tty=True,
