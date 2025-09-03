@@ -38,12 +38,18 @@ Usage examples:
 
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, Command
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+import os
 
 
 def generate_launch_description():
+    # Package share paths for description (URDF)
+    description_share = FindPackageShare(package='mtt_description').find('mtt_description')
+    urdf_path = os.path.join(description_share, 'urdf', 'robot.urdf.xacro')
+
     return LaunchDescription([
         # Launch arguments
         DeclareLaunchArgument(
@@ -62,6 +68,11 @@ def generate_launch_description():
             description='Driver logging level (DEBUG, INFO, WARNING, ERROR)'
         ),
         DeclareLaunchArgument(
+            'control_frequency_hz',
+            default_value='50.0',
+            description='Driver control loop frequency (Hz)'
+        ),
+        DeclareLaunchArgument(
             'enable_teleop',
             default_value='true',
             description='Enable teleoperation (joystick + teleop controller)'
@@ -71,8 +82,33 @@ def generate_launch_description():
             default_value='true',
             description='Enable joystick input node'
         ),
+        DeclareLaunchArgument(
+            'publish_description',
+            default_value='true',
+            description='Publish robot_state_publisher for real hardware run'
+        ),
+        DeclareLaunchArgument(
+            'base_frame',
+            default_value='base_link',
+            description='Base frame of the robot (child of odom)'
+        ),
+        DeclareLaunchArgument(
+            'odom_frame',
+            default_value='odom',
+            description='Odom frame (parent of base frame)'
+        ),
 
         # Core MTT System Nodes
+        # Robot description: provides base_link (URDF) needed for TF tree in real hardware launch
+        Node(
+            package='robot_state_publisher',
+            executable='robot_state_publisher',
+            name='robot_state_publisher',
+            parameters=[{'robot_description': Command(['xacro ', urdf_path])}],
+            condition=IfCondition(LaunchConfiguration('publish_description'))
+        ),
+
+    # (Static bridge removed: TF now published dynamically by odometry manager)
         
         # MTT Driver Wrapper - Hardware abstraction + ROS integration + safety
         Node(
@@ -84,6 +120,7 @@ def generate_launch_description():
                 'test_mode': LaunchConfiguration('test_mode'),
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
+                'base_frame': LaunchConfiguration('base_frame'),
             }],
             output='screen',
             emulate_tty=True,
@@ -97,6 +134,10 @@ def generate_launch_description():
             executable='mtt_odometry_manager',
             name='mtt_odometry_manager',
             arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
+            parameters=[{
+                'base_frame': LaunchConfiguration('base_frame'),
+                'odom_frame': LaunchConfiguration('odom_frame')
+            }],
             output='screen',
             emulate_tty=True,
             respawn=True,

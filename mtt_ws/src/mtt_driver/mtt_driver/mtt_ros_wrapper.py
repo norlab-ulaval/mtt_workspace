@@ -73,12 +73,14 @@ class MTTRosWrapper(Node):
         self.declare_parameter("test_mode", False)
         self.declare_parameter("driver_log_level", "INFO")
         self.declare_parameter("control_frequency_hz", 50.0)
+        self.declare_parameter("base_frame", "mtt_base_link")  # added param
 
         can_interface = self.get_parameter("can_interface").get_parameter_value().string_value
         test_mode = self.get_parameter("test_mode").get_parameter_value().bool_value
         driver_log_level_str = self.get_parameter("driver_log_level").get_parameter_value().string_value
         control_frequency_hz = self.get_parameter("control_frequency_hz").get_parameter_value().double_value
         control_period = 1.0 / control_frequency_hz
+        self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value  # store
         
         self.get_logger().info(f"Control frequency: {control_frequency_hz}Hz (period: {control_period:.6f}s)")
 
@@ -345,7 +347,7 @@ class MTTRosWrapper(Node):
         # Always publish vehicle status for safety monitoring, regardless of tachometer data
         status_msg = MttVehicleStatus()
         status_msg.header.stamp = self.get_clock().now().to_msg()
-        status_msg.header.frame_id = "mtt_base_link"
+        status_msg.header.frame_id = self.base_frame
         
         # Safety and connection status must always be published
         status_msg.emergency_stop_active = (self.safety_state_machine.get_state() == SafetyState.ESTOPPED)
@@ -366,7 +368,7 @@ class MTTRosWrapper(Node):
             # Publish pure tachometer data for odometry node
             tachometer_msg = MttTachometerData()
             tachometer_msg.header.stamp = self.get_clock().now().to_msg()
-            tachometer_msg.header.frame_id = "mtt_base_link"
+            tachometer_msg.header.frame_id = self.base_frame
             tachometer_msg.tachometer_instant = tach_data.tachometer_instant
             tachometer_msg.tachometer_cumulative = tach_data.tachometer_cumulative
             tachometer_msg.speed_ms = odometry_data["speed_ms"]

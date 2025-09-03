@@ -5,7 +5,7 @@
 
 FREQUENCY=${1:-400.0}
 
-echo "🚀 Démarrage MTT-154 à ${FREQUENCY}Hz..."
+echo "Démarrage MTT-154 à ${FREQUENCY}Hz..."
 echo "   - Interface CAN: vcan0 (mode test)"
 echo "   - Fréquence de contrôle: ${FREQUENCY}Hz"
 echo ""

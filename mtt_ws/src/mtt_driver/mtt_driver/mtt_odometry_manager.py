@@ -28,6 +28,8 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 from nav_msgs.msg import Odometry
 from mtt_msgs.msg import MttTachometerData, MttDrivingMode
 from std_srvs.srv import Trigger
+from tf2_ros import TransformBroadcaster  # added
+from geometry_msgs.msg import TransformStamped  # added
 
 
 # --------------------------- Modes --------------------------- #
@@ -492,6 +494,7 @@ class MttOdometryManager(Node):
             f"MTT Odometry Manager initialized - Mode: {self.odometry_calculator.get_mode_name()} | "
             f"odom_frame={self.odom_frame}, base_frame={self.base_frame}, pub={self.odometry_topic}, sub={self.tachometer_topic}, mode_sub={self.mode_topic}"
         )
+        self.tf_broadcaster = TransformBroadcaster(self)  # added
 
     # ----------------- Callbacks ----------------- #
     def tacho_sub_failed_time_fallback(self, odom: Odometry) -> None:
@@ -509,6 +512,15 @@ class MttOdometryManager(Node):
             )
             self.tacho_sub_failed_time_fallback(odom)
             self.odom_pub.publish(odom)
+            # broadcast TF transform odom->base_frame
+            t = TransformStamped()
+            t.header = odom.header
+            t.child_frame_id = self.base_frame
+            t.transform.translation.x = odom.pose.pose.position.x
+            t.transform.translation.y = odom.pose.pose.position.y
+            t.transform.translation.z = odom.pose.pose.position.z
+            t.transform.rotation = odom.pose.pose.orientation
+            self.tf_broadcaster.sendTransform(t)
         except Exception as e:
             self.get_logger().error(f"Odometry calculation failed: {e}")
 
