@@ -10,6 +10,8 @@ find_package(rosidl_default_generators REQUIRED)
 rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MttAuxCommand.msg"
   "msg/MttTachometerData.msg"
+  "msg/MttVehicleStatus.msg"
+  "msg/MttDrivingMode.msg"
   DEPENDENCIES std_msgs
 )
 

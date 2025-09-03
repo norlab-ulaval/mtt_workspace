@@ -18,3 +18,6 @@ float64 speed_kmh   # Speed in kilometers per hour
 
 # Calculated distance
 float64 distance_km # Cumulative distance in kilometers
+
+# Vehicle direction state
+string direction    # Current direction: "Forward" or "Reverse"
