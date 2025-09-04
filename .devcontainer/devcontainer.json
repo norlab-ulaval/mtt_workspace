@@ -111,11 +111,13 @@
     "--ipc=host",
 
     // Joystick devices
-    "--device=/dev/input/js0",
-    "--device=/dev/input/event0",
+    "--device=/dev/input",
 
     // Give container user access to input devices
-    "--group-add=input"
+    "--group-add=input",
+
+    // for can bus
+    "--cap-add=NET_ADMIN"
   ],
 
   "mounts": [
@@ -128,4 +130,3 @@
   "onCreateCommand": ".devcontainer/on_create.bash",
   "updateContentCommand": ".devcontainer/on_update.bash"
 }
-

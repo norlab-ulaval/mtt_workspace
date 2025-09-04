@@ -36,6 +36,9 @@ RUN apt-get update -y && apt-get install -y \
     git \
     python3-pip \
     python3-tk \
+    can-utils \
+    iproute2 \
+    python3-can \
     # Following packages are installed to accelerate container spin up
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-gz-ros2-control \
