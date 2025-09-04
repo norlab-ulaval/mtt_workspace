@@ -141,16 +141,18 @@ class MTTCanDriver:
     raw device resolution values from upstream clients.
     """
 
-    def __init__(self, can_interface="can0", log_level=logging.INFO, node_id=0x001):
+    def __init__(self, can_interface="can0", log_level=logging.INFO, can_id=0x001):
         """Construct driver."""
         # Configure this driver's logging level
         setup_logging(log_level)
         self.frame_lock = threading.RLock()  # Re-entrant lock to avoid self-deadlock
-        self.node_id = node_id
+        self.can_id = can_id
         self.can_interface = can_interface
 
         # Check CAN interface availability and initialize
         self._check_and_initialize_can_interface()
+        
+        # Initialize driver state variables
         self.vehicle_type = None
         self.steer_value = None
         self.throttle_value = None
@@ -170,15 +172,38 @@ class MTTCanDriver:
         self.can_listener_thread.start()
 
     def _setup_initial_frame(self):
+        """Initialize all driver variables to default values."""
+        log.debug("Setting up initial frame...")
+        
         self.set_vehicle_type(VehicleType.VehicleSingleTrack)
-        self.set_security_switch(SecuritySwitchState.SafetyLocked)
+        log.debug(f"Vehicle type set: {self.vehicle_type}")
+        
+        self._set_security_switch(SecuritySwitchState.SafetyLocked)
+        log.debug(f"Security switch set: {self.security_switch_state}")
+        
         self.set_direction(DirectionState.Forward)
+        log.debug(f"Direction set: {self.direction_state}")
+        
         self.set_light_state(LightState.Off)
-        self.set_throttle(0)
+        log.debug(f"Light state set: {self.light_state}")
+        
+        self._set_throttle(0)
+        log.debug(f"Throttle set: {self.throttle_value}")
+        
         self.set_winch_state(WinchState.WinchNeutral)
-        self.set_brake(0)
-        self.set_steer(STEER_CENTER)
+        log.debug(f"Winch state set: {self.winch_state}")
+        
+        self._set_brake(0)
+        log.debug(f"Brake set: {self.brake_value}")
+        
+        
+        self._set_steer(0)
+        log.debug(f"Steer set: {self.steer_value}")
+        
         self.set_direction_mode(DirectionMode.CloseLoop)
+        log.debug(f"Direction mode set: {self.direction_mode}")
+        
+        log.info("Initial frame setup completed - all variables initialized")
 
     def _check_and_initialize_can_interface(self, timeout_seconds=10, check_interval=0.5):
         """Check CAN interface availability and initialize the bus.
@@ -209,9 +234,9 @@ class MTTCanDriver:
             raise
 
     def __del__(self):
-        self._cleanup()
+        self.cleanup()
 
-    def _cleanup(self):
+    def cleanup(self):
         """Stop threads + shutdown bus."""
         self.can_listener_running = False
         if hasattr(self, "can_listener_thread"):
@@ -277,7 +302,7 @@ class MTTCanDriver:
             absolute_distance_m = self._calculate_absolute_distance(tachimeter_cumulative)
 
             if tachimeter_cumulative % 50 == 0:
-                speed_ms = self.get_current_speed_ms()
+                speed_ms = self._get_current_speed_ms()
                 log.debug(
                     f"Tachometer data - Speed: {speed_ms:.2f} m/s, "
                     f"Cumulative: {tachimeter_cumulative}, "
@@ -309,7 +334,7 @@ class MTTCanDriver:
         with self.frame_lock:
             return replace(self.tachometer_data)
 
-    def _get_odometry_snapshot(self) -> dict:
+    def get_odometry_snapshot(self) -> dict:
         """Return a consistent snapshot dict (distance always positive)."""
         with self.frame_lock:
             speed_ms = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
@@ -336,30 +361,20 @@ class MTTCanDriver:
         with self.frame_lock:
             if self.security_switch_state != SecuritySwitchState.SafetyLocked:
                 self._set_security_switch(SecuritySwitchState.SafetyLocked)
-            self.set_throttle(0)
-            self.set_brake(BRAKE_MAX)
+            self._set_throttle(0)
+            self._set_brake(BRAKE_MAX)
             self.set_winch_state(WinchState.WinchNeutral)
         log.warning("Local E-STOP applied in driver")
 
     def release_estop(self):
         """Release E-stop and restore idle command values."""
-        log.debug(f"release_estop() called: estop_active={self.estop_active}")
         with self.frame_lock:
-            if not self.estop_active:
-                log.debug("release_estop() returning early - already not estopped")
-                return
-            self.estop_active = False
             if self.security_switch_state != SecuritySwitchState.SafetyUnlocked:
                 log.debug(f"Setting security switch to unlocked: before={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
                 self._set_security_switch(SecuritySwitchState.SafetyUnlocked)
                 log.debug(f"Setting security switch to unlocked: after={self.can_array[MTT_SWITCHES_GLOBAL]:02X}")
             else:
                 log.debug("Security switch already unlocked")
-            # self.set_brake(0)
-            # self.set_throttle(0)
-            # self.set_winch_state(WinchState.WinchNeutral)
-            # if self.steer_value is None:
-            #     self.set_steer(STEER_CENTER)
 
         log.info("E-STOP released")
 
@@ -369,12 +384,14 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111
                 self.security_switch_state = SecuritySwitchState.SafetyLocked
+                print("Safety Locked")
             return True
 
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
+                print("Safety Unlocked")
             return True
 
         else:
@@ -527,26 +544,41 @@ class MTTCanDriver:
             log.error(f"invalid value for vehicle_type: {vehicle_type}")
             return False
 
+    def get_security_switch_state(self):
+        """Get current security switch state (thread-safe)."""
+        with self.frame_lock:
+            return self.security_switch_state
+
     def _get_current_frame_hex(self):
         """Hex dump of current frame."""
         with self.frame_lock:
             return " ".join(f"{b:02X}" for b in self.can_array)
 
-    def _send_can_frame(self):
+    def send_can_frame(self):
         """Send keepalive frame to maintain communication."""
-        if (
-            self.vehicle_type == None
-            or self.steer_value == None
-            or self.throttle_value == None
-            or self.brake_value == None
-            or self.winch_state == None
-            or self.security_switch_state == None
-            or self.direction_state == None
-            or self.direction_mode == None
-            or self.light_state == None
-        ):
+        # Check if all variables are properly initialized
+        uninitialized_vars = []
+        if self.vehicle_type == None:
+            uninitialized_vars.append("vehicle_type")
+        if self.steer_value == None:
+            uninitialized_vars.append("steer_value")
+        if self.throttle_value == None:
+            uninitialized_vars.append("throttle_value")
+        if self.brake_value == None:
+            uninitialized_vars.append("brake_value")
+        if self.winch_state == None:
+            uninitialized_vars.append("winch_state")
+        if self.security_switch_state == None:
+            uninitialized_vars.append("security_switch_state")
+        if self.direction_state == None:
+            uninitialized_vars.append("direction_state")
+        if self.direction_mode == None:
+            uninitialized_vars.append("direction_mode")
+        if self.light_state == None:
+            uninitialized_vars.append("light_state")
 
-            log.warning("CAN driver variables not initialized")
+        if uninitialized_vars:
+            log.warning(f"CAN driver variables not initialized: {', '.join(uninitialized_vars)}")
             return
 
         if self.bus is None:
@@ -557,7 +589,7 @@ class MTTCanDriver:
             with self.frame_lock:
                 frame_data = self.can_array.copy()
 
-            message = can.Message(arbitration_id=self.node_id, data=frame_data, is_extended_id=False)
+            message = can.Message(arbitration_id=self.can_id, data=frame_data, is_extended_id=False)
             self.bus.send(message)
 
         except (OSError, can.CanOperationError) as e:

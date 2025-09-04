@@ -16,3 +16,5 @@ uint8 winch_command
 
 # Light light_state
 int32 light_state  # 0=off, 1=on
+
+bool winch_safety_button  # true = winch operations allowed, false = winch locked

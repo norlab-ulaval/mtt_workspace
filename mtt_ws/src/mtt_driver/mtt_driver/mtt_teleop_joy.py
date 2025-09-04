@@ -6,7 +6,7 @@ from mtt_msgs.msg import MttAuxCommand
 
 
 class MTTTeleopJoy(Node):
-    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd, including light toggle."""
+    """Translates /joy messages to /cmd_vel and /mtt_aux_cmd, including light toggle and winch safety."""
 
     def __init__(self):
         super().__init__("mtt_teleop_joy")
@@ -16,7 +16,7 @@ class MTTTeleopJoy(Node):
         self.get_logger().info("MTT Teleop Node started.")
 
         self.axis_map = {"left_v": 1, "right_h": 3, "brake": 5, "dpad_v": 7}
-        self.button_map = {"dead_man": 5, "light_toggle": 4}
+        self.button_map = {"dead_man": 5, "light_toggle": 4, "winch_safety": 1}
         self.prev_light_btn = 0
         self.light_state = False
 
@@ -29,6 +29,11 @@ class MTTTeleopJoy(Node):
         aux_msg = MttAuxCommand()
         aux_msg.dead_man_switch = msg.buttons[self.button_map["dead_man"]] == 1
         aux_msg.brake = (1.0 - msg.axes[self.axis_map["brake"]]) / 2.0
+        
+        # Winch safety button
+        aux_msg.winch_safety_button = msg.buttons[self.button_map["winch_safety"]] == 1
+        
+        # Winch command from D-pad
         dpad_val = msg.axes[self.axis_map["dpad_v"]]
         if dpad_val > 0.5:
             aux_msg.winch_command = MttAuxCommand.WINCH_IN

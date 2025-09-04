@@ -26,9 +26,6 @@ Usage examples:
   # Complete system for real hardware
   ros2 launch mtt_driver mtt_composable_system.launch.py
 
-  # Test mode with virtual CAN
-  ros2 launch mtt_driver mtt_composable_system.launch.py test_mode:=true
-
   # Driver + odometry only (no teleop)
   ros2 launch mtt_driver mtt_composable_system.launch.py enable_teleop:=false
 
@@ -56,11 +53,6 @@ def generate_launch_description():
             description='CAN interface name for real hardware'
         ),
         DeclareLaunchArgument(
-            'test_mode',
-            default_value='false',
-            description='Enable test mode (uses vcan0 instead of real CAN)'
-        ),
-        DeclareLaunchArgument(
             'driver_log_level',
             default_value='INFO',
             description='Driver logging level (DEBUG, INFO, WARNING, ERROR)'
@@ -69,6 +61,11 @@ def generate_launch_description():
             'control_frequency_hz',
             default_value='50.0',
             description='Driver control loop frequency (Hz)'
+        ),
+        DeclareLaunchArgument(
+            'can_frame_frequency_hz',
+            default_value='20.0',
+            description='CAN frame frequency (Hz)'
         ),
         DeclareLaunchArgument(
             'enable_teleop',
@@ -147,9 +144,9 @@ def generate_launch_description():
             name='mtt_ros_wrapper',
             parameters=[{
                 'can_interface': LaunchConfiguration('can_interface'),
-                'test_mode': LaunchConfiguration('test_mode'),
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
+                'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
                 'base_frame': LaunchConfiguration('base_frame'),
             }],
             output='screen',
