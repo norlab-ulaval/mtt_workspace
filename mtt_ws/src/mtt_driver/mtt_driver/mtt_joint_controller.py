@@ -61,9 +61,10 @@ class MttJointController(Node):
         
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, '/joint_states', 10)
+        self.cmd_vel_pid_pub = self.create_publisher(Twist, '/cmd_vel_pid', 10)
         
         # Subscribers  
-        self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel_raw', self.cmd_vel_callback, 10)
         
         # Joint states
         self.joint_names = [
@@ -97,12 +98,38 @@ class MttJointController(Node):
         self.get_logger().info('MTT Joint Controller started')
 
     def cmd_vel_callback(self, msg: Twist):
-        """Process velocity commands and update joint positions"""
-        self.linear_vel = msg.linear.x
-        self.angular_vel = msg.angular.z
+        """Process velocity commands with PID control and update joint positions"""
+        # Apply PID control to smooth the velocity commands
+        raw_linear = msg.linear.x
+        raw_angular = msg.angular.z
+        
+        # Update PID setpoints
+        self.left_velocity_pid.setpoint = raw_linear - (raw_angular * self.track_length / 2.0)
+        self.right_velocity_pid.setpoint = raw_linear + (raw_angular * self.track_length / 2.0)
+        
+        # Current measured velocities (simplified - would use actual feedback)
+        current_left_vel = self.linear_vel - (self.angular_vel * self.track_length / 2.0)
+        current_right_vel = self.linear_vel + (self.angular_vel * self.track_length / 2.0)
+        
+        # Apply PID control
+        left_output = self.left_velocity_pid.update(current_left_vel)
+        right_output = self.right_velocity_pid.update(current_right_vel)
+        
+        # Convert back to linear/angular for output
+        smoothed_linear = (left_output + right_output) / 2.0
+        smoothed_angular = (right_output - left_output) / self.track_length
+        
+        # Publish smoothed command for ROS wrapper
+        pid_cmd = Twist()
+        pid_cmd.linear.x = smoothed_linear
+        pid_cmd.angular.z = smoothed_angular
+        self.cmd_vel_pid_pub.publish(pid_cmd)
+        
+        # Update internal state for joint calculations
+        self.linear_vel = smoothed_linear
+        self.angular_vel = smoothed_angular
         
         # Calculate differential velocities for turning
-        # Simple differential drive model
         if abs(self.angular_vel) > 0.01:  # If turning
             # Calculate left/right wheel speeds for differential steering
             left_vel = self.linear_vel - (self.angular_vel * self.track_length / 2.0)
