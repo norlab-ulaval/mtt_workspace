@@ -2,18 +2,62 @@
 
 """
 MTT Joint Controller for Real Hardware
-Converts cmd_vel commands to joint movements and updates joint_states.
+Converts cmd_vel commands to joint movements and updates joint_states with PID control.
 """
 
 import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState
+from rcl_interfaces.msg import ParameterDescriptor
 import math
+import time
+
+class SimplePID:
+    """Simple PID controller implementation"""
+    def __init__(self, kp=1.0, ki=0.0, kd=0.0, setpoint=0.0):
+        self.kp, self.ki, self.kd = kp, ki, kd
+        self.setpoint = setpoint
+        self.prev_error = 0.0
+        self.integral = 0.0
+        self.prev_time = time.time()
+    
+    def update(self, measured_value):
+        current_time = time.time()
+        dt = current_time - self.prev_time
+        if dt <= 0.0:
+            dt = 0.02  # Fallback to 50Hz
+        
+        error = self.setpoint - measured_value
+        self.integral += error * dt
+        derivative = (error - self.prev_error) / dt
+        
+        output = self.kp * error + self.ki * self.integral + self.kd * derivative
+        
+        self.prev_error = error
+        self.prev_time = current_time
+        
+        return output
 
 class MttJointController(Node):
     def __init__(self):
         super().__init__('mtt_joint_controller')
+        
+        # Declare PID parameters
+        self.declare_parameter('velocity_pid.kp', 1.0, 
+                             ParameterDescriptor(description='Velocity PID proportional gain'))
+        self.declare_parameter('velocity_pid.ki', 0.1,
+                             ParameterDescriptor(description='Velocity PID integral gain'))
+        self.declare_parameter('velocity_pid.kd', 0.05,
+                             ParameterDescriptor(description='Velocity PID derivative gain'))
+        
+        # Initialize PID controllers for left and right tracks
+        kp = self.get_parameter('velocity_pid.kp').get_parameter_value().double_value
+        ki = self.get_parameter('velocity_pid.ki').get_parameter_value().double_value
+        kd = self.get_parameter('velocity_pid.kd').get_parameter_value().double_value
+        
+        self.left_velocity_pid = SimplePID(kp, ki, kd)
+        self.right_velocity_pid = SimplePID(kp, ki, kd)
         
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, '/joint_states', 10)
