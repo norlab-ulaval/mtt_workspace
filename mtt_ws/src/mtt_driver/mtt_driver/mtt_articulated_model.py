@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
 """
 MTT Articulated Vehicle Dynamics Model
-
-Implements realistic dynamics for a tracked articulated vehicle:
-- Front tractor with fixed tracks (no front steering)
-- Central articulated joint for steering
-- Rear trailer (passive)
-- Track slip and carving behavior similar to snowmobile dynamics
+Implements realistic dynamics for tracked articulated vehicle with central steering joint.
 """
 
 import math
@@ -24,14 +19,14 @@ class ArticulatedVehicleParams:
     rear_wheelbase: float = 1.27        # Distance from articulation joint to rear axle (m)
     track_width: float = 0.605          # Track width (m)
     
-    # Track dynamics (tuned for MTT-154 tracked vehicle)
-    track_slip_coeff: float = 0.12      # Lateral slip coefficient (0-1)
-    track_grip_coeff: float = 0.85      # Forward grip coefficient (0-1)
-    carving_factor: float = 0.25        # How much tracks "carve" into turns (0-1)
+    # Track dynamics
+    track_slip_coeff: float = 0.12      # Lateral slip coefficient
+    track_grip_coeff: float = 0.85      # Forward grip coefficient
+    carving_factor: float = 0.25        # Track digging effect in turns
     
-    # Articulation limits (from MTT-154 URDF joint limits)
+    # Articulation limits from URDF joint limits
     max_articulation_angle: float = math.radians(60)  # Maximum joint angle (rad)
-    articulation_response: float = 0.7  # How quickly articulation responds to steering input
+    articulation_response: float = 0.7  # Joint response rate
     
     # Speed-dependent factors
     slip_speed_factor: float = 0.08     # Slip increases with speed  
@@ -181,58 +176,16 @@ class ArticulatedVehicleDynamics:
 
 
 def calculate_instantaneous_center_of_rotation(vehicle_state: dict, params: ArticulatedVehicleParams) -> Tuple[float, float]:
-    """
-    Calculate the instantaneous center of rotation for the articulated vehicle.
-    This is useful for understanding the vehicle's turning behavior.
-    """
+    """Calculate instantaneous center of rotation for articulated vehicle."""
     if abs(vehicle_state['angular_velocity']) < 1e-6:
-        # Moving straight
         return float('inf'), float('inf')
     
-    # Radius of curvature
     radius = vehicle_state['linear_velocity'] / vehicle_state['angular_velocity']
     
-    # ICR position relative to vehicle center
     icr_x = -radius * math.sin(vehicle_state['heading'])
     icr_y = radius * math.cos(vehicle_state['heading'])
     
-    # ICR in global coordinates
     global_icr_x = vehicle_state['x'] + icr_x
     global_icr_y = vehicle_state['y'] + icr_y
     
     return global_icr_x, global_icr_y
-
-
-# Example usage and testing
-if __name__ == "__main__":
-    # Create vehicle with custom parameters
-    params = ArticulatedVehicleParams(
-        front_wheelbase=1.8,
-        rear_wheelbase=1.5,
-        track_width=1.2,
-        max_articulation_angle=math.radians(40)
-    )
-    
-    vehicle = ArticulatedVehicleDynamics(params)
-    
-    # Simulate a turning maneuver
-    dt = 0.02  # 50Hz update rate
-    
-    print("Time\tX\tY\tHeading\tArticulation\tAngular_Vel")
-    print("(s)\t(m)\t(m)\t(deg)\t(deg)\t\t(deg/s)")
-    
-    for i in range(100):
-        t = i * dt
-        
-        # Command: forward throttle + right turn
-        throttle = 0.5  # 50% forward
-        steering = 0.3 if t > 1.0 else 0.0  # Start turning after 1 second
-        
-        # Update dynamics
-        x, y, heading = vehicle.update(throttle, steering, dt)
-        state = vehicle.get_state()
-        
-        if i % 10 == 0:  # Print every 0.2 seconds
-            print(f"{t:.1f}\t{x:.2f}\t{y:.2f}\t{math.degrees(heading):.1f}\t"
-                  f"{math.degrees(state['articulation_angle']):.1f}\t\t"
-                  f"{math.degrees(state['angular_velocity']):.1f}")

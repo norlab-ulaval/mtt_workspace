@@ -34,6 +34,15 @@ class SimplePID:
         
         output = self.kp * error + self.ki * self.integral + self.kd * derivative
         
+        # Protect against NaN and infinite values
+        if not math.isfinite(output):
+            print(f"WARNING: PID output NaN/inf detected, resetting: {output}")
+            output = 0.0
+            self.integral = 0.0  # Reset integral windup
+        
+        # Clamp output to reasonable limits
+        output = max(-10.0, min(10.0, output))
+        
         self.prev_error = error
         self.prev_time = current_time
         
@@ -129,6 +138,14 @@ class MttJointController(Node):
         self.linear_vel = smoothed_linear
         self.angular_vel = smoothed_angular
         
+        # Protect against NaN propagation
+        if not math.isfinite(self.linear_vel):
+            self.get_logger().warning("Linear velocity NaN detected, resetting to 0")
+            self.linear_vel = 0.0
+        if not math.isfinite(self.angular_vel):
+            self.get_logger().warning("Angular velocity NaN detected, resetting to 0")
+            self.angular_vel = 0.0
+        
         # Calculate differential velocities for turning
         if abs(self.angular_vel) > 0.01:  # If turning
             # Calculate left/right wheel speeds for differential steering
@@ -146,11 +163,19 @@ class MttJointController(Node):
         # Update track positions (chenilles 1-20)
         # Left tracks (1-10)
         for i in range(10):
-            self.joint_positions[i] += left_angular_vel * dt
+            new_pos = self.joint_positions[i] + left_angular_vel * dt
+            if math.isfinite(new_pos):
+                self.joint_positions[i] = new_pos
+            else:
+                self.get_logger().warning(f"NaN in left track {i+1}, keeping previous position")
             
         # Right tracks (11-20)  
         for i in range(10, 20):
-            self.joint_positions[i] += right_angular_vel * dt
+            new_pos = self.joint_positions[i] + right_angular_vel * dt
+            if math.isfinite(new_pos):
+                self.joint_positions[i] = new_pos
+            else:
+                self.get_logger().warning(f"NaN in right track {i+1}, keeping previous position")
             
         # Update main wheel positions
         self.joint_positions[20] += left_angular_vel * dt   # frontleft_wheel

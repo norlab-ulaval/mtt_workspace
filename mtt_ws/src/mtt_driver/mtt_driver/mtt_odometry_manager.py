@@ -622,11 +622,13 @@ class MttOdometryManager(Node):
 
         # Angular velocity from cmd_vel for steering odometry
         self.current_angular_vel = 0.0
+        
+        # Subscribe to cmd_vel for angular velocity information
         self.cmd_vel_sub = self.create_subscription(
             Twist,
-            '/cmd_vel',
+            '/cmd_vel_pid',
             self.cmd_vel_callback,
-            10  # Standard QoS for commands
+            10
         )
 
         self.get_logger().info(
@@ -643,6 +645,9 @@ class MttOdometryManager(Node):
 
     def tachometer_callback(self, msg: MttTachometerData) -> None:
         try:
+            # The steering angle is now properly included in the tachometer message
+            # No need for separate steering dynamics - use the actual steering data
+            
             odom = self.odometry_calculator.calculate_odometry(
                 msg,
                 odom_frame=self.odom_frame,

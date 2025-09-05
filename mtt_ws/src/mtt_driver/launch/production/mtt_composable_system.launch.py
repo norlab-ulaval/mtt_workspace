@@ -1,15 +1,6 @@
 #!/usr/bin/env python3
 """
-MTT Composable System         DeclareLaunchArgument(
-            'driver_log_level',
-            default_value='INFO',
-            description='Log level for MTT driver (DEBUG, INFO, WARNING, ERROR)'
-        ),
-        DeclareLaunchArgument(
-            'control_frequency_hz',
-            default_value='50.0',
-            description='Control loop frequency in Hz (default: 50, configurable for performance)'
-        ),h File
+MTT Composable System Launch File
 
 This launch file starts the complete MTT composable architecture including:
 - MTT driver wrapper (hardware abstraction + ROS integration + safety)
@@ -123,8 +114,7 @@ def generate_launch_description():
             package='mtt_driver',
             executable='mtt_joint_controller',
             name='mtt_joint_controller',
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('publish_description'))
+            output='screen'
         ),
 
         # TF is published dynamically by odometry manager

@@ -16,8 +16,11 @@ from .mtt_driver import (
     MTTCanDriver,
     WinchState,
     DirectionState,
-    SecuritySwitchState
+    SecuritySwitchState,
+    STEER_CENTER,
+    STEER_MAX
 )
+from .mtt_articulated_model import ArticulatedVehicleParams
 
 
 class SafetyState(Enum):
@@ -405,6 +408,19 @@ class MTTRosWrapper(Node):
             tachometer_msg.direction = odometry_data["direction"]
             tachometer_msg.main_sensor_temp_a = odometry_data["temperature_a"]
             tachometer_msg.main_sensor_temp_b = odometry_data["temperature_b"]
+            
+            # Add current steering angle for articulated odometry
+            with self.driver_lock:
+                current_steer_raw = self.driver.steer_value
+            
+            # Convert raw steering value to articulation angle
+            if current_steer_raw is not None:
+                normalized_steer = (current_steer_raw - STEER_CENTER) / (STEER_MAX - STEER_CENTER)
+                vehicle_params = ArticulatedVehicleParams()
+                tachometer_msg.articulation_angle_rad = normalized_steer * vehicle_params.max_articulation_angle
+            else:
+                tachometer_msg.articulation_angle_rad = 0.0  # Default to straight
+            
             self.tachometer_pub.publish(tachometer_msg)
         else:
             # Set default values when no motion data is available
