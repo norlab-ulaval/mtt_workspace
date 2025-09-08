@@ -110,9 +110,6 @@
     "--pid=host",
     "--ipc=host",
 
-    // Joystick devices
-    "--device=/dev/input",
-
     // Give container user access to input devices
     "--group-add=input",
 
@@ -125,7 +122,8 @@
     "source=/dev/dri,target=/dev/dri,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.ssh,target=/home/mtt/.ssh,type=bind,consistency=cached", // To forward ssh agent and git properly, see https://code.visualstudio.com/remote/advancedcontainers/sharing-git-credentials
     "source=${localEnv:HOME}/.gitconfig,target=/home/mtt/.gitconfig,type=bind",
-    "source=/run/user/1000,target=/run/user/1000,type=bind,consistency=cached"
+    "source=/run/user/1000,target=/run/user/1000,type=bind,consistency=cached",
+    "source=/dev/input,target=/dev/input,type=bind,consistency=consistent" // Use consistent mode for dynamic device updates
   ],
   "onCreateCommand": ".devcontainer/on_create.bash",
   "updateContentCommand": ".devcontainer/on_update.bash"
