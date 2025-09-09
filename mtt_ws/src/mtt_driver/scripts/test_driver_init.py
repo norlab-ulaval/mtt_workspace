@@ -49,7 +49,7 @@ def test_driver_initialization(can_interface='vcan0'):
         
         # Test 2: Check initial frame
         log.info("Test 2: Check initial CAN frame")
-        initial_frame = driver.get_current_frame_hex()
+        initial_frame = driver._get_current_frame_hex()  # Use private method for testing
         log.info(f"Initial frame: {initial_frame}")
         
         # Test 3: Verify initial state
@@ -72,7 +72,7 @@ def test_driver_initialization(can_interface='vcan0'):
         log.info("Test 5: Monitor frames being sent (3 seconds)")
         for i in range(6):  # 3 seconds at ~20Hz
             time.sleep(0.5)
-            current_frame = driver.get_current_frame_hex()
+            current_frame = driver._get_current_frame_hex()  # Use private method for testing
             log.info(f"Frame {i+1}: {current_frame}")
         
         # Test 6: Clean shutdown

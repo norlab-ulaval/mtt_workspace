@@ -5,10 +5,9 @@ This launch file tests only the driver's init frame and basic functionality.
 """
 
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, LogInfo
+from launch.actions import ExecuteProcess, LogInfo, DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
-from launch.actions import DeclareLaunchArgument
 from launch_ros.actions import Node
 
 def generate_launch_description():
@@ -25,15 +24,21 @@ def generate_launch_description():
         description='Whether to automatically setup virtual CAN interface'
     )
 
-    # Setup virtual CAN interface (conditional)
+    driver_log_level_arg = DeclareLaunchArgument(
+        'driver_log_level',
+        default_value='DEBUG',
+        description='Driver logging level for testing'
+    )
+
+    # Setup virtual CAN interface (modern, Docker-friendly)
     setup_vcan_process = ExecuteProcess(
         cmd=[
             'bash', '-c',
-            'sudo modprobe vcan && '
-            'sudo ip link add dev vcan0 type vcan && '
-            'sudo ip link set up vcan0 && '
-            'echo "Virtual CAN interface vcan0 created successfully" || '
-            'echo "Virtual CAN interface vcan0 already exists or setup failed"'
+            # create only if missing
+            'ip link show vcan0 >/dev/null 2>&1 || sudo ip link add dev vcan0 type vcan; '
+            # always bring it up
+            'sudo ip link set up vcan0; '
+            'echo "[TEST] vcan0 is present and UP."'
         ],
         name='setup_vcan',
         output='screen',
@@ -46,8 +51,7 @@ def generate_launch_description():
             '\n',
             '=' * 80, '\n',
             'MTT DRIVER INITIALIZATION TEST LAUNCH\n',
-            'This test runs the MTT driver alone without the ROS wrapper\n',
-            'to verify basic initialization and frame generation.\n',
+            'This test runs the MTT driver test node to verify basic functionality.\n',
             '=' * 80, '\n'
         ]
     )
@@ -58,16 +62,15 @@ def generate_launch_description():
         executable='mtt_test_node',
         name='mtt_driver_init_test',
         output='screen',
-        parameters=[{
-            'can_interface': LaunchConfiguration('can_interface'),
-        }],
-        arguments=[LaunchConfiguration('can_interface')]
+        arguments=[LaunchConfiguration('can_interface')],
+        emulate_tty=True,
     )
 
     return LaunchDescription([
         # Launch arguments
         can_interface_arg,
         setup_vcan_arg,
+        driver_log_level_arg,
         
         # Setup virtual CAN if requested
         setup_vcan_process,
