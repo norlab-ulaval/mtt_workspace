@@ -6,6 +6,8 @@ from std_msgs.msg import Bool
 from rcl_interfaces.msg import Log
 from geometry_msgs.msg import Twist
 from enum import Enum
+from mtt_msgs.msg import MttAuxCommand
+
 
 
 class JoystickMode(Enum):
@@ -20,6 +22,8 @@ class JoyMapper(Node):
         self.rosout_sub = self.create_subscription(Log, '/rosout', self.log_callback, 10)
 
         self.cmd_vel_publisher = self.create_publisher(Twist, '/cmd_vel', 10)
+        self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
+
 
         # float numbers are rarely exactly equal to 0
         self.float_number_threshold = 1e-6
@@ -32,12 +36,8 @@ class JoyMapper(Node):
         self.get_logger().info(f"Detected joystick: {joystick_name}")
         self.set_joystick_controller(joystick_name)
 
-        self.wheel_speed_multiplier = 1
-        self.last_wheel_speed_multiplier_command = 0
-        self.yaw_speed_multiplier = 1
-        self.last_yaw_speed_multiplier_command = 0
-        self.wheel_speed_threshold = 0.2
-        self.yaw_speed_threshold = 0.2
+        self.light_state = False
+        self.last_toggle_light_command = 0
 
 
 
@@ -141,7 +141,6 @@ class JoyMapper(Node):
     def logitech_dual_action_mapping(self, msg: Joy):
 
         # print("####")
-        # print("joy_cb")
 
         # Left joystick X axis (horizontal)
         yaw_speed = msg.axes[0] 
@@ -153,7 +152,7 @@ class JoyMapper(Node):
         msg.axes[2] 
 
         # Right joystick Y axis (vertical)
-        msg.axes[3]
+        brake = msg.axes[3]
 
         # D-pad (arrows) x axis (horizontal)
         msg.axes[4]
@@ -197,80 +196,36 @@ class JoyMapper(Node):
         # appears but haven't found it
         msg.buttons[11]
 
-        # The following part could eventually be a function on its own
-
-        # ignoring small values to prevent unwillingly moving the robot 
-        # in a direction due joystick not being perfectly oriented on an axis
-        if abs(wheel_speed) < self.wheel_speed_threshold:
-            wheel_speed = 0.0
-
-        if abs(yaw_speed) < self.yaw_speed_threshold:
-            yaw_speed = 0.0
-
-
         cmd_vel_msg = Twist()
 
-        if nav_deadman_switch:
-
-            cmd_vel_msg.linear.x = wheel_speed * self.wheel_speed_multiplier
-            cmd_vel_msg.angular.z = yaw_speed * self.yaw_speed_multiplier
-
-        else:
-            cmd_vel_msg.linear.x = 0.0
-            cmd_vel_msg.angular.z = 0.0
-
+        cmd_vel_msg.linear.x = wheel_speed
+        cmd_vel_msg.angular.z = yaw_speed
 
         self.cmd_vel_publisher.publish(cmd_vel_msg)
-        
 
-        if winch_deadman_switch:
-            if winch > 1 - self.float_number_threshold:
-                pass
-                # winch out
+        aux_msg = MttAuxCommand()
+        aux_msg.dead_man_switch = bool(nav_deadman_switch)
+        aux_msg.brake = brake
+        aux_msg.winch_safety_button = bool(winch_deadman_switch)
 
-            elif winch < -1 + self.float_number_threshold:
-                pass
-                # winch in
 
-        
-
-        if increase_wheel_speed or decrease_wheel_speed:
-            if self.last_wheel_speed_multiplier_command == 0:
-                self.last_wheel_speed_multiplier_command = 1
-
-                if increase_wheel_speed:
-                    self.wheel_speed_multiplier +=1
-                elif decrease_wheel_speed:
-                    self.wheel_speed_multiplier -=1
+        if winch > 0.5:
+            aux_msg.winch_command = MttAuxCommand.WINCH_IN
+        elif winch < -0.5:
+            aux_msg.winch_command = MttAuxCommand.WINCH_OUT
         else:
-            self.last_wheel_speed_multiplier_command = 0
+            aux_msg.winch_command = MttAuxCommand.WINCH_NEUTRAL
 
 
-        if increase_yaw_speed or decrease_yaw_speed:
-            if self.last_yaw_speed_multiplier_command == 0:
-                self.last_yaw_speed_multiplier_command = 1
+        if self.last_toggle_light_command == 0:
+            if toggle_light:
+                self.light_state = not self.light_state
+        
+        self.last_toggle_light_command = toggle_light
 
-                if increase_yaw_speed:
-                    self.yaw_speed_multiplier +=1
-                elif decrease_yaw_speed:
-                    self.yaw_speed_multiplier -=1
-        else:
-            self.last_yaw_speed_multiplier_command = 0
+        aux_msg.light_state = self.light_state
 
-
-        if self.wheel_speed_multiplier < 1:
-            self.wheel_speed_multiplier = 1
-
-        if self.yaw_speed_multiplier < 1:
-            self.yaw_speed_multiplier = 1
-
-        if self.wheel_speed_multiplier > 10:
-            self.wheel_speed_multiplier = 10
-
-        if self.yaw_speed_multiplier > 10:
-            self.yaw_speed_multiplier = 10
-
-
+        self.aux_cmd_pub.publish(aux_msg)
 
 
 
