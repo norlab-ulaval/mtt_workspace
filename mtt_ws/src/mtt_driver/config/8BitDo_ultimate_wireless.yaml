@@ -1,10 +1,10 @@
 mtt_teleop_joy:
   axis:
     linear_speed: 1
-    rotation_speed: 0
-    brake: 4
+    rotation_speed: 3
+    brake: 5
     winch: 7
   buttons:
-    nav_safety: 0
-    winch_safety: 1
+    nav_safety: 5
+    winch_safety: 3
     light_toggle: 2
