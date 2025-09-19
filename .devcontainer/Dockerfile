@@ -36,6 +36,7 @@ RUN apt-get update -y && apt-get install -y \
     git \
     python3-pip \
     python3-tk \
+    python3-pyinotify \
     can-utils \
     iproute2 \
     python3-can \

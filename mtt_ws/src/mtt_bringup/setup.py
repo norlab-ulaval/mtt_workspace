@@ -32,7 +32,6 @@ setup(
         'scan_frame_remapper = mtt_bringup.scan_frame_remapper:main',
         'odom_publisher_simul = mtt_bringup.odom_publisher_simul:main',
         'mtt_controller_interface = mtt_bringup.mtt_controller_interface:main',
-        'mtt_joy_mapper = mtt_bringup.mtt_joy_mapper:main',
         ],
     },   
 )
