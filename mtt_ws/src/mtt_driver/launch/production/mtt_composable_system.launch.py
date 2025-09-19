@@ -1,56 +1,82 @@
 #!/usr/bin/env python3
 """
-MTT Composable System         DeclareLaunchArgument(
-            'driver_log_level',
-            default_value='INFO',
-            description='Log level for MTT driver (DEBUG, INFO, WARNING, ERROR)'
-        ),
-        DeclareLaunchArgument(
-            'control_frequency_hz',
-            default_value='50.0',
-            description='Control loop frequency in Hz (default: 50, configurable for performance)'
-        ),h File
+MTT Composable System Launch File
 
 This launch file starts the complete MTT composable architecture including:
 - MTT driver wrapper (hardware abstraction + ROS integration + safety)
 - MTT odometry node (dedicated composable odometry calculations)
 - Joystick input (optional)
 - Teleop controller (optional)
-
-Architecture:
-  Driver → Wrapper → Odometry Node
-     ↓         ↓           ↓
-  hardware  /mtt_tachometer  /mtt_odometry
-
-Usage examples:
-  # Complete system for real hardware
-  ros2 launch mtt_driver mtt_composable_system.launch.py
-
-  # Driver + odometry only (no teleop)
-  ros2 launch mtt_driver mtt_composable_system.launch.py enable_teleop:=false
-
-  # Custom logging
-  ros2 launch mtt_driver mtt_composable_system.launch.py driver_log_level:=DEBUG
 """
 
+import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument
+from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration, Command
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-import os
 
 
 def generate_launch_description():
     description_share = FindPackageShare(package='mtt_description').find('mtt_description')
     urdf_path = os.path.join(description_share, 'urdf', 'robot.urdf.xacro')
 
+    # --- vcan bring-up (idempotent, no modprobe) ---
+    setup_vcan_process = ExecuteProcess(
+        cmd=[
+            'bash', '-c',
+            # create only if missing
+            'ip link show vcan0 >/dev/null 2>&1 || sudo ip link add dev vcan0 type vcan; '
+            # always bring it up
+            'sudo ip link set up vcan0; '
+            'echo "[vcan] vcan0 is present and UP."'
+        ],
+        name='setup_vcan',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('setup_vcan')),
+    )
+
+    # --- real CAN bring-up (with bitrate) ---
+    setup_real_can_process = ExecuteProcess(
+        cmd=[
+            'bash', '-c',
+            # uses launch args via env-style expansion by passing them into the shell
+            'IFACE="$(echo $CAN_IFACE)"; RATE="$(echo $CAN_RATE)"; '
+            'sudo ip link set "$IFACE" down 2>/dev/null || true; '
+            'sudo ip link set "$IFACE" up type can bitrate "$RATE"; '
+            'echo "[can] ${IFACE} UP @ ${RATE} bps."'
+        ],
+        additional_env={
+            'CAN_IFACE': LaunchConfiguration('can_interface'),
+            'CAN_RATE':  LaunchConfiguration('can_bitrate'),
+        },
+        name='setup_real_can',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('setup_real_can')),
+    )
+
     return LaunchDescription([
+        # -------- Arguments --------
+        DeclareLaunchArgument(
+            'setup_vcan',
+            default_value='false',
+            description='Bring up vcan0 (Docker/testing - uses sudo).'
+        ),
+        DeclareLaunchArgument(
+            'setup_real_can',
+            default_value='false',
+            description='Bring up real CAN interface with bitrate (host sudo).'
+        ),
         DeclareLaunchArgument(
             'can_interface',
             default_value='can0',
             description='CAN interface name for real hardware'
+        ),
+        DeclareLaunchArgument(
+            'can_bitrate',
+            default_value='250000',
+            description='Bitrate for real CAN interface (e.g., 250000, 500000).'
         ),
         DeclareLaunchArgument(
             'driver_log_level',
@@ -108,8 +134,15 @@ def generate_launch_description():
             description='RViz config file path'
         ),
 
-        # Core MTT System Nodes
-        # Robot description: provides base_link (URDF) needed for TF tree in real hardware launch
+        # -------- Actions / Nodes --------
+
+        # 0) (Optional) Ensure vcan0 exists & is up BEFORE anything else
+        setup_vcan_process,
+
+        # 0b) (Optional) Ensure real CAN is up with bitrate BEFORE anything else
+        setup_real_can_process,
+
+        # 1) Robot description (URDF → TF tree for real runs)
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -118,7 +151,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('publish_description'))
         ),
 
-        # Joint controller: converts cmd_vel to joint movements and publishes joint_states
+        # 2) Joint controller (cmd_vel → joints) and joint_states
         Node(
             package='mtt_driver',
             executable='mtt_joint_controller',
@@ -127,8 +160,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('publish_description'))
         ),
 
-        # TF is published dynamically by odometry manager
-        # Optional static map->odom identity for RViz (dead reckoning visualization)
+        # 3) Optional static map->odom identity TF (RViz dead-reckoning)
         Node(
             package='tf2_ros',
             executable='static_transform_publisher',
@@ -136,8 +168,8 @@ def generate_launch_description():
             arguments=['0','0','0','0','0','0','map', LaunchConfiguration('odom_frame')],
             condition=IfCondition(LaunchConfiguration('enable_map_frame'))
         ),
-        
-        # MTT Driver Wrapper - Hardware abstraction + ROS integration + safety
+
+        # 4) Driver
         Node(
             package='mtt_driver',
             executable='mtt_ros_wrapper',
@@ -155,7 +187,7 @@ def generate_launch_description():
             respawn_delay=2.0
         ),
 
-        # MTT Multi-Mode Odometry Manager - Supports multiple driving modes
+        # 5) Odometry manager
         Node(
             package='mtt_driver',
             executable='mtt_odometry_manager',
@@ -171,9 +203,7 @@ def generate_launch_description():
             respawn_delay=2.0
         ),
 
-        # Teleoperation Nodes (optional)
-        
-        # Joystick input node
+        # 6) Joystick (joy_linux)
         Node(
             package='joy_linux',
             executable='joy_linux_node',
@@ -187,7 +217,7 @@ def generate_launch_description():
             respawn=True
         ),
 
-        # MTT Teleop controller
+        # 7) Teleop
         Node(
             package='mtt_driver',
             executable='mtt_teleop_joy',
@@ -197,7 +227,7 @@ def generate_launch_description():
             respawn=True
         ),
 
-        # Optional RViz (mirrors mtt_description launch capability)
+        # 8) RViz
         Node(
             package='rviz2',
             executable='rviz2',

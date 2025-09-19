@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Launch file for testing MTT Driver initialization without ROS wrapper.
+Launch file for testing MTT Driver initialization with standalone script.
 This launch file runs a standalone test script that verifies the driver's init frame and basic functionality.
 """
 
@@ -8,8 +8,14 @@ from launch import LaunchDescription
 from launch.actions import ExecuteProcess, LogInfo, DeclareLaunchArgument
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
+import os
 
 def generate_launch_description():
+    # Get the current workspace path
+    workspace_root = '/home/ws/mtt_ws'
+    script_path = os.path.join(workspace_root, 'src', 'mtt_driver', 'scripts', 'test_driver_init.py')
+    driver_path = os.path.join(workspace_root, 'src', 'mtt_driver', 'mtt_driver')
+    
     # Declare launch arguments
     can_interface_arg = DeclareLaunchArgument(
         'can_interface',
@@ -23,15 +29,15 @@ def generate_launch_description():
         description='Whether to automatically setup virtual CAN interface'
     )
 
-    # Setup virtual CAN interface (conditional) - creates vcan0 by default
+    # Setup virtual CAN interface (modern, Docker-friendly)
     setup_vcan_process = ExecuteProcess(
         cmd=[
             'bash', '-c',
-            'sudo modprobe vcan && '
-            'sudo ip link add dev vcan0 type vcan && '
-            'sudo ip link set up vcan0 && '
-            'echo "Virtual CAN interface vcan0 created successfully" || '
-            'echo "Virtual CAN interface vcan0 already exists or setup failed"'
+            # create only if missing
+            'ip link show vcan0 >/dev/null 2>&1 || sudo ip link add dev vcan0 type vcan; '
+            # always bring it up
+            'sudo ip link set up vcan0; '
+            'echo "[TEST] vcan0 is present and UP."'
         ],
         name='setup_vcan',
         output='screen',
@@ -43,9 +49,11 @@ def generate_launch_description():
         msg=[
             '\n',
             '=' * 80, '\n',
-            'MTT DRIVER INITIALIZATION TEST LAUNCH\n',
-            'This test runs the MTT driver alone without the ROS wrapper\n',
+            'MTT DRIVER STANDALONE TEST LAUNCH\n',
+            'This test runs the MTT driver standalone script\n',
             'to verify basic initialization and frame generation.\n',
+            f'Script path: {script_path}\n',
+            f'Driver path: {driver_path}\n',
             '=' * 80, '\n'
         ]
     )
@@ -54,12 +62,12 @@ def generate_launch_description():
     mtt_driver_test_process = ExecuteProcess(
         cmd=[
             'python3',
-            '/home/robot/mtt_project/mtt_ws/src/mtt_driver/scripts/test_driver_init.py',
+            script_path,
             LaunchConfiguration('can_interface')
         ],
-        name='mtt_driver_init_test',
+        name='mtt_driver_standalone_test',
         output='screen',
-        cwd='/home/robot/mtt_project/mtt_ws/src/mtt_driver/mtt_driver'
+        cwd=driver_path
     )
 
     return LaunchDescription([

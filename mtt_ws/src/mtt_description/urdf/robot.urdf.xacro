@@ -15,7 +15,7 @@
 
     <link name="base_link">
     <visual>
-    <origin xyz="-0.0034808381178577409154 -0.051022168970358453 0.49330103716210749187" rpy="0 -0 3.1415926535897926719" />
+    <origin xyz="-0.0034808381178577409154 -0.051022168970358453 0.49330103716210749187" rpy="0 -0 ${pi}" />
     <geometry>
     <mesh filename="file://$(find mtt_description)/meshes/visual/m500_ra-02_r02.stl"/>
     </geometry>
@@ -24,7 +24,7 @@
     </material>
     </visual>
     <collision>
-    <origin xyz="-0.0034808381178577409154 -0.051022168970358453 0.49330103716210749187" rpy="0 -0 3.1415926535897926719" />
+    <origin xyz="-0.0034808381178577409154 -0.051022168970358453 0.49330103716210749187" rpy="0 -0 ${pi}" />
     <geometry>
     <mesh filename="file://$(find mtt_description)/meshes/collision/boitecollisionmtt_simple.stl"/>
     </geometry>
@@ -1454,7 +1454,104 @@
   </inertial>
 </link>
 
-<!-- Joint to attach LiDAR to base_footprint -->
+<!-- Physical pencil mark reference point -->
+<link name="reference_point">
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <sphere radius="0.005"/>
+    </geometry>
+    <material name="mark_material">
+      <color rgba="1.0 0.0 0.0 1.0"/>
+    </material>
+  </visual>
+</link>
+
+<joint name="reference_point_joint" type="fixed">
+  <parent link="base_link"/>
+  <child link="reference_point"/>
+  <origin xyz="-0.7174808381178577409 0.21597831029643155 0.52330103716210749187" rpy="0 0 0"/>
+</joint>
+
+<!-- Center LiDAR -->
+<link name="center_lidar_link">
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.05" length="0.1"/>
+    </geometry>
+    <material name="lidar_material">
+      <color rgba="0.2 0.2 0.2 1.0"/>
+    </material>
+  </visual>
+  <inertial>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <mass value="0.1"/>
+    <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+             iyy="0.0001" iyz="0.0"
+             izz="0.0001"/>
+  </inertial>
+</link>
+
+<joint name="center_lidar_joint" type="fixed">
+  <parent link="reference_point"/>
+  <child link="center_lidar_link"/>
+  <origin xyz="0.62 -0.266 0.355" rpy="0 0 ${pi/2}"/>
+</joint>
+
+<!-- Front LiDAR -->
+<link name="front_lidar_link">
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.05" length="0.1"/>
+    </geometry>
+    <material name="lidar_material">
+      <color rgba="0.2 0.2 0.2 1.0"/>
+    </material>
+  </visual>
+  <inertial>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <mass value="0.1"/>
+    <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+             iyy="0.0001" iyz="0.0"
+             izz="0.0001"/>
+  </inertial>
+</link>
+
+<joint name="front_lidar_joint" type="fixed">
+  <parent link="reference_point"/>
+  <child link="front_lidar_link"/>
+  <origin xyz="1.24 -0.266 0.3302" rpy="0 0 0"/>
+</joint>
+
+<!-- Rear LiDAR -->
+<link name="rear_lidar_link">
+  <visual>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <geometry>
+      <cylinder radius="0.05" length="0.1"/>
+    </geometry>
+    <material name="lidar_material">
+      <color rgba="0.2 0.2 0.2 1.0"/>
+    </material>
+  </visual>
+  <inertial>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <mass value="0.1"/>
+    <inertia ixx="0.0001" ixy="0.0" ixz="0.0"
+             iyy="0.0001" iyz="0.0"
+             izz="0.0001"/>
+  </inertial>
+</link>
+
+<joint name="rear_lidar_joint" type="fixed">
+  <parent link="reference_point"/>
+  <child link="rear_lidar_link"/>
+  <origin xyz="0.01 -0.266 0.3302" rpy="0 0 0"/>
+</joint>
+
+<!-- Legacy LiDAR (kept for compatibility) -->
 <joint name="lidar_joint" type="fixed">
   <parent link="base_link"/>
   <child link="lidar_link"/>
@@ -1467,9 +1564,9 @@
 </plugin>
 </gazebo>
 
-<!-- Gazebo sensor plugin -->
-<gazebo reference="lidar_link">
-  <sensor name="lidar" type="gpu_lidar">
+<!-- Gazebo sensor plugin for Center LiDAR -->
+<gazebo reference="center_lidar_link">
+  <sensor name="center_lidar" type="gpu_lidar">
     <pose>0 0 0 0 0 0</pose>
     <update_rate>10</update_rate>
     <ray>
@@ -1486,7 +1583,50 @@
         <max>30.0</max>
       </range>
     </ray>
+  </sensor>
+</gazebo>
 
+<!-- Gazebo sensor plugin for Front LiDAR -->
+<gazebo reference="front_lidar_link">
+  <sensor name="front_lidar" type="gpu_lidar">
+    <pose>0 0 0 0 0 0</pose>
+    <update_rate>10</update_rate>
+    <ray>
+      <scan>
+        <horizontal>
+          <samples>360</samples>
+          <resolution>1.0</resolution>
+          <min_angle>-3.14</min_angle>
+          <max_angle>3.14</max_angle>
+        </horizontal>
+      </scan>
+      <range>
+        <min>0.1</min>
+        <max>30.0</max>
+      </range>
+    </ray>
+  </sensor>
+</gazebo>
+
+<!-- Gazebo sensor plugin for Rear LiDAR -->
+<gazebo reference="rear_lidar_link">
+  <sensor name="rear_lidar" type="gpu_lidar">
+    <pose>0 0 0 0 0 0</pose>
+    <update_rate>10</update_rate>
+    <ray>
+      <scan>
+        <horizontal>
+          <samples>360</samples>
+          <resolution>1.0</resolution>
+          <min_angle>-3.14</min_angle>
+          <max_angle>3.14</max_angle>
+        </horizontal>
+      </scan>
+      <range>
+        <min>0.1</min>
+        <max>30.0</max>
+      </range>
+    </ray>
   </sensor>
 </gazebo>
 

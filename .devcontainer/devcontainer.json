@@ -110,9 +110,6 @@
     "--pid=host",
     "--ipc=host",
 
-    // Give container user access to input devices
-    "--group-add=input",
-
     // for can bus
     "--cap-add=NET_ADMIN"
   ],
