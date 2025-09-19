@@ -47,7 +47,7 @@ RUN apt-get update -y && apt-get install -y \
     ros-${ROS_DISTRO}-forward-command-controller && \
     rm -rf /var/lib/apt/lists/*
 
-RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash && source /home/ws/install/setup.bash" >> /home/$USERNAME/.bashrc
+RUN echo "source /opt/ros/$ROS_DISTRO/setup.bash && source /home/ws/mtt_ws/install/setup.bash" >> /home/$USERNAME/.bashrc
 
 # Set XDG_RUNTIME_DIR environment variable
 ENV XDG_RUNTIME_DIR=/run/user/$USER_UID
