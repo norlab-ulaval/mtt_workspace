@@ -12,7 +12,7 @@ This launch file starts the complete MTT composable architecture including:
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, Command
+from launch.substitutions import LaunchConfiguration, Command, PythonExpression
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -99,6 +99,13 @@ def generate_launch_description():
             description='Enable teleoperation (joystick + teleop controller)'
         ),
         DeclareLaunchArgument(
+            'teleop_flow',
+            default_value='smoother',
+            description=(
+                "Teleop pipeline: 'smoother' (joystick → smoother → wrapper) or 'joint_pid' (joystick → joint_controller → wrapper)"
+            ),
+        ),
+        DeclareLaunchArgument(
             'enable_joystick',
             default_value='true',
             description='Enable joystick input node'
@@ -122,6 +129,11 @@ def generate_launch_description():
             'enable_map_frame',
             default_value='true',
             description='Publish static map->odom identity transform'
+        ),
+        DeclareLaunchArgument(
+            'odometry_broadcast_tf',
+            default_value='true',
+            description='Whether mtt_odometry_manager should publish odom->base TF'
         ),
         DeclareLaunchArgument(
             'use_rviz',
@@ -156,6 +168,8 @@ def generate_launch_description():
             package='mtt_driver',
             executable='mtt_joint_controller',
             name='mtt_joint_controller',
+            # Subscribe to unified teleop topic in both flows
+            remappings=[('/cmd_vel_raw', 'cmd_vel/teleop')],
             output='screen'
         ),
 
@@ -179,6 +193,15 @@ def generate_launch_description():
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
                 'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
                 'base_frame': LaunchConfiguration('base_frame'),
+                # Internal mux defaults
+                'use_external_mux': False,
+                'control_source': 'auto_if_no_deadman',
+                'command_timeout': 0.5,
+                # Select teleop input based on flow
+                'teleop_input_topic': PythonExpression([
+                    "'cmd_vel/teleop_smoothed' if '", LaunchConfiguration('teleop_flow'), "' == 'smoother' else '/cmd_vel_pid'"
+                ]),
+                'teleop_raw_topic': 'cmd_vel/teleop',
             }],
             output='screen',
             emulate_tty=True,
@@ -194,7 +217,13 @@ def generate_launch_description():
             arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
             parameters=[{
                 'base_frame': LaunchConfiguration('base_frame'),
-                'odom_frame': LaunchConfiguration('odom_frame')
+                'odom_frame': LaunchConfiguration('odom_frame'),
+                # Ensure odometry angular source matches the selected teleop flow
+                'cmd_vel_topic': PythonExpression([
+                    "'cmd_vel/teleop_smoothed' if '", LaunchConfiguration('teleop_flow'), "' == 'smoother' else '/cmd_vel_pid'"
+                ]),
+                # Toggle TF broadcasting via launch arg
+                'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
             }],
             output='screen',
             emulate_tty=True,
@@ -216,11 +245,31 @@ def generate_launch_description():
             respawn=True
         ),
 
+        # 6.5) Teleop command smoother (decays to zero on input inactivity)
+        Node(
+            package='mtt_driver',
+            executable='mtt_cmd_smoother',
+            name='mtt_cmd_smoother',
+            parameters=[{
+                'input_topic': 'cmd_vel/teleop',
+                'output_topic': 'cmd_vel/teleop_smoothed',
+                'input_timeout': 0.5,
+                'rate_hz': 50.0,
+            }],
+            output='screen',
+            condition=IfCondition(PythonExpression([
+                "'", LaunchConfiguration('enable_teleop'), "' == 'true' and '",
+                LaunchConfiguration('teleop_flow'), "' == 'smoother'"
+            ])),
+            respawn=True
+        ),
+
         # 7) Teleop
         Node(
             package='mtt_driver',
             executable='mtt_teleop_joy',
             name='mtt_teleop_joy_node',
+            remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
             output='screen',
             condition=IfCondition(LaunchConfiguration('enable_teleop')),
             respawn=True

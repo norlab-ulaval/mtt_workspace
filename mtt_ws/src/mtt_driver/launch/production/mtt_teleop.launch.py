@@ -18,6 +18,7 @@ Usage examples:
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.substitutions import LaunchConfiguration
+from launch_ros.substitutions import FindPackageShare
 from launch_ros.actions import Node
 
 
@@ -62,10 +63,28 @@ def generate_launch_description():
             output='screen'
         ),
 
+        # Teleop node publishes to cmd_vel/teleop (not directly to cmd_vel)
         Node(
             package='mtt_driver',
             executable='mtt_teleop_joy',
             name='mtt_teleop_joy_node',
+            # teleop_joy publishes to 'cmd_vel_raw' -> pipe it into 'cmd_vel/teleop'
+            remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
+            output='screen'
+        ),
+
+        # Optional command smoother between teleop and wrapper
+        Node(
+            package='mtt_driver',
+            executable='mtt_cmd_smoother',
+            name='mtt_cmd_smoother',
+            parameters=[{
+                'input_topic': 'cmd_vel/teleop',
+                'output_topic': 'cmd_vel/teleop_smoothed',
+                'max_accel_linear': 1.5,
+                'max_accel_angular': 1.5,
+                'rate_hz': 50.0,
+            }],
             output='screen'
         ),
 

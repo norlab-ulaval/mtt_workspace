@@ -160,10 +160,10 @@ class SingleTrailerOdometry(OdometryInterface):
         angular_velocity: float = 0.0,
     ) -> Odometry:
         odom = self._odom_with_stamp(msg, odom_frame, base_frame)
-        
+
         # Get current time for dynamics integration
         current_time = time.time()
-        
+
         if self.last_time is None:
             # First sample - initialize
             self.last_time = current_time
@@ -171,24 +171,25 @@ class SingleTrailerOdometry(OdometryInterface):
         else:
             dt = current_time - self.last_time
             dt = max(0.001, min(0.1, dt))  # Clamp dt to reasonable range
-        
+
         # Get tachometer distance for validation/correction
-        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier * 1000.0  # Convert to meters
-        
+        # distance_km multiplied by distance_multiplier (1000 if km) yields meters
+        cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
+
         # Handle wrap-around detection
         if self.last_abs_m is not None and abs(cur_abs - self.last_abs_m) > wrap_reset_threshold_m:
             # Reset could be handled here if needed
             pass
-        
-        # Convert angular velocity input to steering input for articulated model
-        # This maps cmd_vel angular.z to articulation joint angle
-        if abs(angular_velocity) > 0.01:
-            max_angular = 1.0  # rad/s - adjust based on your vehicle capabilities
-            steering_ratio = angular_velocity / max_angular
-            self.current_steering = max(-1.0, min(1.0, steering_ratio))
+
+        # Interpret cmd input as articulation angle command (phi_cmd in rad)
+        # Map phi_cmd to normalized steering input in [-1, 1] using model's max angle
+        phi_cmd = float(angular_velocity)
+        if abs(phi_cmd) > 1e-4:
+            max_angle = max(1e-6, float(self.vehicle_params.max_articulation_angle))
+            self.current_steering = max(-1.0, min(1.0, phi_cmd / max_angle))
         else:
             self.current_steering = 0.0
-        
+
         # Get throttle from tachometer speed (fallback if no cmd_vel)
         speed_ms = float(getattr(msg, "speed_ms", 0.0))
         if abs(speed_ms) > 0.01:
@@ -196,7 +197,7 @@ class SingleTrailerOdometry(OdometryInterface):
             self.current_throttle = max(-1.0, min(1.0, speed_ms / max_speed))
         else:
             self.current_throttle = 0.0
-        
+
         # Update articulated vehicle dynamics
         x, y, heading = self.dynamics.update(
             throttle_input=self.current_throttle,
@@ -204,36 +205,36 @@ class SingleTrailerOdometry(OdometryInterface):
             dt=dt,
             terrain_grip=1.0  # Could be made dynamic based on conditions
         )
-        
+
         # Get vehicle state
         vehicle_state = self.dynamics.get_state()
-        
+
         # Validate against tachometer if we have previous measurement
         if self.last_abs_m is not None:
             # Calculate distance traveled according to tachometer
             tach_distance = cur_abs - self.last_abs_m
-            
+
             # Calculate distance according to dynamics model
             dynamics_distance = vehicle_state['linear_velocity'] * dt
-            
+
             # If there's significant discrepancy, we could apply correction
             distance_error = abs(tach_distance - abs(dynamics_distance))
             if distance_error > 0.1:  # 10cm threshold
                 # For now, trust the dynamics model but log discrepancy
                 pass
-        
+
         self.last_abs_m = cur_abs
         self.last_time = current_time
-        
+
         # Fill odometry message with articulated vehicle state
         odom.pose.pose.position.x = x
         odom.pose.pose.position.y = y
         odom.pose.pose.position.z = 0.0
-        
+
         # Convert heading to quaternion
         quat = self._yaw_to_quaternion(heading)
         odom.pose.pose.orientation = quat
-        
+
         # Velocity information from dynamics model
         odom.twist.twist.linear.x = vehicle_state['linear_velocity']
         odom.twist.twist.linear.y = 0.0  # Tracked vehicles don't have lateral velocity
@@ -241,10 +242,10 @@ class SingleTrailerOdometry(OdometryInterface):
         odom.twist.twist.angular.x = 0.0
         odom.twist.twist.angular.y = 0.0
         odom.twist.twist.angular.z = vehicle_state['angular_velocity']
-        
+
         # Set realistic covariances for articulated vehicle
         self._apply_articulated_covariances(odom, vehicle_state)
-        
+
         return odom
 
     def _apply_articulated_covariances(self, odom: Odometry, vehicle_state: dict):
@@ -563,19 +564,23 @@ class MttOdometryManager(Node):
         # New: distance unit & scaling
         self.declare_parameter("distance_unit", "km")  # 'km' or 'm'
         self.declare_parameter("distance_scale", 1.0)  # additional multiplicative scaling
+        # New: angular velocity source topic and TF broadcast control
+        self.declare_parameter("cmd_vel_topic", "/cmd_vel_pid")
+        self.declare_parameter("broadcast_tf", True)
 
-        self.odom_frame: str = self.get_parameter("odom_frame").get_parameter_value().string_value
-        self.base_frame: str = self.get_parameter("base_frame").get_parameter_value().string_value
-        self.tachometer_topic: str = self.get_parameter("tachometer_topic").get_parameter_value().string_value
-        self.odometry_topic: str = self.get_parameter("odometry_topic").get_parameter_value().string_value
-        self.mode_topic: str = self.get_parameter("mode_topic").get_parameter_value().string_value
-        self.wrap_reset_threshold_m: float = (
-            self.get_parameter("wrap_reset_threshold_m").get_parameter_value().double_value
-        )
-        self.track_width_m: float = self.get_parameter("track_width_m").get_parameter_value().double_value
-        self.wheelbase_m: float = self.get_parameter("wheelbase_m").get_parameter_value().double_value
-        distance_unit: str = self.get_parameter("distance_unit").get_parameter_value().string_value.lower()
-        distance_scale: float = self.get_parameter("distance_scale").get_parameter_value().double_value
+        # Resolve parameters
+        self.odom_frame = self.get_parameter("odom_frame").get_parameter_value().string_value
+        self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value
+        self.tachometer_topic = self.get_parameter("tachometer_topic").get_parameter_value().string_value
+        self.odometry_topic = self.get_parameter("odometry_topic").get_parameter_value().string_value
+        self.mode_topic = self.get_parameter("mode_topic").get_parameter_value().string_value
+        self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").get_parameter_value().string_value
+        self.broadcast_tf = self.get_parameter("broadcast_tf").get_parameter_value().bool_value
+        self.wrap_reset_threshold_m = self.get_parameter("wrap_reset_threshold_m").get_parameter_value().double_value
+        self.track_width_m = self.get_parameter("track_width_m").get_parameter_value().double_value
+        self.wheelbase_m = self.get_parameter("wheelbase_m").get_parameter_value().double_value
+        distance_unit = self.get_parameter("distance_unit").get_parameter_value().string_value.lower()
+        distance_scale = self.get_parameter("distance_scale").get_parameter_value().double_value
         base_multiplier = 1000.0 if distance_unit == "km" else 1.0
         self.distance_multiplier = base_multiplier * distance_scale
         self.get_logger().info(
@@ -584,7 +589,7 @@ class MttOdometryManager(Node):
 
         # Mode
         self.current_mode = DrivingMode.SINGLE_TRAILER
-        self.odometry_calculator: OdometryInterface = OdometryFactory.create_odometry(
+        self.odometry_calculator = OdometryFactory.create_odometry(
             self.current_mode, track_width_m=self.track_width_m, wheelbase_m=self.wheelbase_m
         )
 
@@ -622,20 +627,20 @@ class MttOdometryManager(Node):
 
         # Angular velocity from cmd_vel for steering odometry
         self.current_angular_vel = 0.0
-        
+
         # Subscribe to cmd_vel for angular velocity information
         self.cmd_vel_sub = self.create_subscription(
             Twist,
-            '/cmd_vel_pid',
+            self.cmd_vel_topic,
             self.cmd_vel_callback,
-            10
+            10,
         )
 
         self.get_logger().info(
             f"MTT Odometry Manager initialized - Mode: {self.odometry_calculator.get_mode_name()} | "
             f"odom_frame={self.odom_frame}, base_frame={self.base_frame}, pub={self.odometry_topic}, sub={self.tachometer_topic}, mode_sub={self.mode_topic}"
         )
-        self.tf_broadcaster = TransformBroadcaster(self)  # added
+        self.tf_broadcaster = TransformBroadcaster(self) if self.broadcast_tf else None  # optional
 
     # ----------------- Callbacks ----------------- #
     def tacho_sub_failed_time_fallback(self, odom: Odometry) -> None:
@@ -658,15 +663,25 @@ class MttOdometryManager(Node):
             )
             self.tacho_sub_failed_time_fallback(odom)
             self.odom_pub.publish(odom)
-            # broadcast TF transform odom->base_frame
-            t = TransformStamped()
-            t.header = odom.header
-            t.child_frame_id = self.base_frame
-            t.transform.translation.x = odom.pose.pose.position.x
-            t.transform.translation.y = odom.pose.pose.position.y
-            t.transform.translation.z = odom.pose.pose.position.z
-            t.transform.rotation = odom.pose.pose.orientation
-            self.tf_broadcaster.sendTransform(t)
+            # broadcast TF transform odom->base_frame (optional, dynamic)
+            try:
+                want_tf = self.get_parameter("broadcast_tf").get_parameter_value().bool_value
+            except Exception:
+                want_tf = True
+            # Lazy toggle
+            if want_tf and self.tf_broadcaster is None:
+                self.tf_broadcaster = TransformBroadcaster(self)
+            elif not want_tf and self.tf_broadcaster is not None:
+                self.tf_broadcaster = None
+            if want_tf and self.tf_broadcaster is not None:
+                t = TransformStamped()
+                t.header = odom.header
+                t.child_frame_id = self.base_frame
+                t.transform.translation.x = odom.pose.pose.position.x
+                t.transform.translation.y = odom.pose.pose.position.y
+                t.transform.translation.z = odom.pose.pose.position.z
+                t.transform.rotation = odom.pose.pose.orientation
+                self.tf_broadcaster.sendTransform(t)
         except Exception as e:
             self.get_logger().error(f"Odometry calculation failed: {e}")
 
