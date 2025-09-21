@@ -7,7 +7,6 @@ import pyinotify
 import os
 from ament_index_python.packages import get_package_share_directory
 import yaml
-from typing import Optional
 
 
 class MTTTeleopJoy(Node):
@@ -38,13 +37,7 @@ class MTTTeleopJoy(Node):
 
         # pyinotify setup
         self.wm = pyinotify.WatchManager()
-        mask = (
-            pyinotify.IN_CREATE
-            | pyinotify.IN_DELETE
-            | pyinotify.IN_ATTRIB
-            | pyinotify.IN_MOVED_TO
-            | pyinotify.IN_MOVED_FROM
-        )
+        mask = pyinotify.IN_CREATE | pyinotify.IN_DELETE | pyinotify.IN_ATTRIB | pyinotify.IN_MOVED_TO | pyinotify.IN_MOVED_FROM
 
         # Add watch to /dev/input
         self.notifier = pyinotify.ThreadedNotifier(self.wm, self.event_handler)
@@ -63,7 +56,7 @@ class MTTTeleopJoy(Node):
         except Exception as e:
             self.get_logger().error(f"Could not read joystick name: {e}")
             return "Unknown"
-
+        
     def set_joystick_mapper(self, received_string):
         for name, yaml_file in self.mapping_registry.items():
             if name in received_string:
@@ -75,18 +68,18 @@ class MTTTeleopJoy(Node):
         pkg_share = get_package_share_directory("mtt_driver")
         mapping_path = os.path.join(pkg_share, "config", "joystick_mappings.yaml")
         try:
-            with open(mapping_path, "r") as f:
+            with open(mapping_path, 'r') as f:
                 data = yaml.safe_load(f)
             return data.get("joystick_mappings", {})
         except Exception as e:
             self.get_logger().error(f"Failed to load joystick mapping registry: {e}")
             return {}
-
+    
     def load_params_from_file(self, yaml_file: str):
         pkg_share = get_package_share_directory("mtt_driver")
         yaml_path = os.path.join(pkg_share, "config", yaml_file)
-
-        with open(yaml_path, "r") as f:
+    
+        with open(yaml_path, 'r') as f:
             data = yaml.safe_load(f)
 
         self.get_logger().debug(f"Loaded parameters from {yaml_file}")
@@ -96,16 +89,16 @@ class MTTTeleopJoy(Node):
         self.axis_map["rotation_speed"] = params["axis"]["rotation_speed"]
         self.axis_map["brake"] = params["axis"]["brake"]
         self.axis_map["winch"] = params["axis"]["winch"]
-
+        
         self.button_map["nav_safety"] = params["buttons"]["nav_safety"]
         self.button_map["winch_safety"] = params["buttons"]["winch_safety"]
         self.button_map["light_toggle"] = params["buttons"]["light_toggle"]
 
         self.is_initialized = True
 
-    def _get_button(self, msg: Joy, name: str, default: bool = False) -> bool:
+    def _get_button(self, msg: Joy, name: str, default: bool = False):
         """Return a button as bool; safe if mapping is missing or out of range."""
-        idx: Optional[int] = self.button_map.get(name)
+        idx = self.button_map.get(name)
         if idx is None:
             return default
         try:
@@ -113,9 +106,9 @@ class MTTTeleopJoy(Node):
         except (IndexError, TypeError):
             return default
 
-    def _get_axis(self, msg: Joy, name: str, default: float = 0.0) -> float:
+    def _get_axis(self, msg: Joy, name: str, default: float = 0.0):
         """Return an axis as float; safe if mapping is missing or out of range."""
-        idx: Optional[int] = self.axis_map.get(name)
+        idx = self.axis_map.get(name)
         if idx is None:
             return default
         try:
@@ -151,10 +144,10 @@ class MTTTeleopJoy(Node):
         aux_msg = MttAuxCommand()
         aux_msg.dead_man_switch = self._get_button(msg, "nav_safety")
         aux_msg.brake = abs(self._get_axis(msg, "brake"))
-
+        
         # Winch safety button
         aux_msg.winch_safety_button = self._get_button(msg, "winch_safety")
-
+         
         # Winch command from D-pad
         dpad_val = self._get_axis(msg, "winch")
         if dpad_val > 0.5:
@@ -166,7 +159,7 @@ class MTTTeleopJoy(Node):
 
         # Light toggle logic (rising edge detection)
         light_btn = self._get_button(msg, "light_toggle")
-        if light_btn and not self.prev_light_btn:
+        if light_btn == 1 and self.prev_light_btn == 0:
             self.light_state = not self.light_state
         self.prev_light_btn = light_btn
 
@@ -175,7 +168,6 @@ class MTTTeleopJoy(Node):
             aux_msg.light_state = self.light_state
 
         self.aux_cmd_pub.publish(aux_msg)
-
 
 def main(args=None):
     rclpy.init(args=args)
