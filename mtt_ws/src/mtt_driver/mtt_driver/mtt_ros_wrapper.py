@@ -1,28 +1,45 @@
 #!/usr/bin/env python3
 """MTT-154 ROS2 Wrapper: bridges ROS topics to low-level CAN driver."""
 
-import rclpy
 import time
 import threading
 import logging
 from enum import Enum
 from typing import Optional
+
+import rclpy
 from rclpy.node import Node
 from rclpy.executors import ExternalShutdownException
+
 from geometry_msgs.msg import Twist
 from std_msgs.msg import UInt8
-from mtt_msgs.msg import MttTachometerData, MttVehicleStatus, MttAuxCommand, MttDrivingMode
+
+from mtt_msgs.msg import (
+    MttTachometerData,
+    MttVehicleStatus,
+    MttAuxCommand,
+    MttDrivingMode,
+)
 from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
-from .mtt_driver import MTTCanDriver, WinchState, DirectionState, SecuritySwitchState, STEER_CENTER, STEER_MAX
-from .mtt_articulated_model import ArticulatedVehicleParams
+
+from .mtt_driver import (
+    MTTCanDriver,
+    WinchState,
+    DirectionState,
+    SecuritySwitchState,
+    STEER_CENTER,
+    STEER_MAX,
+)
+from .mtt_articulated_model import ArticulatedVehicleParams  # noqa: F401 (reserved for future use)
 
 
+# -------------------- Safety -------------------- #
 class SafetyState(Enum):
     """Safety state machine for the MTT vehicle."""
 
     ESTOPPED = "estopped"  # System estopped (start, wrapper closed, remote lost, deadman released)
-    READY = "ready"  # Remote detected, waiting for deadman
-    ACTIVE = "active"  # Remote detected AND deadman pressed
+    READY = "ready"        # Remote detected, waiting for deadman
+    ACTIVE = "active"      # Remote detected AND deadman pressed
 
 
 class SafetyStateMachine:
@@ -55,20 +72,22 @@ class SafetyStateMachine:
         # Communication lost = immediate E-STOP (alive safety)
         if not self.remote_present:
             self.state = SafetyState.ESTOPPED
-        # Deadman released = immediate E-STOP (emergency safety)
+        # Deadman released = E-STOPPED but comms OK
         elif not self.deadman_active:
-            self.state = SafetyState.READY  # Still E-STOPPED but ready for deadman
+            self.state = SafetyState.READY
         # Both communication and deadman OK = ACTIVE
         elif self.remote_present and self.deadman_active:
             self.state = SafetyState.ACTIVE
 
 
+# -------------------- Node -------------------- #
 class MTTRosWrapper(Node):
     """ROS2 node exposing cmd_vel + aux command control and tachometer/odometry outputs."""
 
     def __init__(self):
         super().__init__("mtt_ros_wrapper")
-        # Parameters
+
+        # ---------- Parameters ----------
         self.declare_parameter("can_interface", "can0")
         self.declare_parameter("test_mode", False)
         self.declare_parameter("driver_log_level", "INFO")
@@ -76,6 +95,7 @@ class MTTRosWrapper(Node):
         self.declare_parameter("can_frame_frequency_hz", 20.0)
         self.declare_parameter("base_frame", "mtt_base_link")
         self.declare_parameter("can_id", 0x001)
+
         # Command integration parameters
         self.declare_parameter("use_external_mux", False)  # Use twist_mux to feed unified /cmd_vel
         # control_source: 'auto' | 'teleop' | 'auto_if_no_deadman'
@@ -87,16 +107,16 @@ class MTTRosWrapper(Node):
         self.declare_parameter("teleop_input_topic", "cmd_vel/teleop_smoothed")
         self.declare_parameter("teleop_raw_topic", "cmd_vel/teleop")
 
-        # Resolve parameters
+        # ---------- Resolve parameters ----------
         can_interface = self.get_parameter("can_interface").get_parameter_value().string_value
         test_mode = self.get_parameter("test_mode").get_parameter_value().bool_value
         driver_log_level_str = self.get_parameter("driver_log_level").get_parameter_value().string_value
         control_frequency_hz = self.get_parameter("control_frequency_hz").get_parameter_value().double_value
-        can_frame_period_hz = self.get_parameter("can_frame_frequency_hz").get_parameter_value().double_value
+        can_frame_frequency_hz = self.get_parameter("can_frame_frequency_hz").get_parameter_value().double_value
         self.control_period = 1.0 / max(1e-3, control_frequency_hz)
-        self.can_frame_period = 1.0 / max(1e-3, can_frame_period_hz)
+        self.can_frame_period = 1.0 / max(1e-3, can_frame_frequency_hz)
         self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value
-        self.can_id = self.get_parameter("can_id").get_parameter_value().integer_value
+        self.can_id = int(self.get_parameter("can_id").get_parameter_value().integer_value)
         self.use_external_mux = self.get_parameter("use_external_mux").get_parameter_value().bool_value
         self.control_source = self.get_parameter("control_source").get_parameter_value().string_value
         self.command_timeout = self.get_parameter("command_timeout").get_parameter_value().double_value
@@ -114,7 +134,7 @@ class MTTRosWrapper(Node):
         driver_log_level = getattr(logging, driver_log_level_str.upper(), logging.INFO)
         self.get_logger().info(f"CAN interface: {can_interface}")
 
-        # Driver init
+        # ---------- Driver init ----------
         try:
             self.driver = MTTCanDriver(can_interface, log_level=driver_log_level, can_id=self.can_id)
             self.get_logger().info("MTT Driver initialized")
@@ -122,65 +142,72 @@ class MTTRosWrapper(Node):
             self.get_logger().fatal(f"Could not start driver: {e}")
             raise
 
-        # Safety machines
+        # ---------- Safety machines ----------
         self.safety_state_machine_cmd_vel = SafetyStateMachine(SafetyState.ESTOPPED)
         self.safety_state_machine_winch = SafetyStateMachine(SafetyState.ESTOPPED)
 
-        # Locks and thresholds
+        # ---------- Locks and thresholds ----------
         self.driver_lock = threading.RLock()
         self.throttle_deadband = 0.01
         self.steer_deadband = 0.01
 
-        # Remote presence detection
+        # ---------- Remote presence detection ----------
         self.remote_timeout_seconds = 0.5
-        self.last_remote_command_time = None
+        self.last_remote_command_time: Optional[float] = None
 
-        # Subscriptions: unified + internal mux inputs
+        # ---------- Subscriptions ----------
+        # Backward-compat: accept unified /cmd_vel and legacy /cmd_vel_pid
         self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
+        self.create_subscription(Twist, "cmd_vel_pid", self.cmd_vel_callback, 10)
+
         # Teleop raw (for presence/freshness) and smoothed (for command)
-        self.teleop_last_msg = None
-        self.teleop_last_time = None
-        self.teleop_raw_last_msg = None
-        self.teleop_raw_last_time = None
+        self.teleop_last_msg: Optional[Twist] = None
+        self.teleop_last_time: Optional[float] = None
+        self.teleop_raw_last_msg: Optional[Twist] = None
+        self.teleop_raw_last_time: Optional[float] = None
         self.create_subscription(Twist, self.teleop_input_topic, self._teleop_smoothed_cb, 10)
         self.create_subscription(Twist, self.teleop_raw_topic, self._teleop_raw_cb, 10)
+
         # Auto
-        self.auto_last_msg = None
-        self.auto_last_time = None
+        self.auto_last_msg: Optional[Twist] = None
+        self.auto_last_time: Optional[float] = None
         self.create_subscription(Twist, "cmd_vel/auto", self._auto_cmd_cb, 10)
+
+        # Aux
         self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
 
-        # Publishers and services
+        # ---------- Publishers & Services ----------
         self.tachometer_pub = self.create_publisher(MttTachometerData, "mtt_tachometer", 10)
         self.vehicle_status_pub = self.create_publisher(MttVehicleStatus, "mtt_status", 10)
         self.driving_mode_pub = self.create_publisher(MttDrivingMode, "mtt_driving_mode", 10)
-        self.set_mode_srv = self.create_service(SetVehiculeTypeSrv, "/mtt/set_driving_mode", self._srv_set_mode)
-        self.get_mode_srv = self.create_service(GetVehiculeTypeSrv, "/mtt/get_driving_mode", self._srv_get_mode)
-
-        # Mode state and feedback
-        self.current_driving_mode = 0  # SINGLE_TRAILER
         self.steer_pub = self.create_publisher(UInt8, "mtt_steer_cmd", 10)
 
-        # Timers
+        self.set_mode_srv = self.create_service(
+            SetVehiculeTypeSrv, "/mtt/set_driving_mode", self._srv_set_mode
+        )
+        self.get_mode_srv = self.create_service(
+            GetVehiculeTypeSrv, "/mtt/get_driving_mode", self._srv_get_mode
+        )
+
+        # ---------- Mode state ----------
+        self.current_driving_mode = 0  # 0=SINGLE_TRAILER
+
+        # ---------- Timers ----------
         self.ctrl_timer = self.create_timer(self.control_period, self.control_loop)
         self.cmd_select_timer = self.create_timer(self.control_period, self._select_and_apply_command)
         self.can_frame_timer = self.create_timer(self.can_frame_period, self.send_can_frame)
         self.remote_timer = self.create_timer(0.1, self.check_remote_presence)
 
-        self.get_logger().info("Wrapper ready (E-stop active - waiting for remote controller).")
-        # Internal mux auxiliary state
+        # ---------- Internal state ----------
         self._zero_twist = Twist()
         self._last_cmd_applied_time = 0.0
         self._last_zero_sent = False
-        # Track last direction to apply hysteresis around zero
         self._last_direction_state = DirectionState.Forward
+
+        self.get_logger().info("Wrapper ready (E-stop active - waiting for remote controller).")
 
     # -------------------- Services -------------------- #
     def _srv_set_mode(self, request: SetVehiculeTypeSrv.Request, response: SetVehiculeTypeSrv.Response):
-        """Set vehicle/driving mode via low-level driver then notify odometry manager.
-
-        request.vehicule_type: uint8 (0=SINGLE_TRAILER, 1=DUAL_DIFFERENTIAL, 2=DUAL_SERPENTINE)
-        """
         try:
             mode = int(request.vehicule_type)
             self._set_driving_mode(mode)
@@ -194,7 +221,6 @@ class MTTRosWrapper(Node):
         """Return current driving mode as numeric code and name."""
         try:
             response.vehicule_type = int(self.current_driving_mode)
-            # Provide a human-readable name consistent with odometry manager
             names = {0: "SINGLE_TRAILER", 1: "DUAL_DIFFERENTIAL", 2: "DUAL_SERPENTINE"}
             response.type_name = names.get(int(self.current_driving_mode), "UNKNOWN")
         except Exception as e:
@@ -263,11 +289,11 @@ class MTTRosWrapper(Node):
                 self._last_zero_sent = False
             else:
                 # No fresh command: enforce safe stop (zero) to avoid holding last speed
-                # Limit zero spam by remembering last zero was sent
                 if not self._last_zero_sent or (now - self._last_cmd_applied_time) >= self.command_timeout:
                     self._handle_cmd_vel(self._zero_twist)
                     self._last_zero_sent = True
 
+    # -------------------- Driver periodic -------------------- #
     def send_can_frame(self):
         with self.driver_lock:
             self.driver.send_can_frame()
@@ -286,9 +312,12 @@ class MTTRosWrapper(Node):
 
         if prev_state_cmd != new_state_cmd:
             if not remote_present:
-                self.get_logger().warning(
-                    f"Remote controller timeout ({(now - self.last_remote_command_time) if self.last_remote_command_time else 'never'})"
+                delta = (
+                    (now - self.last_remote_command_time)
+                    if self.last_remote_command_time is not None
+                    else float("inf")
                 )
+                self.get_logger().warning(f"Remote controller timeout ({delta:.3f}s)")
             else:
                 self.get_logger().info("Remote controller detected")
             self.get_logger().info(f"Cmd_vel safety state transition: {prev_state_cmd.value} -> {new_state_cmd.value}")
@@ -300,13 +329,13 @@ class MTTRosWrapper(Node):
             )
             self._apply_safety_state_winch(new_state_winch)
 
-    def _apply_safety_state_cmd_vel(self, state):
+    def _apply_safety_state_cmd_vel(self, state: SafetyState):
         """Apply the safety state to the driver for cmd_vel operations."""
         with self.driver_lock:
             if state == SafetyState.ESTOPPED:
                 if self.driver.get_security_switch_state() != SecuritySwitchState.SafetyLocked:
                     self.driver.emergency_stop()
-                    self.get_logger().warn("E-STOP: Communication lost")
+                    self.get_logger().warning("E-STOP: Communication lost")
 
             elif state == SafetyState.READY:
                 # READY = E-STOPPED waiting for deadman (communication OK)
@@ -319,7 +348,7 @@ class MTTRosWrapper(Node):
                     self.driver.release_estop()
                     self.get_logger().info("System ACTIVE (remote + deadman)")
 
-    def _apply_safety_state_winch(self, state):
+    def _apply_safety_state_winch(self, state: SafetyState):
         """Apply the safety state to the winch operations only."""
         with self.driver_lock:
             if state in (SafetyState.ESTOPPED, SafetyState.READY):
@@ -330,6 +359,7 @@ class MTTRosWrapper(Node):
                 else:
                     self.get_logger().debug("Winch safety: Winch button released - winch neutral")
 
+    # -------------------- Command handling -------------------- #
     def cmd_vel_callback(self, msg: Twist):
         """Handle unified ROS velocity commands (external mux or legacy)."""
         # Mark that we received a remote command
@@ -377,8 +407,10 @@ class MTTRosWrapper(Node):
                 self.driver.set_direction(desired_dir)
                 self._last_direction_state = desired_dir
 
+        # Publish raw steer (UInt8)
         steer_msg = UInt8()
-        steer_msg.data = steer_raw if steer_raw is not None else 0
+        steer_val = int(steer_raw) if steer_raw is not None else 0
+        steer_msg.data = max(0, min(255, steer_val))
         self.steer_pub.publish(steer_msg)
 
     def aux_cmd_callback(self, msg: MttAuxCommand):
@@ -394,24 +426,23 @@ class MTTRosWrapper(Node):
             deadman_active=msg.dead_man_switch,
         )
 
-        # Handle winch safety state machine using the new winch_safety_button field
-        winch_safety_active = msg.winch_safety_button
+        # Handle winch safety state machine using the winch_safety_button
+        winch_safety_active = getattr(msg, "winch_safety_button", False)
         prev_winch, new_winch = self.safety_state_machine_winch.transition(
             remote_present=True,
-            deadman_active=winch_safety_active,
+            deadman_active=bool(winch_safety_active),
         )
 
-        # Handle cmd_vel state transitions
+        # Logging transitions
         if prev_cmd != new_cmd:
             if prev_cmd == SafetyState.ESTOPPED and new_cmd != SafetyState.ESTOPPED:
                 self.get_logger().info("Remote controller detected")
             self.get_logger().info(f"Cmd_vel safety state transition: {prev_cmd.value} -> {new_cmd.value}")
 
-        # Handle winch state transitions (logging only, no e-stop)
         if prev_winch != new_winch:
             self.get_logger().info(f"Winch safety state transition: {prev_winch.value} -> {new_winch.value}")
 
-        # Only apply safety states when they actually change
+        # Apply safety states when they change
         if prev_cmd != new_cmd:
             self._apply_safety_state_cmd_vel(new_cmd)
         if prev_winch != new_winch:
@@ -422,13 +453,11 @@ class MTTRosWrapper(Node):
             with self.driver_lock:
                 self.driver.set_brake(msg.brake)
 
-        # Light commands allowed in both READY and ACTIVE states (for cmd_vel state machine)
+        # Light commands allowed in READY and ACTIVE (cmd_vel state machine)
         if new_cmd in (SafetyState.READY, SafetyState.ACTIVE):
-            with self.driver_lock:
-                # Light commands
-                if hasattr(msg, "light_state"):
-                    from .mtt_driver import LightState
-
+            if hasattr(msg, "light_state"):
+                from .mtt_driver import LightState  # local import to avoid top-level dependency if not present
+                with self.driver_lock:
                     if msg.light_state == 1:
                         self.driver.set_light_state(LightState.On)
                     else:
@@ -437,7 +466,6 @@ class MTTRosWrapper(Node):
         # Winch commands only allowed when winch safety is ACTIVE
         if new_winch == SafetyState.ACTIVE:
             with self.driver_lock:
-                # Winch commands
                 if msg.winch_command == MttAuxCommand.WINCH_IN:
                     self.driver.set_winch_state(WinchState.WinchIn)
                 elif msg.winch_command == MttAuxCommand.WINCH_OUT:
@@ -446,6 +474,7 @@ class MTTRosWrapper(Node):
                     self.driver.set_winch_state(WinchState.WinchNeutral)
         # Note: winch neutral enforcement is handled in _apply_safety_state_winch
 
+    # -------------------- Periodic publish -------------------- #
     def control_loop(self):
         """Main control loop - publishes tachometer data."""
         with self.driver_lock:
@@ -455,15 +484,17 @@ class MTTRosWrapper(Node):
         """Publish tachometer and vehicle status snapshots from the driver."""
         try:
             tacho = self.driver.get_tachometer_snapshot()
+
             # Tachometer message
             tmsg = MttTachometerData()
             tmsg.header.stamp = self.get_clock().now().to_msg()
-            tmsg.main_sensor_temp_a = float(tacho.main_sensor_temp_a)
-            tmsg.main_sensor_temp_b = float(tacho.main_sensor_temp_b)
-            tmsg.tachometer_instant = int(tacho.tachometer_instant)
-            tmsg.tachometer_cumulative = int(tacho.tachometer_cumulative)
+            tmsg.main_sensor_temp_a = float(getattr(tacho, "main_sensor_temp_a", 0.0))
+            tmsg.main_sensor_temp_b = float(getattr(tacho, "main_sensor_temp_b", 0.0))
+            tmsg.tachometer_instant = int(getattr(tacho, "tachometer_instant", 0))
+            tmsg.tachometer_cumulative = int(getattr(tacho, "tachometer_cumulative", 0))
             tmsg.speed_ms = float(self.driver._get_current_speed_ms())
             tmsg.speed_kmh = float(self.driver._get_current_speed_kmh())
+
             # Distance in km from driver snapshot (convert meters to km)
             tmsg.distance_km = 0.0
             try:
@@ -473,15 +504,17 @@ class MTTRosWrapper(Node):
                     if abs_m > 0.0:
                         tmsg.distance_km = abs_m / 1000.0
             except Exception:
-                # Leave as 0.0 if snapshot not available
                 pass
+
             # Direction
             if hasattr(self.driver, "current_direction") and self.driver.current_direction is not None:
                 tmsg.direction = self.driver.current_direction.name
             else:
                 tmsg.direction = "Unknown"
+
             # Articulation angle (if modeled) - currently unavailable from driver; set 0.0
             tmsg.articulation_angle_rad = 0.0
+
             self.tachometer_pub.publish(tmsg)
 
             # Vehicle status aggregate
@@ -493,22 +526,29 @@ class MTTRosWrapper(Node):
             vmsg.direction = tmsg.direction
             vmsg.temperature_a = tmsg.main_sensor_temp_a
             vmsg.temperature_b = tmsg.main_sensor_temp_b
-            vmsg.steer_position = int(self.driver.steer_value or 0)
+            vmsg.steer_position = int(getattr(self.driver, "steer_value", 0) or 0)
             vmsg.tachometer_instant = tmsg.tachometer_instant
             vmsg.tachometer_cumulative = tmsg.tachometer_cumulative
+
             # System status flags
             try:
-                vmsg.emergency_stop_active = self.driver.get_security_switch_state() == SecuritySwitchState.SafetyLocked
+                vmsg.emergency_stop_active = (
+                    self.driver.get_security_switch_state() == SecuritySwitchState.SafetyLocked
+                )
             except Exception:
                 vmsg.emergency_stop_active = False
+
             vmsg.remote_connected = (
                 self.last_remote_command_time is not None
                 and (time.monotonic() - self.last_remote_command_time) < self.remote_timeout_seconds
             )
+
             self.vehicle_status_pub.publish(vmsg)
+
         except Exception as e:
             self.get_logger().debug(f"Publish vehicle data failed: {e}")
 
+    # -------------------- Mode management -------------------- #
     def _set_driving_mode(self, mode: int):
         """
         Change driving mode and notify odometry manager.
@@ -518,15 +558,12 @@ class MTTRosWrapper(Node):
         """
         if mode != self.current_driving_mode:
             self.get_logger().info(f"Changing driving mode from {self.current_driving_mode} to {mode}")
-
-            # Update internal state
             self.current_driving_mode = mode
 
             # Publish the command so the odometry manager switches too
             mode_msg = MttDrivingMode()
             mode_msg.mode = int(mode)
-            # Optionally include parameters string for geometry updates (left blank by default)
-            mode_msg.mode_parameters = ""
+            mode_msg.mode_parameters = ""  # placeholder for geometry updates
             try:
                 self.driving_mode_pub.publish(mode_msg)
                 self.get_logger().info(f"Published driving mode command: {mode_msg.mode}")
@@ -534,6 +571,7 @@ class MTTRosWrapper(Node):
                 self.get_logger().error(f"Failed to publish driving mode: {e}")
 
 
+# -------------------- Entrypoint -------------------- #
 def main(args=None):
     rclpy.init(args=args)
     node = MTTRosWrapper()
@@ -551,3 +589,7 @@ def main(args=None):
         except Exception:
             # Context may already be shut down
             pass
+
+
+if __name__ == "__main__":
+    main()
