@@ -13,7 +13,9 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
+from mtt_msgs.msg import MttTachometerData
 from mtt_msgs.msg import MttTachometerData, MttDrivingMode
+from mtt_interfaces.srv import SetSteerControlMode
 from std_srvs.srv import Trigger
 from tf2_ros import TransformBroadcaster
 from geometry_msgs.msg import TransformStamped, Quaternion
@@ -148,6 +150,11 @@ class SingleTrailerOdometry(OdometryInterface):
         self.last_time: Optional[float] = None
         self.current_throttle = 0.0
         self.current_steering = 0.0
+        # Closed-loop response state
+        self.actual_yaw_rate = 0.0  # Current actual yaw rate (with lag)
+        self.imu_heading: Optional[float] = None  # IMU-based heading for feedback
+        self.previous_imu_heading: Optional[float] = None  # Previous IMU heading for rate calculation
+        self.use_imu_feedback = True  # Enable IMU-based closed loop control
 
     def calculate_odometry(
         self,
@@ -172,7 +179,7 @@ class SingleTrailerOdometry(OdometryInterface):
             dt = current_time - self.last_time
             dt = max(0.001, min(0.1, dt))  # Clamp dt to reasonable range
 
-        # Get tachometer distance for validation/correction
+        # Get tachometer absolute distance (converted to meters)
         # distance_km multiplied by distance_multiplier (1000 if km) yields meters
         cur_abs = float(getattr(msg, "distance_km", 0.0)) * distance_multiplier
 
@@ -181,32 +188,102 @@ class SingleTrailerOdometry(OdometryInterface):
             # Reset could be handled here if needed
             pass
 
-        # Interpret cmd input as articulation angle command (phi_cmd in rad)
-        # Map phi_cmd to normalized steering input in [-1, 1] using model's max angle
-        phi_cmd = float(angular_velocity)
-        if abs(phi_cmd) > 1e-4:
-            max_angle = max(1e-6, float(self.vehicle_params.max_articulation_angle))
-            self.current_steering = max(-1.0, min(1.0, phi_cmd / max_angle))
-        else:
-            self.current_steering = 0.0
+        # Odometry integration from available sensors
+        commanded_angular_vel = float(angular_velocity)  # rad/s from cmd_vel
 
-        # Get throttle from tachometer speed (fallback if no cmd_vel)
-        speed_ms = float(getattr(msg, "speed_ms", 0.0))
+        # Calculate encoder delta distance and speed
+        distance_traveled: Optional[float] = None
+        speed_ms = 0.0
+        if self.last_abs_m is not None:
+            distance_traveled = cur_abs - self.last_abs_m  # meters (unsigned from sensor)
+
+        # Direction sign from message (default +1 if missing)
+        sign = +1
+        try:
+            sign = self._norm_direction(getattr(msg, "direction", None))
+        except Exception:
+            pass
+
+        if distance_traveled is not None and dt > 0.001:
+            speed_ms = (distance_traveled * sign) / dt
+        else:
+            # Fallback to tachometer instantaneous speed (already signed or will be signed below)
+            try:
+                speed_ms = float(getattr(msg, "speed_ms", 0.0))
+            except Exception:
+                speed_ms = 0.0
+            # Ensure sign is applied
+            speed_ms *= sign
+
+        # Use IMU heading if available, otherwise integrate angular velocity
+        if self.imu_heading is not None:
+            # IMU available: use direct heading measurement
+            current_heading: Optional[float] = self.imu_heading
+            # Use commanded angular velocity for velocity reporting
+            current_angular_vel = commanded_angular_vel
+        else:
+            # No IMU: let dynamics model integrate from angular velocity
+            current_heading = None  # Will be calculated by dynamics
+            current_angular_vel = commanded_angular_vel
+
+        # Expose angular velocity in odometry (closed/open loop)
+        self.actual_yaw_rate = float(current_angular_vel)
+
+        # Set throttle for dynamics model based on measured (signed) speed
         if abs(speed_ms) > 0.01:
             max_speed = 2.0  # m/s - adjust based on your vehicle
             self.current_throttle = max(-1.0, min(1.0, speed_ms / max_speed))
         else:
             self.current_throttle = 0.0
 
-        # Update articulated vehicle dynamics
+        # Set steering for dynamics model based on raw steering command from CAN bus
+        raw_steer_cmd = float(getattr(msg, "steer_cmd", 0.0))
+        self.current_steering = max(-1.0, min(1.0, raw_steer_cmd))
+
+        # Preserve previous pose for encoder-based integration
+        try:
+            x_prev = float(self.dynamics.x)
+            y_prev = float(self.dynamics.y)
+        except Exception:
+            x_prev, y_prev = 0.0, 0.0
+
+        # Update dynamics model (for heading/vel integration)
         x, y, heading = self.dynamics.update(
             throttle_input=self.current_throttle,
             steering_input=self.current_steering,
             dt=dt,
-            terrain_grip=1.0  # Could be made dynamic based on conditions
+            terrain_grip=1.0
         )
 
-        # Get vehicle state
+        # Override heading with IMU if available (more accurate)
+        if current_heading is not None:
+            heading = current_heading
+            # Update dynamics internal state to match IMU
+            self.dynamics.x = x
+            self.dynamics.y = y
+            self.dynamics.heading = heading
+
+        # Choose heading source
+        if self.use_imu_feedback and self.imu_heading is not None:
+            final_heading = self.imu_heading
+        else:
+            final_heading = heading
+
+        # Integrate position from encoder distance along current heading
+        if distance_traveled is not None:
+            ds_signed = distance_traveled * sign
+            x_enc = x_prev + ds_signed * math.cos(final_heading)
+            y_enc = y_prev + ds_signed * math.sin(final_heading)
+        else:
+            # No previous distance: keep current model position
+            x_enc, y_enc = x, y
+
+        # Sync dynamics internal state to encoder-integrated pose and selected heading
+        self.dynamics.x = x_enc
+        self.dynamics.y = y_enc
+        self.dynamics.heading = final_heading
+
+        # Get vehicle state (after sync)
         vehicle_state = self.dynamics.get_state()
 
         # Validate against tachometer if we have previous measurement
@@ -226,22 +303,23 @@ class SingleTrailerOdometry(OdometryInterface):
         self.last_abs_m = cur_abs
         self.last_time = current_time
 
-        # Fill odometry message with articulated vehicle state
-        odom.pose.pose.position.x = x
-        odom.pose.pose.position.y = y
+        # Fill odometry message with encoder-integrated pose
+        odom.pose.pose.position.x = self.dynamics.x
+        odom.pose.pose.position.y = self.dynamics.y
         odom.pose.pose.position.z = 0.0
 
         # Convert heading to quaternion
-        quat = self._yaw_to_quaternion(heading)
+        quat = self._yaw_to_quaternion(final_heading)
         odom.pose.pose.orientation = quat
 
-        # Velocity information from dynamics model
-        odom.twist.twist.linear.x = vehicle_state['linear_velocity']
+        # Velocity information: use measured linear speed from encoders; angular from command/IMU
+        odom.twist.twist.linear.x = float(speed_ms)
         odom.twist.twist.linear.y = 0.0  # Tracked vehicles don't have lateral velocity
         odom.twist.twist.linear.z = 0.0
         odom.twist.twist.angular.x = 0.0
         odom.twist.twist.angular.y = 0.0
-        odom.twist.twist.angular.z = vehicle_state['angular_velocity']
+        # Use commanded yaw rate (what we're trying to achieve) for twist
+        odom.twist.twist.angular.z = self.actual_yaw_rate
 
         # Set realistic covariances for articulated vehicle
         self._apply_articulated_covariances(odom, vehicle_state)
@@ -284,7 +362,11 @@ class SingleTrailerOdometry(OdometryInterface):
             "last_abs_m": self.last_abs_m,
             "last_time": self.last_time,
             "current_throttle": self.current_throttle,
-            "current_steering": self.current_steering
+            "current_steering": self.current_steering,
+            "actual_yaw_rate": self.actual_yaw_rate,
+            "imu_heading": self.imu_heading,
+            "previous_imu_heading": self.previous_imu_heading,
+            "use_imu_feedback": self.use_imu_feedback
         }
 
     def import_state(self, state: Dict[str, Any]) -> None:
@@ -299,6 +381,10 @@ class SingleTrailerOdometry(OdometryInterface):
         self.last_time = state.get("last_time", None)
         self.current_throttle = state.get("current_throttle", 0.0)
         self.current_steering = state.get("current_steering", 0.0)
+        self.actual_yaw_rate = state.get("actual_yaw_rate", 0.0)
+        self.imu_heading = state.get("imu_heading", None)
+        self.previous_imu_heading = state.get("previous_imu_heading", None)
+        self.use_imu_feedback = state.get("use_imu_feedback", True)
 
     def reset_odometry(self) -> None:
         self.dynamics.reset()
@@ -306,9 +392,21 @@ class SingleTrailerOdometry(OdometryInterface):
         self.last_time = None
         self.current_throttle = 0.0
         self.current_steering = 0.0
+        self.actual_yaw_rate = 0.0
+        self.imu_heading = None
+        self.previous_imu_heading = None
+
+    def update_imu_heading(self, heading_rad: float) -> None:
+        """Update IMU heading for closed-loop control"""
+        self.imu_heading = heading_rad
+    
+    def set_control_mode(self, use_imu_feedback: bool) -> None:
+        """Switch between open-loop and closed-loop control modes"""
+        self.use_imu_feedback = use_imu_feedback
 
     def get_mode_name(self) -> str:
-        return "Articulated Single Trailer"
+        mode = "Closed-loop" if self.use_imu_feedback else "Open-loop"
+        return f"Articulated Single Trailer ({mode})"
 
 
 class DualDifferentialOdometry(OdometryInterface):
@@ -472,8 +570,8 @@ class DualSerpentineOdometry(OdometryInterface):
         sign = self._norm_direction(getattr(msg, "direction", None))
         ds *= sign
 
-        # Use articulation angle if available; treat as steer angle surrogate
-        steer = float(getattr(msg, "articulation_angle_rad", 0.0)) if hasattr(msg, "articulation_angle_rad") else 0.0
+        # Use steering command if available; treat as steer angle surrogate
+        steer = float(getattr(msg, "steer_cmd", 0.0))
 
         if abs(steer) < 1e-9 or self.wheelbase_m < 1e-9:
             # Straight
@@ -567,6 +665,14 @@ class MttOdometryManager(Node):
         # New: angular velocity source topic and TF broadcast control
         self.declare_parameter("cmd_vel_topic", "/cmd_vel_pid")
         self.declare_parameter("broadcast_tf", True)
+        # Steering control mode parameters
+        self.declare_parameter("steer_control_mode", "open_loop")  # "open_loop" or "closed_loop" 
+        self.declare_parameter("max_yaw_rate", 1.0)  # rad/s for open_loop mode
+        self.declare_parameter("max_articulation_angle", 1.047)  # rad (60°) for closed_loop mode
+        # New: turn behavior tuning to reduce drift at rest
+        self.declare_parameter("pivot_turn_enabled", False)
+        self.declare_parameter("min_turn_speed_ms", 0.03)  # below this, suppress yaw unless pivot enabled
+        self.declare_parameter("yaw_slip_factor", 1.0)     # scale < 1.0 reduces effective yaw
 
         # Resolve parameters
         self.odom_frame = self.get_parameter("odom_frame").get_parameter_value().string_value
@@ -583,6 +689,14 @@ class MttOdometryManager(Node):
         distance_scale = self.get_parameter("distance_scale").get_parameter_value().double_value
         base_multiplier = 1000.0 if distance_unit == "km" else 1.0
         self.distance_multiplier = base_multiplier * distance_scale
+        
+        # Steering control mode configuration
+        self.steer_control_mode = self.get_parameter("steer_control_mode").get_parameter_value().string_value
+        self.max_yaw_rate = self.get_parameter("max_yaw_rate").get_parameter_value().double_value
+        self.max_articulation_angle = self.get_parameter("max_articulation_angle").get_parameter_value().double_value
+        self.pivot_turn_enabled = self.get_parameter("pivot_turn_enabled").get_parameter_value().bool_value
+        self.min_turn_speed_ms = self.get_parameter("min_turn_speed_ms").get_parameter_value().double_value
+        self.yaw_slip_factor = self.get_parameter("yaw_slip_factor").get_parameter_value().double_value
         self.get_logger().info(
             f"Distance conversion: unit={distance_unit} scale={distance_scale} -> multiplier={self.distance_multiplier}"
         )
@@ -624,6 +738,13 @@ class MttOdometryManager(Node):
 
         # Services
         self.reset_srv = self.create_service(Trigger, "/mtt/reset_odometry", self.reset_odometry_cb)
+        
+        # Steering control mode service
+        self.steer_control_srv = self.create_service(
+            SetSteerControlMode, 
+            "/mtt/set_steer_control_mode", 
+            self.set_steer_control_mode_cb
+        )
 
         # Angular velocity from cmd_vel for steering odometry
         self.current_angular_vel = 0.0
@@ -638,6 +759,7 @@ class MttOdometryManager(Node):
 
         self.get_logger().info(
             f"MTT Odometry Manager initialized - Mode: {self.odometry_calculator.get_mode_name()} | "
+            f"Steering: {self.steer_control_mode} (max_rate={self.max_yaw_rate:.3f} rad/s, max_angle={self.max_articulation_angle:.3f} rad) | "
             f"odom_frame={self.odom_frame}, base_frame={self.base_frame}, pub={self.odometry_topic}, sub={self.tachometer_topic}, mode_sub={self.mode_topic}"
         )
         self.tf_broadcaster = TransformBroadcaster(self) if self.broadcast_tf else None  # optional
@@ -650,17 +772,46 @@ class MttOdometryManager(Node):
 
     def tachometer_callback(self, msg: MttTachometerData) -> None:
         try:
-            # The steering angle is now properly included in the tachometer message
-            # No need for separate steering dynamics - use the actual steering data
+            # Process steering command based on control mode
+            raw_steer_cmd = float(getattr(msg, "steer_cmd", 0.0))
+            speed_ms = float(getattr(msg, "speed_ms", 0.0))
+
+            # Compute angular velocity with proper coupling to speed to prevent drift at rest
+            if self.steer_control_mode == "closed_loop":
+                # steer_cmd is normalized articulation angle [-1,1] → [-max_angle, +max_angle]
+                articulation_angle = max(-self.max_articulation_angle, min(self.max_articulation_angle, raw_steer_cmd * self.max_articulation_angle))
+                # Bicycle-like kinematics: yaw_rate = v * tan(phi) / L
+                curvature = math.tan(articulation_angle) / max(self.wheelbase_m, 1e-6)
+                effective_angular_vel = speed_ms * curvature
+            else:
+                # Open-loop: steer_cmd as normalized yaw rate
+                effective_angular_vel = raw_steer_cmd * self.max_yaw_rate
+
+            # Suppress yaw when nearly stationary unless pivot turns are explicitly enabled
+            if not self.pivot_turn_enabled and abs(speed_ms) < self.min_turn_speed_ms:
+                effective_angular_vel = 0.0
+
+            # Apply slip scaling and clamp to configured max yaw rate
+            effective_angular_vel *= float(self.yaw_slip_factor)
+            if self.max_yaw_rate > 0.0:
+                max_rate = abs(self.max_yaw_rate)
+                if effective_angular_vel > max_rate:
+                    effective_angular_vel = max_rate
+                elif effective_angular_vel < -max_rate:
+                    effective_angular_vel = -max_rate
             
+            # Use the processed angular velocity for odometry calculation
             odom = self.odometry_calculator.calculate_odometry(
                 msg,
                 odom_frame=self.odom_frame,
                 base_frame=self.base_frame,
                 distance_multiplier=self.distance_multiplier,
                 wrap_reset_threshold_m=self.wrap_reset_threshold_m,
-                angular_velocity=self.current_angular_vel,
+                angular_velocity=effective_angular_vel,
             )
+            # Enforce consistent time base for odom and TF to avoid oscillation with RSP
+            if not getattr(self, "use_sensor_stamp", False):
+                odom.header.stamp = self.get_clock().now().to_msg()
             self.tacho_sub_failed_time_fallback(odom)
             self.odom_pub.publish(odom)
             # broadcast TF transform odom->base_frame (optional, dynamic)
@@ -693,6 +844,38 @@ class MttOdometryManager(Node):
         except Exception as e:
             response.success = False
             response.message = str(e)
+        return response
+
+    def set_steer_control_mode_cb(self, request, response):
+        """Service callback to set steering control mode and parameters"""
+        try:
+            # Validate control mode
+            if request.control_mode not in ["open_loop", "closed_loop"]:
+                response.success = False
+                response.message = "Invalid control_mode. Use 'open_loop' or 'closed_loop'"
+                return response
+            
+            # Validate parameters
+            if request.max_rate <= 0.0 or request.max_angle <= 0.0:
+                response.success = False
+                response.message = "max_rate and max_angle must be positive values"
+                return response
+            
+            # Update configuration
+            self.steer_control_mode = request.control_mode
+            self.max_yaw_rate = request.max_rate
+            self.max_articulation_angle = request.max_angle
+            
+            response.success = True
+            response.message = f"Steering control mode set to: {request.control_mode} " + \
+                             f"(max_rate={request.max_rate:.3f} rad/s, max_angle={request.max_angle:.3f} rad)"
+            
+            self.get_logger().info(response.message)
+            
+        except Exception as e:
+            response.success = False
+            response.message = f"Failed to set steering control mode: {str(e)}"
+            
         return response
 
     def cmd_vel_callback(self, msg: Twist) -> None:

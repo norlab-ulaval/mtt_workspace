@@ -5,6 +5,7 @@ import rclpy
 import time
 import threading
 import logging
+import math
 import time
 from enum import Enum
 from rclpy.node import Node
@@ -15,7 +16,7 @@ from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
 from .mtt_driver import (
     MTTCanDriver,
     WinchState,
-    DirectionState,
+    VehicleDirection,
     SecuritySwitchState
 )
 
@@ -118,7 +119,10 @@ class MTTRosWrapper(Node):
         self.steer_deadband = 0.01
 
         # Direction hysteresis state
-        self._last_direction_state = DirectionState.Forward
+        self._last_direction_state = VehicleDirection.Forward
+        
+        # Current steering input for odometry feedback (raw value sent to CAN bus)
+        self.current_steering_input = 0.0  # Raw steering input (-1.0 to +1.0)
 
         # Remote controller detection
         self.remote_timeout_seconds = 0.5  # Remote considered lost after 500ms
@@ -144,6 +148,9 @@ class MTTRosWrapper(Node):
         
         # Current driving mode (default: single trailer)
         self.current_driving_mode = 0  # SINGLE_TRAILER
+        
+        # Track current steering input for odometry feedback
+        self.current_steering_input = 0.0
         
         # Keep only essential command feedback
         self.steer_pub = self.create_publisher(UInt8, "mtt_steer_cmd", 10)
@@ -238,21 +245,16 @@ class MTTRosWrapper(Node):
 
         throttle_percent = min(1.0, abs(lin))
 
-        # Direction hysteresis: only switch when beyond +/- threshold, else keep last
-        thr = max(0.0, float(self.direction_switch_threshold))
-        if lin > thr:
-            desired_dir = DirectionState.Forward
-        elif lin < -thr:
-            desired_dir = DirectionState.Reverse
-        else:
-            desired_dir = self._last_direction_state
-
         with self.driver_lock:
+            # Origin/main behavior: set direction directly from cmd sign
             self.driver.set_throttle(throttle_percent)
             steer_raw = self.driver.set_steer(max(-1.0, min(1.0, ang)))
-            if desired_dir != self._last_direction_state:
-                self.driver.set_direction(desired_dir)
-                self._last_direction_state = desired_dir
+            direction = VehicleDirection.Forward if lin >= 0 else VehicleDirection.Reverse
+            self.driver.set_direction(direction)
+            
+            # Store the actual steering input sent to CAN bus for odometry feedback
+            # This is the raw input value (-1.0 to +1.0) that was sent to the hardware
+            self.current_steering_input = max(-1.0, min(1.0, ang))
 
         steer_msg = UInt8()
         steer_msg.data = steer_raw if steer_raw is not None else 0
@@ -427,6 +429,9 @@ class MTTRosWrapper(Node):
             tachometer_msg.direction = odometry_data["direction"]
             tachometer_msg.main_sensor_temp_a = odometry_data["temperature_a"]
             tachometer_msg.main_sensor_temp_b = odometry_data["temperature_b"]
+            # Include current steering input for articulated vehicle odometry
+            # This is the raw steering command (-1.0 to +1.0) sent to CAN bus
+            tachometer_msg.steer_cmd = self.current_steering_input
             self.tachometer_pub.publish(tachometer_msg)
         else:
             # Set default values when no motion data is available

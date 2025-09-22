@@ -50,12 +50,14 @@ MTT_ANALOG_STEER = 5
 MTT_SWITCHES_DIRECTION_MODE = 6
 
 
-class DirectionMode(Enum):
+class SteeringMode(Enum):
+    """Steering control mode: open loop (yaw rate) vs closed loop (articulation angle)"""
     OpenLoop = 0
     CloseLoop = 1
 
 
-class DirectionState(Enum):
+class VehicleDirection(Enum):
+    """Vehicle movement direction: forward or reverse"""
     Forward = 0x00
     Reverse = 0x01
 
@@ -160,7 +162,7 @@ class MTTCanDriver:
         self.winch_state = None
         self.security_switch_state = None
         self.direction_state = None
-        self.direction_mode = None
+        self.steering_mode = None
         self.light_state = None
         self.can_listener_running = True
         self.can_array = [0] * 8
@@ -181,7 +183,7 @@ class MTTCanDriver:
         self._set_security_switch(SecuritySwitchState.SafetyLocked)
         log.debug(f"Security switch set: {self.security_switch_state}")
         
-        self.set_direction(DirectionState.Forward)
+        self.set_direction(VehicleDirection.Forward)
         log.debug(f"Direction set: {self.direction_state}")
         
         self.set_light_state(LightState.Off)
@@ -200,8 +202,8 @@ class MTTCanDriver:
         self._set_steer(0)
         log.debug(f"Steer set: {self.steer_value}")
         
-        self.set_direction_mode(DirectionMode.CloseLoop)
-        log.debug(f"Direction mode set: {self.direction_mode}")
+        self.set_steering_mode(SteeringMode.CloseLoop)
+        log.debug(f"Steering mode set: {self.steering_mode}")
         
         log.info("Initial frame setup completed - all variables initialized")
 
@@ -315,7 +317,7 @@ class MTTCanDriver:
             if not self.tachometer_data.new_data_available:
                 return 0.0
             speed = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
-            if self.current_direction == DirectionState.Reverse:
+            if self.current_direction == VehicleDirection.Reverse:
                 speed = -speed
             return speed
 
@@ -325,7 +327,7 @@ class MTTCanDriver:
             if not self.tachometer_data.new_data_available:
                 return 0.0
             speed = self.tachometer_data.get_speed_kmh(self.encoder_final_ratio)
-            if self.current_direction == DirectionState.Reverse:
+            if self.current_direction == VehicleDirection.Reverse:
                 speed = -speed
             return speed
 
@@ -339,7 +341,7 @@ class MTTCanDriver:
         with self.frame_lock:
             speed_ms = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
             speed_kmh = self.tachometer_data.get_speed_kmh(self.encoder_final_ratio)
-            if self.current_direction == DirectionState.Reverse:
+            if self.current_direction == VehicleDirection.Reverse:
                 speed_ms = -speed_ms
                 speed_kmh = -speed_kmh
             ts = self.tachometer_data.timestamp
@@ -444,19 +446,19 @@ class MTTCanDriver:
             return False
 
     def set_direction(self, direction):
-        """Set direction bit."""
-        if direction == DirectionState.Forward:
+        """Set vehicle movement direction: forward or reverse."""
+        if direction == VehicleDirection.Forward:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00100000
-                self.direction_state = DirectionState.Forward
-                self.current_direction = DirectionState.Forward
+                self.direction_state = VehicleDirection.Forward
+                self.current_direction = VehicleDirection.Forward
             return True
 
-        elif direction == DirectionState.Reverse:
+        elif direction == VehicleDirection.Reverse:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11011111
-                self.direction_state = DirectionState.Reverse
-                self.current_direction = DirectionState.Reverse
+                self.direction_state = VehicleDirection.Reverse
+                self.current_direction = VehicleDirection.Reverse
             return True
 
         else:
@@ -503,21 +505,21 @@ class MTTCanDriver:
             log.error(f"invalid value for light_state: {light_state}")
             return False
 
-    def set_direction_mode(self, direction_mode):
-        """Set open/close loop bit0 of byte6."""
-        if direction_mode == DirectionMode.CloseLoop:
+    def set_steering_mode(self, steering_mode):
+        """Set steering control mode: open loop (yaw rate) vs closed loop (articulation angle)."""
+        if steering_mode == SteeringMode.CloseLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
-                self.direction_mode = DirectionMode.CloseLoop
+                self.steering_mode = SteeringMode.CloseLoop
             return True
 
-        elif direction_mode == DirectionMode.OpenLoop:
+        elif steering_mode == SteeringMode.OpenLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
-                self.direction_mode = DirectionMode.OpenLoop
+                self.steering_mode = SteeringMode.OpenLoop
             return True
         else:
-            log.error(f"invalid value for direction_mode: {direction_mode}")
+            log.error(f"invalid value for steering_mode: {steering_mode}")
             return False
 
     def set_vehicle_type(self, vehicle_type):
@@ -572,8 +574,8 @@ class MTTCanDriver:
             uninitialized_vars.append("security_switch_state")
         if self.direction_state == None:
             uninitialized_vars.append("direction_state")
-        if self.direction_mode == None:
-            uninitialized_vars.append("direction_mode")
+        if self.steering_mode == None:
+            uninitialized_vars.append("steering_mode")
         if self.light_state == None:
             uninitialized_vars.append("light_state")
 
