@@ -134,7 +134,6 @@ class MTTRosWrapper(Node):
         # self.ctrl_timer = None
 
         self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
-        self.create_subscription(Twist, "cmd_vel/pid", self.cmd_vel_callback, 10)  # Backward compatibility
         self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
         
         # Single aggregated publisher for all vehicle status

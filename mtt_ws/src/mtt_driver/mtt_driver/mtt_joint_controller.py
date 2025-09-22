@@ -68,18 +68,7 @@ class MttJointController(Node):
         # Get real MTT-154 measured parameters
         mtt_params = get_mtt_params()
 
-        # Declare PID parameters (velocity smoothing for linear speed)
-        # Deprecated: previously used a PID to smooth linear speed; now replaced by slew limiter
-        self.declare_parameter(
-            "velocity_pid.kp", 1.0, ParameterDescriptor(description="[Deprecated] Velocity PID proportional gain")
-        )
-        self.declare_parameter(
-            "velocity_pid.ki", 0.1, ParameterDescriptor(description="[Deprecated] Velocity PID integral gain")
-        )
-        self.declare_parameter(
-            "velocity_pid.kd", 0.05, ParameterDescriptor(description="[Deprecated] Velocity PID derivative gain")
-        )
-        # New: linear slew-rate limiter (units: normalized units per second; input expected in [-1, 1])
+        # Linear slew-rate limiter (units: normalized units per second; input expected in [-1, 1])
         self.declare_parameter(
             "linear_slew_rate", 3.0, ParameterDescriptor(description="Max change per second for linear.x (normalized)")
         )
@@ -104,16 +93,12 @@ class MttJointController(Node):
             ParameterDescriptor(description="Max articulation yaw rate (rad/s) - from measured steering limits")
         )
 
-        # Initialize PID controllers
-        v_kp = self.get_parameter("velocity_pid.kp").get_parameter_value().double_value
-        v_ki = self.get_parameter("velocity_pid.ki").get_parameter_value().double_value
-        v_kd = self.get_parameter("velocity_pid.kd").get_parameter_value().double_value
+        # Initialize articulation PID controller
         a_kp = self.get_parameter("articulation_pid.kp").get_parameter_value().double_value
         a_ki = self.get_parameter("articulation_pid.ki").get_parameter_value().double_value
         a_kd = self.get_parameter("articulation_pid.kd").get_parameter_value().double_value
 
-        # Keep instance for backward compatibility but it's no longer used for linear smoothing
-        self.velocity_pid = SimplePID(v_kp, v_ki, v_kd)
+        # Articulation PID controller
         self.artic_pid = SimplePID(a_kp, a_ki, a_kd)
         self.articulation_max = math.radians(
             self.get_parameter("articulation_max_deg").get_parameter_value().double_value
