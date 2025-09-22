@@ -16,7 +16,7 @@ from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
 from .mtt_driver import (
     MTTCanDriver,
     WinchState,
-    VehicleDirection,
+    DirectionState,
     SecuritySwitchState
 )
 
@@ -119,7 +119,7 @@ class MTTRosWrapper(Node):
         self.steer_deadband = 0.01
 
         # Direction hysteresis state
-        self._last_direction_state = VehicleDirection.Forward
+        self._last_direction_state = DirectionState.Forward
         
         # Current steering input for odometry feedback (raw value sent to CAN bus)
         self.current_steering_input = 0.0  # Raw steering input (-1.0 to +1.0)
@@ -249,7 +249,7 @@ class MTTRosWrapper(Node):
             # Origin/main behavior: set direction directly from cmd sign
             self.driver.set_throttle(throttle_percent)
             steer_raw = self.driver.set_steer(max(-1.0, min(1.0, ang)))
-            direction = VehicleDirection.Forward if lin >= 0 else VehicleDirection.Reverse
+            direction = DirectionState.Forward if lin >= 0 else DirectionState.Reverse
             self.driver.set_direction(direction)
             
             # Store the actual steering input sent to CAN bus for odometry feedback

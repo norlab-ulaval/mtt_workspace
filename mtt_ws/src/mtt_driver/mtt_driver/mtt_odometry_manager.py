@@ -13,6 +13,7 @@ from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPo
 
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
+from std_msgs.msg import Float64
 from mtt_msgs.msg import MttTachometerData
 from mtt_msgs.msg import MttTachometerData, MttDrivingMode
 from mtt_interfaces.srv import SetSteerControlMode
@@ -22,6 +23,7 @@ from geometry_msgs.msg import TransformStamped, Quaternion
 
 # Import our articulated vehicle model
 from .mtt_articulated_model import ArticulatedVehicleDynamics, ArticulatedVehicleParams
+from .mtt_vehicle_params import get_mtt_params
 
 """
 MTT-154 Multi-Mode Odometry Manager
@@ -132,16 +134,9 @@ class SingleTrailerOdometry(OdometryInterface):
     """Realistic articulated vehicle odometry using proper dynamics model."""
 
     def __init__(self) -> None:
-        # Initialize articulated vehicle dynamics
-        self.vehicle_params = ArticulatedVehicleParams(
-            front_wheelbase=1.8,    # Distance from front axle to articulation joint
-            rear_wheelbase=1.5,     # Distance from joint to rear axle  
-            track_width=1.2,        # Track width
-            max_articulation_angle=math.radians(45),  # Max steering angle
-            track_slip_coeff=0.15,  # Lateral slip coefficient for tracks
-            carving_factor=0.3,     # Track carving effect in turns
-            min_speed_for_steering=0.1  # Minimum speed for effective steering
-        )
+        # Initialize articulated vehicle dynamics using real MTT-154 measured parameters
+        self.mtt_params = get_mtt_params()
+        self.vehicle_params = ArticulatedVehicleParams(self.mtt_params)
         
         self.dynamics = ArticulatedVehicleDynamics(self.vehicle_params)
         
@@ -231,7 +226,7 @@ class SingleTrailerOdometry(OdometryInterface):
 
         # Set throttle for dynamics model based on measured (signed) speed
         if abs(speed_ms) > 0.01:
-            max_speed = 2.0  # m/s - adjust based on your vehicle
+            max_speed = self.mtt_params.max_speed_ms  # From centralized MTT parameters
             self.current_throttle = max(-1.0, min(1.0, speed_ms / max_speed))
         else:
             self.current_throttle = 0.0
@@ -318,7 +313,6 @@ class SingleTrailerOdometry(OdometryInterface):
         odom.twist.twist.linear.z = 0.0
         odom.twist.twist.angular.x = 0.0
         odom.twist.twist.angular.y = 0.0
-        # Use commanded yaw rate (what we're trying to achieve) for twist
         odom.twist.twist.angular.z = self.actual_yaw_rate
 
         # Set realistic covariances for articulated vehicle
@@ -329,8 +323,8 @@ class SingleTrailerOdometry(OdometryInterface):
     def _apply_articulated_covariances(self, odom: Odometry, vehicle_state: dict):
         """Apply realistic covariance estimates for articulated vehicle."""
         # Position covariance increases with speed and articulation
-        speed_factor = abs(vehicle_state['linear_velocity']) / 2.0  # Normalize to 2 m/s
-        articulation_factor = abs(vehicle_state['articulation_angle']) / math.radians(45)  # Normalize to 45 deg
+        speed_factor = abs(vehicle_state['linear_velocity']) / self.mtt_params.max_speed_ms  # Normalize to max speed
+        articulation_factor = abs(vehicle_state['articulation_angle']) / self.mtt_params.max_articulation_rad  # Normalize to max articulation
         
         # Base covariances - articulated vehicles have higher uncertainty
         pos_cov = 0.02 * (1.0 + speed_factor + articulation_factor)  # Position uncertainty
@@ -396,6 +390,10 @@ class SingleTrailerOdometry(OdometryInterface):
         self.imu_heading = None
         self.previous_imu_heading = None
 
+    def get_articulation_angle(self) -> float:
+        """Get current articulation angle from dynamics model."""
+        return self.dynamics.articulation_angle
+    
     def update_imu_heading(self, heading_rad: float) -> None:
         """Update IMU heading for closed-loop control"""
         self.imu_heading = heading_rad
@@ -650,25 +648,26 @@ class MttOdometryManager(Node):
     def __init__(self) -> None:
         super().__init__("mtt_odometry_manager")
 
-        # Parameters
+        # Get centralized MTT parameters
+        mtt_params = get_mtt_params()
+
+        # Parameters - using centralized MTT vehicle parameters as defaults
         self.declare_parameter("odom_frame", "odom")
         self.declare_parameter("base_frame", "mtt_base_link")
         self.declare_parameter("tachometer_topic", "/mtt_tachometer")
         self.declare_parameter("odometry_topic", "/mtt_odometry")
         self.declare_parameter("mode_topic", "/mtt_driving_mode")
         self.declare_parameter("wrap_reset_threshold_m", 1000.0)
-        self.declare_parameter("track_width_m", 1.0)
-        self.declare_parameter("wheelbase_m", 2.0)
+        self.declare_parameter("track_width_m", mtt_params.track_width)  # From centralized params
+        self.declare_parameter("wheelbase_m", mtt_params.total_wheelbase)  # From centralized params
         # New: distance unit & scaling
         self.declare_parameter("distance_unit", "km")  # 'km' or 'm'
         self.declare_parameter("distance_scale", 1.0)  # additional multiplicative scaling
         # New: angular velocity source topic and TF broadcast control
         self.declare_parameter("cmd_vel_topic", "/cmd_vel_pid")
         self.declare_parameter("broadcast_tf", True)
-        # Steering control mode parameters
-        self.declare_parameter("steer_control_mode", "open_loop")  # "open_loop" or "closed_loop" 
-        self.declare_parameter("max_yaw_rate", 1.0)  # rad/s for open_loop mode
-        self.declare_parameter("max_articulation_angle", 1.047)  # rad (60°) for closed_loop mode
+        # Steering control mode parameters - using centralized vehicle parameters
+        self.declare_parameter("steer_control_mode", "open_loop")  # "open_loop" or "closed_loop"
         # New: turn behavior tuning to reduce drift at rest
         self.declare_parameter("pivot_turn_enabled", False)
         self.declare_parameter("min_turn_speed_ms", 0.03)  # below this, suppress yaw unless pivot enabled
@@ -690,10 +689,13 @@ class MttOdometryManager(Node):
         base_multiplier = 1000.0 if distance_unit == "km" else 1.0
         self.distance_multiplier = base_multiplier * distance_scale
         
-        # Steering control mode configuration
+        # Get centralized vehicle parameters
+        mtt_params = get_mtt_params()
+        
+        # Steering control mode configuration - use centralized parameters
         self.steer_control_mode = self.get_parameter("steer_control_mode").get_parameter_value().string_value
-        self.max_yaw_rate = self.get_parameter("max_yaw_rate").get_parameter_value().double_value
-        self.max_articulation_angle = self.get_parameter("max_articulation_angle").get_parameter_value().double_value
+        self.max_yaw_rate = mtt_params.max_yaw_rate_rad_s  # Use centralized parameter
+        self.max_articulation_angle = mtt_params.max_articulation_rad  # Use centralized parameter
         self.pivot_turn_enabled = self.get_parameter("pivot_turn_enabled").get_parameter_value().bool_value
         self.min_turn_speed_ms = self.get_parameter("min_turn_speed_ms").get_parameter_value().double_value
         self.yaw_slip_factor = self.get_parameter("yaw_slip_factor").get_parameter_value().double_value
@@ -709,6 +711,8 @@ class MttOdometryManager(Node):
 
         # Publisher
         self.odom_pub = self.create_publisher(Odometry, self.odometry_topic, 10)
+        # Publisher for articulation state (for joint controller)
+        self.articulation_pub = self.create_publisher(Float64, "/mtt_articulation_angle", 10)
 
         # Subscriber with sensor-like QoS
         sensor_qos = QoSProfile(depth=1)
@@ -814,6 +818,12 @@ class MttOdometryManager(Node):
                 odom.header.stamp = self.get_clock().now().to_msg()
             self.tacho_sub_failed_time_fallback(odom)
             self.odom_pub.publish(odom)
+            
+            # Publish articulation angle for joint controller (only for SingleTrailerOdometry)
+            if isinstance(self.odometry_calculator, SingleTrailerOdometry):
+                articulation_msg = Float64()
+                articulation_msg.data = self.odometry_calculator.get_articulation_angle()
+                self.articulation_pub.publish(articulation_msg)
             # broadcast TF transform odom->base_frame (optional, dynamic)
             try:
                 want_tf = self.get_parameter("broadcast_tf").get_parameter_value().bool_value
@@ -855,20 +865,34 @@ class MttOdometryManager(Node):
                 response.message = "Invalid control_mode. Use 'open_loop' or 'closed_loop'"
                 return response
             
-            # Validate parameters
+            # Validate parameters against centralized vehicle parameters
+            mtt_params = get_mtt_params()
             if request.max_rate <= 0.0 or request.max_angle <= 0.0:
                 response.success = False
                 response.message = "max_rate and max_angle must be positive values"
                 return response
             
-            # Update configuration
+            # Warn if parameters differ from centralized values
+            if abs(request.max_rate - mtt_params.max_yaw_rate_rad_s) > 0.001:
+                self.get_logger().warn(
+                    f"Requested max_rate {request.max_rate:.3f} differs from centralized parameter "
+                    f"{mtt_params.max_yaw_rate_rad_s:.3f}. Using centralized value for consistency."
+                )
+            
+            if abs(request.max_angle - mtt_params.max_articulation_rad) > 0.001:
+                self.get_logger().warn(
+                    f"Requested max_angle {request.max_angle:.3f} differs from centralized parameter "
+                    f"{mtt_params.max_articulation_rad:.3f}. Using centralized value for consistency."
+                )
+            
+            # Update configuration - always use centralized parameters for consistency
             self.steer_control_mode = request.control_mode
-            self.max_yaw_rate = request.max_rate
-            self.max_articulation_angle = request.max_angle
+            # Note: max_yaw_rate and max_articulation_angle remain from centralized params
             
             response.success = True
             response.message = f"Steering control mode set to: {request.control_mode} " + \
-                             f"(max_rate={request.max_rate:.3f} rad/s, max_angle={request.max_angle:.3f} rad)"
+                             f"(max_rate={self.max_yaw_rate:.3f} rad/s, max_angle={self.max_articulation_angle:.3f} rad) " + \
+                             f"[Using centralized vehicle parameters]"
             
             self.get_logger().info(response.message)
             

@@ -8,30 +8,40 @@ import math
 import numpy as np
 from typing import Tuple, Optional
 from dataclasses import dataclass
+from typing import Optional
+from .mtt_vehicle_params import MTTVehicleParams, get_mtt_params
 
 
-@dataclass
+@dataclass 
 class ArticulatedVehicleParams:
-    """Physical parameters of the articulated vehicle."""
+    """Physical parameters of the articulated vehicle - uses real measured MTT-154 values."""
     
-    # Vehicle geometry (Real MTT-154 specifications from URDF)
-    front_wheelbase: float = 1.051      # Distance from front axle to articulation joint (m)
-    rear_wheelbase: float = 1.27        # Distance from articulation joint to rear axle (m)
-    track_width: float = 0.605          # Track width (m)
-    
-    # Track dynamics
-    track_slip_coeff: float = 0.12      # Lateral slip coefficient
-    track_grip_coeff: float = 0.85      # Forward grip coefficient
-    carving_factor: float = 0.25        # Track digging effect in turns
-    
-    # Articulation limits from URDF joint limits
-    max_articulation_angle: float = math.radians(60)  # Maximum joint angle (rad)
-    articulation_response: float = 0.7  # Joint response rate
-    max_yaw_rate: float = math.radians(60) / 8.0  # Maximum yaw rate (rad/s) - 60 deg in 8 sec
-    
-    # Speed-dependent factors
-    slip_speed_factor: float = 0.08     # Slip increases with speed  
-    min_speed_for_steering: float = 0.05  # Minimum speed for effective steering (m/s)
+    def __init__(self, mtt_params: Optional[MTTVehicleParams] = None):
+        """Initialize with real MTT-154 measured parameters."""
+        if mtt_params is None:
+            mtt_params = get_mtt_params()
+            
+        # Vehicle geometry - from real vehicle measurements
+        self.front_wheelbase: float = mtt_params.l_f        # Distance from track center to hitch pin (m)
+        self.rear_wheelbase: float = mtt_params.l_r         # Distance from hitch pin to trailer axle (m)  
+        self.track_width: float = mtt_params.track_width    # Track width (m)
+        
+        # Track dynamics - tunable parameters
+        self.track_slip_coeff: float = mtt_params.track_slip_coeff      # Lateral slip coefficient
+        self.track_grip_coeff: float = mtt_params.track_grip_coeff      # Forward grip coefficient  
+        self.carving_factor: float = mtt_params.carving_factor          # Track digging effect in turns
+        
+        # Articulation limits - from real vehicle measurements (±50°)
+        self.max_articulation_angle: float = mtt_params.max_articulation_rad  # Maximum joint angle (rad)
+        self.articulation_response: float = mtt_params.articulation_response  # Joint response rate
+        self.max_yaw_rate: float = mtt_params.max_yaw_rate_rad_s              # Maximum yaw rate (rad/s)
+        
+        # Speed limits - from centralized MTT parameters
+        self.max_speed_ms: float = mtt_params.max_speed_ms                    # Maximum vehicle speed (m/s)
+        
+        # Speed-dependent factors - tunable parameters
+        self.slip_speed_factor: float = mtt_params.slip_speed_factor         # Slip increases with speed
+        self.min_speed_for_steering: float = mtt_params.min_speed_for_steering  # Minimum speed for effective steering (m/s)
 
 
 class ArticulatedVehicleDynamics:
@@ -87,26 +97,40 @@ class ArticulatedVehicleDynamics:
                                      min(self.params.max_articulation_angle,
                                          self.articulation_angle))
         
-        # 3. Calculate forward velocity from throttle (simplified)
-        max_velocity = 5.0  # m/s - adjust based on your vehicle
+        # 3. Calculate forward velocity with proper damping for tracked vehicle
+        max_velocity = self.params.max_speed_ms  # From centralized MTT parameters
         target_velocity = throttle_input * max_velocity
         
-        # Apply terrain grip to acceleration
-        accel_factor = terrain_grip * self.params.track_grip_coeff
-        velocity_error = target_velocity - self.linear_velocity
-        self.linear_velocity += velocity_error * accel_factor * dt
+        # Heavy tracked vehicle behavior: strong damping when no throttle
+        if abs(throttle_input) < 0.01:  # No throttle input
+            # Strong deceleration due to track friction and vehicle weight
+            decel_rate = 3.0  # m/s^2 - tracks provide strong braking
+            if abs(self.linear_velocity) > 0.01:
+                decel_sign = -1.0 if self.linear_velocity > 0 else 1.0
+                decel = decel_sign * decel_rate * dt
+                if abs(decel) >= abs(self.linear_velocity):
+                    self.linear_velocity = 0.0  # Full stop
+                else:
+                    self.linear_velocity += decel
+            else:
+                self.linear_velocity = 0.0
+        else:
+            # Normal acceleration/deceleration with throttle input
+            accel_factor = terrain_grip * self.params.track_grip_coeff
+            velocity_error = target_velocity - self.linear_velocity
+            acceleration = velocity_error * accel_factor * 2.0  # Faster response
+            self.linear_velocity += acceleration * dt
         
-        # 4. Calculate vehicle kinematics using articulated bicycle model
+        # 4. Calculate vehicle kinematics - tracked vehicles need forward motion to steer
         if abs(self.linear_velocity) > self.params.min_speed_for_steering:
             # Effective steering based on articulation and speed
             effective_steering_angle = self.articulation_angle
             
-            # Speed-dependent slip adjustment
+            # Reduced slip for heavy tracked vehicle (much more grip than wheeled)
             speed_factor = min(1.0, abs(self.linear_velocity) / 2.0)  # Normalize to 2 m/s
-            slip_factor = self.params.track_slip_coeff * (1.0 + speed_factor * self.params.slip_speed_factor)
+            slip_factor = self.params.track_slip_coeff * 0.3  # Much less slip for tracks
             
             # Calculate angular velocity using articulated vehicle model
-            # This is derived from the kinematic model of an articulated vehicle
             wheelbase_effective = self.params.front_wheelbase + self.params.rear_wheelbase
             
             # The articulated joint creates a virtual steering angle
@@ -115,21 +139,36 @@ class ArticulatedVehicleDynamics:
                 (self.params.front_wheelbase + self.params.rear_wheelbase * math.cos(effective_steering_angle))
             )
             
-            # Apply track carving effect (tracks dig into turns)
-            carving_effect = self.params.carving_factor * abs(virtual_steering_angle)
+            # Minimal carving effect for realistic behavior
+            carving_effect = self.params.carving_factor * 0.2 * abs(virtual_steering_angle)  # Reduced
             enhanced_steering = virtual_steering_angle * (1.0 + carving_effect)
             
-            # Calculate angular velocity
+            # Calculate angular velocity - proportional to forward speed
             self.angular_velocity = (self.linear_velocity * math.tan(enhanced_steering) / 
-                                   wheelbase_effective) * (1.0 - slip_factor * abs(enhanced_steering))
+                                   wheelbase_effective) * (1.0 - slip_factor)
             
             # Calculate slip angles for front and rear tracks
-            self.front_slip_angle = effective_steering_angle - self.angular_velocity * self.params.front_wheelbase / self.linear_velocity
-            self.rear_slip_angle = -self.angular_velocity * self.params.rear_wheelbase / self.linear_velocity
-            
+            if abs(self.linear_velocity) > 0.01:
+                self.front_slip_angle = effective_steering_angle - self.angular_velocity * self.params.front_wheelbase / self.linear_velocity
+                self.rear_slip_angle = -self.angular_velocity * self.params.rear_wheelbase / self.linear_velocity
+            else:
+                self.front_slip_angle = 0.0
+                self.rear_slip_angle = 0.0
+
         else:
-            # At very low speeds, no effective steering
-            self.angular_velocity = 0.0
+            # CRITICAL: At low/zero speeds, tracked vehicles cannot steer effectively
+            # Angular velocity decays rapidly when stopped
+            decay_rate = 10.0  # rad/s^2 - fast angular decay for stopped tracked vehicle
+            if abs(self.angular_velocity) > 0.01:
+                decay_sign = -1.0 if self.angular_velocity > 0 else 1.0
+                decay = decay_sign * decay_rate * dt
+                if abs(decay) >= abs(self.angular_velocity):
+                    self.angular_velocity = 0.0  # Full stop
+                else:
+                    self.angular_velocity += decay
+            else:
+                self.angular_velocity = 0.0
+            
             self.front_slip_angle = 0.0
             self.rear_slip_angle = 0.0
         

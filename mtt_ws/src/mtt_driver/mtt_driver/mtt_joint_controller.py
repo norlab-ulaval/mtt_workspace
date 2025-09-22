@@ -15,7 +15,10 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from sensor_msgs.msg import JointState
+from nav_msgs.msg import Odometry
+from std_msgs.msg import Float64
 from rcl_interfaces.msg import ParameterDescriptor
+from .mtt_vehicle_params import get_mtt_params
 import math
 import time
 
@@ -62,6 +65,9 @@ class MttJointController(Node):
     def __init__(self):
         super().__init__("mtt_joint_controller")
 
+        # Get real MTT-154 measured parameters
+        mtt_params = get_mtt_params()
+
         # Declare PID parameters (velocity smoothing for linear speed)
         # Deprecated: previously used a PID to smooth linear speed; now replaced by slew limiter
         self.declare_parameter(
@@ -87,12 +93,15 @@ class MttJointController(Node):
         self.declare_parameter(
             "articulation_pid.kd", 0.2, ParameterDescriptor(description="Articulation PID derivative gain")
         )
+        # Use real measured max articulation angle from vehicle testing (±50°)
         self.declare_parameter(
-            "articulation_max_deg", 35.0, ParameterDescriptor(description="Max articulation absolute angle (deg)")
+            "articulation_max_deg", mtt_params.max_articulation_deg, 
+            ParameterDescriptor(description=f"Max articulation absolute angle (deg) - measured: ±{mtt_params.max_articulation_deg}°")
         )
-        # Physical rate limit for articulation (closed-loop) in rad/s (60° in 8s ≈ 0.131 rad/s)
+        # Physical rate limit for articulation (closed-loop) in rad/s
         self.declare_parameter(
-            "articulation_max_rate_rad_s", 0.131, ParameterDescriptor(description="Max articulation yaw rate (rad/s)")
+            "articulation_max_rate_rad_s", mtt_params.max_yaw_rate_rad_s, 
+            ParameterDescriptor(description="Max articulation yaw rate (rad/s) - from measured steering limits")
         )
 
         # Initialize PID controllers
@@ -120,6 +129,8 @@ class MttJointController(Node):
 
         # Subscribers
         self.cmd_vel_sub = self.create_subscription(Twist, "/cmd_vel_raw", self.cmd_vel_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, "/mtt_odometry", self.odometry_callback, 10)
+        self.articulation_sub = self.create_subscription(Float64, "/mtt_articulation_angle", self.articulation_callback, 10)
 
         # Joint states
         self.joint_names = [
@@ -161,9 +172,9 @@ class MttJointController(Node):
         # Joint positions (accumulated for continuous joints)
         self.joint_positions = [0.0] * len(self.joint_names)
 
-        # Robot parameters
-        self.wheel_radius = 0.15  # meters
-        self.track_length = 2.0  # legacy param (not used for steering in frame-steer)
+        # Robot parameters - using real MTT-154 measured values
+        self.wheel_radius = mtt_params.wheel_radius  # Effective sprocket radius from measurements
+        self.track_length = mtt_params.total_wheelbase  # Total wheelbase (front + rear) from centralized params
 
         # Command targets and current state
         self.target_linear = 0.0  # normalized [-1,1]
@@ -171,6 +182,11 @@ class MttJointController(Node):
         self.phi_target = 0.0     # articulation target angle (rad)
         self.steer_input_norm = 0.0  # normalized steering input [-1, 1]
         self.angular_vel = 0.0
+        
+        # Actual vehicle state from odometry/dynamics system
+        self.actual_articulation_angle = 0.0  # Real articulation from dynamics (rad)
+        self.actual_linear_velocity = 0.0     # Real vehicle speed (m/s)
+        
         self.dt = 0.02  # nominal 50 Hz
         self._last_integration_time = time.time()
 
@@ -192,6 +208,16 @@ class MttJointController(Node):
         self.phi_target = self.steer_input_norm * self.articulation_max
         self.artic_pid.setpoint = self.phi_target
 
+    def odometry_callback(self, msg: Odometry):
+        """Receive actual vehicle state from dynamics system."""
+        # Extract real vehicle speed
+        self.actual_linear_velocity = msg.twist.twist.linear.x  # m/s
+
+    def articulation_callback(self, msg: Float64):
+        """Receive actual articulation angle from dynamics system."""
+        # This is the real articulation angle from the physics model
+        self.actual_articulation_angle = msg.data  # rad
+
     def publish_joint_states(self):
         """Integrate commands, update joints deterministically, publish joints and smoothed cmd."""
         now = time.time()
@@ -212,15 +238,30 @@ class MttJointController(Node):
         else:
             self.linear_vel = self.target_linear
 
-        # 2) Articulation PID: produce yaw rate, integrate position
-        phi_meas = self.joint_positions[27]  # current yaw
-        phi_rate_cmd = self.artic_pid.update(phi_meas, dt)  # rad/s
-        # Enforce physical articulation rate limit (closed-loop behavior)
+        # 2) Articulation PID with PHYSICAL CONSTRAINTS
+        current_articulation = self.joint_positions[27]  # current yaw joint angle
+        
+        # CRITICAL PHYSICS: Articulated vehicles can ONLY change steering when moving!
+        # When stopped, the articulation joint is locked by ground friction
+        min_speed = get_mtt_params().min_speed_for_steering  # From centralized params
+        speed_factor = min(1.0, max(0.0, abs(self.linear_vel) / min_speed))
+        
+        # Additional constraint: if changing direction, require even more speed
+        direction_change = (self.phi_target * current_articulation) < 0  # Opposite signs
+        if direction_change and abs(current_articulation) > 0.1:  # Significant deflection
+            # Require higher speed to change direction when already deflected
+            speed_factor *= max(0.1, min(1.0, abs(self.linear_vel) / (min_speed * 2.0)))
+        
+        # Calculate desired articulation rate, but severely limit when not moving
+        phi_rate_cmd = self.artic_pid.update(current_articulation, dt)  # rad/s
+        
+        # Apply speed-dependent constraint
+        phi_rate_cmd *= speed_factor
+        
+        # Hard limit on articulation rate (hydraulic system limits)
         if self.articulation_max_rate > 0.0:
-            if phi_rate_cmd > self.articulation_max_rate:
-                phi_rate_cmd = self.articulation_max_rate
-            elif phi_rate_cmd < -self.articulation_max_rate:
-                phi_rate_cmd = -self.articulation_max_rate
+            max_rate = self.articulation_max_rate * speed_factor
+            phi_rate_cmd = max(-max_rate, min(max_rate, phi_rate_cmd))
 
         # 3) Update joints from rates
         omega_roll = self.linear_vel / max(self.wheel_radius, 1e-6)  # rad/s
@@ -242,8 +283,9 @@ class MttJointController(Node):
         self.joint_positions[24] = 0.0
         self.joint_positions[25] = 0.0
 
-        # Articulation yaw updated by PID-produced rate
-        self.joint_positions[27] += phi_rate_cmd * dt
+        # Articulation yaw: use ACTUAL angle from dynamics system, not independent PID
+        # This ensures joint controller matches the odometry/dynamics model exactly
+        self.joint_positions[27] = self.actual_articulation_angle
 
         # Keep roll and pitch at 0 for now
         self.joint_positions[26] = 0.0  # roll

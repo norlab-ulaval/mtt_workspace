@@ -218,10 +218,9 @@ def generate_launch_description():
                 'cmd_vel_topic': 'cmd_vel',
                 # Toggle TF broadcasting via launch arg
                 'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
-                # Steering control and anti-drift tuning
+                # Steering control and anti-drift tuning - using centralized vehicle parameters
                 'steer_control_mode': 'closed_loop',
-                'max_articulation_angle': 1.047,   # 60 deg
-                'max_yaw_rate': 2.0,               # rad/s clamp
+                # max_articulation_angle and max_yaw_rate now come from centralized vehicle parameters
                 'pivot_turn_enabled': False,
                 'min_turn_speed_ms': 0.05,
                 'yaw_slip_factor': 0.6,

@@ -34,14 +34,12 @@ class VehicleState:
     acceleration: float = 1.5  # m/s^2
     deceleration: float = 2.0  # m/s^2
     
-    # Encoder simulation (matching real hardware)
-    # Measured scaling (preferred): 12.7 mm per tick
-    # -> ticks per meter (cumulative) ≈ 1000 / 12.7 ≈ 78.74016
-    # Instant pulses/sec per (m/s) ≈ 2 × cumulative ≈ 157.48031
-    ticks_per_meter_cumulative: float = 78.74016
-    ticks_per_meter_instant: float = 157.48031
-    # Theoretical (for reference): track=3.93 m, final_ratio=648 (instant), 324 (distance)
-    # cumulative ≈ 324/3.93 ≈ 82.44, instant ≈ 648/3.93 ≈ 164.89
+    # Encoder simulation (following mtt_encoder_methodology.md)
+    # Theoretical calculation: final_ratio = 324.0, track_length = 3.93 m  
+    # -> ticks_per_meter = final_ratio / track_length = 324.0 / 3.93 ≈ 82.44
+    # Both instant and cumulative use the same theoretical calculation
+    ticks_per_meter_cumulative: float = 324.0 / 3.93  # ≈ 82.44
+    ticks_per_meter_instant: float = 324.0 / 3.93     # ≈ 82.44
 
 
 class MTTCommandTachometerSim:
@@ -140,7 +138,7 @@ class MTTCommandTachometerSim:
         temp_a = int(30 + 5 * math.sin(time.time() / 20))  # Slow variation
         temp_b = int(32 + 3 * math.cos(time.time() / 15))
         
-        # Instantaneous pulses/sec using measured scaling (~157.48 per m/s)
+        # Instantaneous RPS using theoretical calculation (final_ratio = 324.0)
         velocity_abs = abs(self.vehicle.velocity_ms)
         rps_raw = int(round(velocity_abs * self.vehicle.ticks_per_meter_instant))
         
