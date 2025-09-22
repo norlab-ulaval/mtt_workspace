@@ -22,5 +22,6 @@ float64 distance_km # Cumulative distance in kilometers
 # Vehicle direction state
 string direction    # Current direction: "Forward" or "Reverse"
 
-# Articulation joint angle for steering odometry
-float64 articulation_angle_rad    # Current articulation joint angle in radians
+# Steering command value sent to CAN bus
+float64 steer_cmd    # Raw steering command (-1.0 to +1.0) sent to vehicle
+                     # Interpretation depends on control mode (open/closed loop)
