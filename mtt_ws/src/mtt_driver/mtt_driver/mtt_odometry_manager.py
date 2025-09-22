@@ -664,7 +664,7 @@ class MttOdometryManager(Node):
         self.declare_parameter("distance_unit", "km")  # 'km' or 'm'
         self.declare_parameter("distance_scale", 1.0)  # additional multiplicative scaling
         # New: angular velocity source topic and TF broadcast control
-        self.declare_parameter("cmd_vel_topic", "/cmd_vel_pid")
+        self.declare_parameter("cmd_vel_topic", "/cmd_vel/pid")
         self.declare_parameter("broadcast_tf", True)
         # Steering control mode parameters - using centralized vehicle parameters
         self.declare_parameter("steer_control_mode", "open_loop")  # "open_loop" or "closed_loop"

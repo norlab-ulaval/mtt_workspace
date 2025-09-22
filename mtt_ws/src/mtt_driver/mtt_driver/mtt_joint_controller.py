@@ -125,7 +125,7 @@ class MttJointController(Node):
 
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
-        self.cmd_vel_pid_pub = self.create_publisher(Twist, "/cmd_vel_pid", 10)
+        self.cmd_vel_pid_pub = self.create_publisher(Twist, "/cmd_vel/pid", 10)
 
         # Subscribers
         self.cmd_vel_sub = self.create_subscription(Twist, "/cmd_vel_raw", self.cmd_vel_callback, 10)
