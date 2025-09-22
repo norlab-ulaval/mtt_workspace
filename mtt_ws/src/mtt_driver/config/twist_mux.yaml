@@ -6,10 +6,6 @@ twist_mux:
         topic: cmd_vel/teleop_smoothed
         timeout: 0.5
         priority: 10
-      pid_controller:
-        topic: cmd_vel/pid
-        timeout: 0.5
-        priority: 8
       nav_cmd:
         topic: cmd_vel/nav
         timeout: 1.0

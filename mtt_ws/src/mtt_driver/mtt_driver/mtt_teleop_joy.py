@@ -14,7 +14,7 @@ class MTTTeleopJoy(Node):
 
     def __init__(self):
         super().__init__("mtt_teleop_joy")
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel", 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel_raw", 10)
         self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
 
         self.create_subscription(Joy, "joy", self.joy_callback, 10)

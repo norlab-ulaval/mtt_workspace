@@ -161,8 +161,7 @@ def generate_launch_description():
             package='mtt_driver',
             executable='mtt_joint_controller',
             name='mtt_joint_controller',
-            # Subscribe to unified teleop topic in both flows
-            remappings=[('/cmd_vel_raw', 'cmd_vel/teleop')],
+            # No remapping - should receive final muxed commands from twist_mux
             output='screen'
         ),
 

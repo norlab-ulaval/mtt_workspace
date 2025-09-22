@@ -113,7 +113,7 @@ class MttJointController(Node):
         self.cmd_vel_pid_pub = self.create_publisher(Twist, "/cmd_vel/pid", 10)
 
         # Subscribers
-        self.cmd_vel_sub = self.create_subscription(Twist, "/cmd_vel_raw", self.cmd_vel_callback, 10)
+        self.cmd_vel_sub = self.create_subscription(Twist, "/cmd_vel", self.cmd_vel_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, "/mtt_odometry", self.odometry_callback, 10)
         self.articulation_sub = self.create_subscription(Float64, "/mtt_articulation_angle", self.articulation_callback, 10)
 
