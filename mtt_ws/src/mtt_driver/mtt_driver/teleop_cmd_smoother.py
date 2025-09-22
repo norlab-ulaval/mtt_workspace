@@ -24,9 +24,9 @@ from rclpy.node import Node
 from geometry_msgs.msg import Twist
 
 
-class MttCmdSmoother(Node):
+class MttTeleopCmdSmoother(Node):
     def __init__(self) -> None:
-        super().__init__('mtt_cmd_smoother')
+        super().__init__('teleop_cmd_smoother')
 
         # Declare parameters with defaults
         self.declare_parameter('input_topic', 'cmd_vel/teleop')
@@ -114,7 +114,7 @@ class MttCmdSmoother(Node):
 
 def main(args=None):
     rclpy.init(args=args)
-    node = MttCmdSmoother()
+    node = MttTeleopCmdSmoother()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:

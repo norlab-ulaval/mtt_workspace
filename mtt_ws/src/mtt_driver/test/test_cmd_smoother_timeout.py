@@ -11,7 +11,7 @@ Contract:
 - Expect smoother to emit same direction immediately (within 0.5s)
 - After input_timeout, output should decay to ~0 (abs < 1e-3)
 Assumptions:
-- mtt_cmd_smoother runs with defaults: input_topic=cmd_vel/teleop, output_topic=cmd_vel/teleop_smoothed, input_timeout=0.5
+- teleop_cmd_smoother runs with defaults: input_topic=cmd_vel/teleop, output_topic=cmd_vel/teleop_smoothed, input_timeout=0.5
 """
 
 class TestSmootherDecay(unittest.TestCase):

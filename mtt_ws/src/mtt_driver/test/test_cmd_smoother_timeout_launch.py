@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # Copyright
-"""Pytest verifying mtt_cmd_smoother decays to zero after input timeout.
+"""Pytest verifying teleop_cmd_smoother decays to zero after input timeout.
 
 This test starts the smoother as a subprocess (ros2 run ...) to avoid depending
 on launch_testing. It then publishes one Twist and checks the output decays to 0.
@@ -45,7 +45,7 @@ class _Helper(Node):
 def test_decay_to_zero_after_timeout():
     # Start smoother as a background process
     cmd = [
-        'ros2', 'run', 'mtt_driver', 'mtt_cmd_smoother',
+        'ros2', 'run', 'mtt_driver', 'teleop_cmd_smoother',
         '--ros-args',
         '-p', 'input_topic:=test/smoother/in',
         '-p', 'output_topic:=test/smoother/out',

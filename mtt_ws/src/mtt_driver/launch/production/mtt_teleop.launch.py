@@ -76,8 +76,8 @@ def generate_launch_description():
         # Optional command smoother between teleop and wrapper
         Node(
             package='mtt_driver',
-            executable='mtt_cmd_smoother',
-            name='mtt_cmd_smoother',
+            executable='teleop_cmd_smoother',
+            name='teleop_cmd_smoother',
             parameters=[{
                 'input_topic': 'cmd_vel/teleop',
                 'output_topic': 'cmd_vel/teleop_smoothed',

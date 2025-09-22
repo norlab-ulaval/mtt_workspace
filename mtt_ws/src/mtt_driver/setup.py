@@ -31,7 +31,7 @@ setup(
             'mtt_test_node = mtt_driver.mtt_test_node:main',
             'mtt_odometry_manager = mtt_driver.mtt_odometry_manager:main',
             'mtt_joint_controller = mtt_driver.mtt_joint_controller:main',
-            'mtt_cmd_smoother = mtt_driver.mtt_cmd_smoother:main',
+            'teleop_cmd_smoother = mtt_driver.teleop_cmd_smoother:main',
         ],
     },
 )
