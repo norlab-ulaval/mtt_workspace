@@ -27,6 +27,7 @@ class ArticulatedVehicleParams:
     # Articulation limits from URDF joint limits
     max_articulation_angle: float = math.radians(60)  # Maximum joint angle (rad)
     articulation_response: float = 0.7  # Joint response rate
+    max_yaw_rate: float = math.radians(60) / 8.0  # Maximum yaw rate (rad/s) - 60 deg in 8 sec
     
     # Speed-dependent factors
     slip_speed_factor: float = 0.08     # Slip increases with speed  

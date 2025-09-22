@@ -13,10 +13,9 @@ class MTTTeleopJoy(Node):
     """Translates /joy messages to /cmd_vel and /mtt_aux_cmd, including light toggle and winch safety."""
 
     def __init__(self):
-        super().__init__("mtt_teleop_joy")
-        # Publish raw commands for the new pipeline and legacy /cmd_vel for backward compatibility
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel_raw", 10)
-        self.cmd_vel_legacy_pub = self.create_publisher(Twist, "cmd_vel", 10)
+        super().__init__("mtt_teleop_joy_node")
+        # Publish to the correct topic for twist_mux
+        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel/teleop", 10)
         self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
 
         self.create_subscription(Joy, "joy", self.joy_callback, 10)
@@ -30,6 +29,11 @@ class MTTTeleopJoy(Node):
         self.light_state = False
 
         self.is_initialized = False
+        
+        # Add debouncing for joystick detection to prevent rapid reconnections
+        self.last_joystick_check = 0.0
+        self.joystick_check_interval = 2.0  # Only check every 2 seconds
+        self.last_known_good_name = None
 
         self.joystick_name = self._get_joystick_name("/dev/input/js0")
         self.get_logger().info(f"Initial joystick: {self.joystick_name}")
@@ -119,14 +123,29 @@ class MTTTeleopJoy(Node):
     def event_handler(self, event):
         basename = os.path.basename(event.pathname)
 
-        # Check if the event concerns js0
+        # Check if the event concerns js0 with debouncing
         if basename == "js0":
+            current_time = self.get_clock().now().nanoseconds / 1e9
+            
+            # Only check joystick changes every few seconds to prevent rapid cycling
+            if current_time - self.last_joystick_check < self.joystick_check_interval:
+                return
+                
+            self.last_joystick_check = current_time
             new_name = self._get_joystick_name()
-            if new_name != self.joystick_name:
+            
+            # Only update if we have a meaningful change
+            if new_name != "Unknown" and new_name != self.joystick_name:
                 self.is_initialized = False
                 self.get_logger().info(f"Joystick changed: {self.joystick_name} → {new_name}")
                 self.joystick_name = new_name
+                self.last_known_good_name = new_name
                 self.set_joystick_mapper(new_name)
+            elif new_name == "Unknown" and self.last_known_good_name and self.last_known_good_name != self.joystick_name:
+                # Fall back to last known good joystick if current detection fails
+                self.get_logger().info(f"Joystick detection failed, using last known: {self.last_known_good_name}")
+                self.joystick_name = self.last_known_good_name
+                self.set_joystick_mapper(self.last_known_good_name)
 
     def joy_callback(self, msg: Joy):
 
@@ -138,8 +157,6 @@ class MTTTeleopJoy(Node):
         twist_msg.linear.x = self._get_axis(msg, "linear_speed")
         twist_msg.angular.z = self._get_axis(msg, "rotation_speed")
         self.cmd_vel_pub.publish(twist_msg)
-        # Backward-compat: also publish to /cmd_vel
-        self.cmd_vel_legacy_pub.publish(twist_msg)
 
         aux_msg = MttAuxCommand()
         aux_msg.dead_man_switch = self._get_button(msg, "nav_safety")

@@ -96,14 +96,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_teleop',
             default_value='true',
-            description='Enable teleoperation (joystick + teleop controller)'
-        ),
-        DeclareLaunchArgument(
-            'teleop_flow',
-            default_value='smoother',
-            description=(
-                "Teleop pipeline: 'smoother' (joystick → smoother → wrapper) or 'joint_pid' (joystick → joint_controller → wrapper)"
-            ),
+            description='Enable teleoperation (joystick + teleop controller + smoother)'
         ),
         DeclareLaunchArgument(
             'enable_joystick',
@@ -182,7 +175,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('enable_map_frame'))
         ),
 
-        # 4) Driver
+        # 4) Driver (now receives commands from twist_mux on cmd_vel)
         Node(
             package='mtt_driver',
             executable='mtt_ros_wrapper',
@@ -193,18 +186,21 @@ def generate_launch_description():
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
                 'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
                 'base_frame': LaunchConfiguration('base_frame'),
-                # Internal mux defaults
-                'use_external_mux': False,
-                'control_source': 'auto_if_no_deadman',
-                'command_timeout': 0.5,
-                # Select teleop input based on flow
-                'teleop_input_topic': PythonExpression([
-                    "'cmd_vel/teleop_smoothed' if '", LaunchConfiguration('teleop_flow'), "' == 'smoother' else '/cmd_vel_pid'"
-                ]),
-                'teleop_raw_topic': 'cmd_vel/teleop',
             }],
             output='screen',
             emulate_tty=True,
+            respawn=True,
+            respawn_delay=2.0
+        ),
+
+        # 4.5) Twist Mux - Command multiplexer (replaces internal muxing)
+        Node(
+            package='twist_mux',
+            executable='twist_mux',
+            name='twist_mux',
+            parameters=[os.path.join(FindPackageShare(package='mtt_driver').find('mtt_driver'), 'config', 'twist_mux.yaml')],
+            remappings=[('cmd_vel_out', 'cmd_vel')],
+            output='screen',
             respawn=True,
             respawn_delay=2.0
         ),
@@ -218,12 +214,17 @@ def generate_launch_description():
             parameters=[{
                 'base_frame': LaunchConfiguration('base_frame'),
                 'odom_frame': LaunchConfiguration('odom_frame'),
-                # Ensure odometry angular source matches the selected teleop flow
-                'cmd_vel_topic': PythonExpression([
-                    "'cmd_vel/teleop_smoothed' if '", LaunchConfiguration('teleop_flow'), "' == 'smoother' else '/cmd_vel_pid'"
-                ]),
+                # Odometry now listens to the final muxed cmd_vel topic
+                'cmd_vel_topic': 'cmd_vel',
                 # Toggle TF broadcasting via launch arg
                 'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
+                # Steering control and anti-drift tuning
+                'steer_control_mode': 'closed_loop',
+                'max_articulation_angle': 1.047,   # 60 deg
+                'max_yaw_rate': 2.0,               # rad/s clamp
+                'pivot_turn_enabled': False,
+                'min_turn_speed_ms': 0.05,
+                'yaw_slip_factor': 0.6,
             }],
             output='screen',
             emulate_tty=True,
@@ -257,10 +258,7 @@ def generate_launch_description():
                 'rate_hz': 50.0,
             }],
             output='screen',
-            condition=IfCondition(PythonExpression([
-                "'", LaunchConfiguration('enable_teleop'), "' == 'true' and '",
-                LaunchConfiguration('teleop_flow'), "' == 'smoother'"
-            ])),
+            condition=IfCondition(LaunchConfiguration('enable_teleop')),
             respawn=True
         ),
 

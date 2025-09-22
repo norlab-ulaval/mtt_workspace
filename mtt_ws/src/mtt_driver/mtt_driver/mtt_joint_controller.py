@@ -7,7 +7,7 @@ Converts cmd_vel commands to joint movements and updates joint_states with PID c
 
 Key behavior for articulated frame-steer:
 - All 20 track rollers rotate in the same direction/speed based on linear.x only.
-- Steering comes from the articulation joint (yaw) using angular.z as target angle (phi_cmd).
+- Steering comes from the articulation joint (yaw) using angular.z as normalized steering input [-1, 1].
 - Trailer wheels remain passive (positions held at 0).
 """
 
@@ -21,7 +21,7 @@ import time
 
 
 class SimplePID:
-    """Simple PID controller implementation"""
+    """Simple PID controller implementation with optional external dt"""
 
     def __init__(self, kp=1.0, ki=0.0, kd=0.0, setpoint=0.0):
         self.kp, self.ki, self.kd = kp, ki, kd
@@ -30,9 +30,10 @@ class SimplePID:
         self.integral = 0.0
         self.prev_time = time.time()
 
-    def update(self, measured_value):
+    def update(self, measured_value, dt: float | None = None):
         current_time = time.time()
-        dt = current_time - self.prev_time
+        if dt is None:
+            dt = current_time - self.prev_time
         if dt <= 0.0:
             dt = 0.02  # Fallback to 50Hz
 
@@ -48,7 +49,7 @@ class SimplePID:
             output = 0.0
             self.integral = 0.0  # Reset integral windup
 
-        # Clamp output to reasonable limits
+        # Clamp output to reasonable limits (rad/s)
         output = max(-10.0, min(10.0, output))
 
         self.prev_error = error
@@ -89,6 +90,10 @@ class MttJointController(Node):
         self.declare_parameter(
             "articulation_max_deg", 35.0, ParameterDescriptor(description="Max articulation absolute angle (deg)")
         )
+        # Physical rate limit for articulation (closed-loop) in rad/s (60° in 8s ≈ 0.131 rad/s)
+        self.declare_parameter(
+            "articulation_max_rate_rad_s", 0.131, ParameterDescriptor(description="Max articulation yaw rate (rad/s)")
+        )
 
         # Initialize PID controllers
         v_kp = self.get_parameter("velocity_pid.kp").get_parameter_value().double_value
@@ -105,6 +110,9 @@ class MttJointController(Node):
             self.get_parameter("articulation_max_deg").get_parameter_value().double_value
         )
         self.linear_slew_rate = self.get_parameter("linear_slew_rate").get_parameter_value().double_value
+        self.articulation_max_rate = abs(
+            self.get_parameter("articulation_max_rate_rad_s").get_parameter_value().double_value
+        )
 
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
@@ -157,10 +165,14 @@ class MttJointController(Node):
         self.wheel_radius = 0.15  # meters
         self.track_length = 2.0  # legacy param (not used for steering in frame-steer)
 
-        # Current velocities
-        self.linear_vel = 0.0
+        # Command targets and current state
+        self.target_linear = 0.0  # normalized [-1,1]
+        self.linear_vel = 0.0     # normalized [-1,1]
+        self.phi_target = 0.0     # articulation target angle (rad)
+        self.steer_input_norm = 0.0  # normalized steering input [-1, 1]
         self.angular_vel = 0.0
-        self.dt = 0.02  # 50 Hz
+        self.dt = 0.02  # nominal 50 Hz
+        self._last_integration_time = time.time()
 
         # Timer for publishing joint states
         self.timer = self.create_timer(self.dt, self.publish_joint_states)  # 50Hz
@@ -168,40 +180,51 @@ class MttJointController(Node):
         self.get_logger().info("MTT Joint Controller started")
 
     def cmd_vel_callback(self, msg: Twist):
-        """Process cmd_vel as: linear.x => track speed; angular.z => articulation angle (PID)."""
+        """Store cmd targets: linear.x in [-1,1], angular.z normalized steering [-1,1]."""
         raw_linear = float(msg.linear.x)
         raw_angular = float(msg.angular.z)
 
-        # 1) Smooth linear velocity with a slew limiter (normalized command in [-1, 1])
-        target_linear = max(-1.0, min(1.0, raw_linear))
-        max_step = max(0.0, self.linear_slew_rate) * self.dt
-        delta = target_linear - self.linear_vel
+        # Targets only; integration happens in the timer with consistent dt
+        self.target_linear = max(-1.0, min(1.0, raw_linear))
+        # Expect steering command as normalized [-1, 1]
+        self.steer_input_norm = max(-1.0, min(1.0, raw_angular))
+        # Map normalized input to articulation angle setpoint in radians
+        self.phi_target = self.steer_input_norm * self.articulation_max
+        self.artic_pid.setpoint = self.phi_target
+
+    def publish_joint_states(self):
+        """Integrate commands, update joints deterministically, publish joints and smoothed cmd."""
+        now = time.time()
+        dt = now - self._last_integration_time
+        # Clamp dt: avoid huge jumps on pauses
+        if not math.isfinite(dt) or dt <= 0.0:
+            dt = self.dt
+        dt = max(0.001, min(0.1, dt))
+        self._last_integration_time = now
+
+        # 1) Slew linear velocity toward target
+        max_step = max(0.0, self.linear_slew_rate) * dt
+        delta = self.target_linear - self.linear_vel
         if delta > max_step:
             self.linear_vel += max_step
         elif delta < -max_step:
             self.linear_vel -= max_step
         else:
-            self.linear_vel = target_linear
+            self.linear_vel = self.target_linear
 
-        # 2) Articulation PID: treat angular.z as target articulation angle (radians)
-        # Clamp to safe limit
-        phi_cmd = max(-self.articulation_max, min(self.articulation_max, raw_angular))
-        self.artic_pid.setpoint = phi_cmd
-        phi_meas = self.joint_positions[27]  # yaw joint current position
-        phi_rate_cmd = self.artic_pid.update(phi_meas)  # rad/s limited by PID internal clamp
+        # 2) Articulation PID: produce yaw rate, integrate position
+        phi_meas = self.joint_positions[27]  # current yaw
+        phi_rate_cmd = self.artic_pid.update(phi_meas, dt)  # rad/s
+        # Enforce physical articulation rate limit (closed-loop behavior)
+        if self.articulation_max_rate > 0.0:
+            if phi_rate_cmd > self.articulation_max_rate:
+                phi_rate_cmd = self.articulation_max_rate
+            elif phi_rate_cmd < -self.articulation_max_rate:
+                phi_rate_cmd = -self.articulation_max_rate
 
-        # 3) Publish smoothed command for odometry consumers
-        # linear.x = smoothed forward velocity; angular.z = articulation target angle (rad)
-        pid_cmd = Twist()
-        pid_cmd.linear.x = self.linear_vel
-        pid_cmd.angular.z = phi_cmd
-        self.cmd_vel_pid_pub.publish(pid_cmd)
+        # 3) Update joints from rates
+        omega_roll = self.linear_vel / max(self.wheel_radius, 1e-6)  # rad/s
 
-        # 4) Update continuous joints
-        dt = self.dt
-        omega_roll = self.linear_vel / max(self.wheel_radius, 1e-6)
-
-        # Rollers: 1..20 all same direction/speed
         for i in range(20):
             new_pos = self.joint_positions[i] + omega_roll * dt
             if math.isfinite(new_pos):
@@ -226,15 +249,20 @@ class MttJointController(Node):
         self.joint_positions[26] = 0.0  # roll
         self.joint_positions[28] = 0.0  # pitch
 
-    def publish_joint_states(self):
-        """Publish current joint states"""
+        # Publish smoothed command for odometry consumers
+        pid_cmd = Twist()
+        pid_cmd.linear.x = self.linear_vel
+        # angular.z carries normalized steering command [-1, 1] expected by wrapper/odometry
+        pid_cmd.angular.z = float(self.steer_input_norm)
+        self.cmd_vel_pid_pub.publish(pid_cmd)
+
+        # Publish joint states
         msg = JointState()
         msg.header.stamp = self.get_clock().now().to_msg()
         msg.name = self.joint_names
         msg.position = self.joint_positions
-        msg.velocity = []  # Empty for now
-        msg.effort = []  # Empty for now
-
+        msg.velocity = []
+        msg.effort = []
         self.joint_state_pub.publish(msg)
 
 
