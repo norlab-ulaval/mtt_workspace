@@ -80,7 +80,7 @@ def generate_launch_description():
             name='teleop_cmd_smoother',
             parameters=[{
                 'input_topic': 'cmd_vel/teleop',
-                'output_topic': 'cmd_vel/teleop_smoothed',
+                'output_topic': 'cmd_vel',
                 'max_accel_linear': 1.5,
                 'max_accel_angular': 1.5,
                 'rate_hz': 50.0,
