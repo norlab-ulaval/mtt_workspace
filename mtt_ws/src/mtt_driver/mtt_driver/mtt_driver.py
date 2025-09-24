@@ -204,7 +204,7 @@ class MTTCanDriver:
         log.debug(f"Brake set: {self.brake_value}")
         
         
-        self._set_steer(0)
+        self._set_steer(STEER_CENTER)
         log.debug(f"Steer set: {self.steer_value}")
         
         self.set_steering_mode(SteeringMode.CloseLoop)
