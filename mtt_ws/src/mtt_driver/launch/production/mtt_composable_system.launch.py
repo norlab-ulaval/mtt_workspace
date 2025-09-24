@@ -12,7 +12,7 @@ This launch file starts the complete MTT composable architecture including:
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, Command
+from launch.substitutions import LaunchConfiguration, Command, PythonExpression
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -96,7 +96,7 @@ def generate_launch_description():
         DeclareLaunchArgument(
             'enable_teleop',
             default_value='true',
-            description='Enable teleoperation (joystick + teleop controller)'
+            description='Enable teleoperation (joystick + teleop controller + smoother)'
         ),
         DeclareLaunchArgument(
             'enable_joystick',
@@ -122,6 +122,11 @@ def generate_launch_description():
             'enable_map_frame',
             default_value='true',
             description='Publish static map->odom identity transform'
+        ),
+        DeclareLaunchArgument(
+            'odometry_broadcast_tf',
+            default_value='true',
+            description='Whether mtt_odometry_manager should publish odom->base TF'
         ),
         DeclareLaunchArgument(
             'use_rviz',
@@ -156,8 +161,8 @@ def generate_launch_description():
             package='mtt_driver',
             executable='mtt_joint_controller',
             name='mtt_joint_controller',
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('publish_description'))
+            # No remapping - should receive final muxed commands from twist_mux
+            output='screen'
         ),
 
         # 3) Optional static map->odom identity TF (RViz dead-reckoning)
@@ -169,7 +174,7 @@ def generate_launch_description():
             condition=IfCondition(LaunchConfiguration('enable_map_frame'))
         ),
 
-        # 4) Driver
+        # 4) Driver (now receives commands from twist_mux on cmd_vel)
         Node(
             package='mtt_driver',
             executable='mtt_ros_wrapper',
@@ -187,6 +192,18 @@ def generate_launch_description():
             respawn_delay=2.0
         ),
 
+        # 4.5) Twist Mux - Command multiplexer (replaces internal muxing)
+        Node(
+            package='twist_mux',
+            executable='twist_mux',
+            name='twist_mux',
+            parameters=[os.path.join(FindPackageShare(package='mtt_driver').find('mtt_driver'), 'config', 'twist_mux.yaml')],
+            remappings=[('cmd_vel_out', 'cmd_vel')],
+            output='screen',
+            respawn=True,
+            respawn_delay=2.0
+        ),
+
         # 5) Odometry manager
         Node(
             package='mtt_driver',
@@ -195,7 +212,17 @@ def generate_launch_description():
             arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
             parameters=[{
                 'base_frame': LaunchConfiguration('base_frame'),
-                'odom_frame': LaunchConfiguration('odom_frame')
+                'odom_frame': LaunchConfiguration('odom_frame'),
+                # Odometry now listens to the final muxed cmd_vel topic
+                'cmd_vel_topic': 'cmd_vel',
+                # Toggle TF broadcasting via launch arg
+                'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
+                # Steering control and anti-drift tuning - using centralized vehicle parameters
+                'steer_control_mode': 'closed_loop',
+                # max_articulation_angle and max_yaw_rate now come from centralized vehicle parameters
+                'pivot_turn_enabled': False,
+                'min_turn_speed_ms': 0.05,
+                'yaw_slip_factor': 0.6,
             }],
             output='screen',
             emulate_tty=True,
@@ -217,11 +244,28 @@ def generate_launch_description():
             respawn=True
         ),
 
+        # 6.5) Teleop command smoother (decays to zero on input inactivity)
+        Node(
+            package='mtt_driver',
+            executable='teleop_cmd_smoother',
+            name='teleop_cmd_smoother',
+            parameters=[{
+                'input_topic': 'cmd_vel/teleop',
+                'output_topic': 'cmd_vel/teleop_smoothed',
+                'input_timeout': 0.5,
+                'rate_hz': 50.0,
+            }],
+            output='screen',
+            condition=IfCondition(LaunchConfiguration('enable_teleop')),
+            respawn=True
+        ),
+
         # 7) Teleop
         Node(
             package='mtt_driver',
             executable='mtt_teleop_joy',
             name='mtt_teleop_joy_node',
+            remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
             output='screen',
             condition=IfCondition(LaunchConfiguration('enable_teleop')),
             respawn=True

@@ -5,6 +5,7 @@ import rclpy
 import time
 import threading
 import logging
+import math
 import time
 from enum import Enum
 from rclpy.node import Node
@@ -72,20 +73,29 @@ class MTTRosWrapper(Node):
     def __init__(self):
         super().__init__("mtt_ros_wrapper")
         self.declare_parameter("can_interface", "can0")
+        self.declare_parameter("test_mode", False)
         self.declare_parameter("driver_log_level", "INFO")
         self.declare_parameter("control_frequency_hz", 50.0)
         self.declare_parameter("can_frame_frequency_hz", 20.0)
         self.declare_parameter("base_frame", "mtt_base_link")
         self.declare_parameter("can_id", 0x001)
+        self.declare_parameter("direction_switch_threshold", 0.05)
 
         can_interface = self.get_parameter("can_interface").get_parameter_value().string_value
+        test_mode = self.get_parameter("test_mode").get_parameter_value().bool_value
         driver_log_level_str = self.get_parameter("driver_log_level").get_parameter_value().string_value
         control_frequency_hz = self.get_parameter("control_frequency_hz").get_parameter_value().double_value
-        can_frame_period_hz = self.get_parameter("can_frame_frequency_hz").get_parameter_value().double_value
-        self.control_period = 1.0 / control_frequency_hz
-        self.can_frame_period = 1.0 / can_frame_period_hz
+        can_frame_frequency_hz = self.get_parameter("can_frame_frequency_hz").get_parameter_value().double_value
+        self.control_period = 1.0 / max(1e-3, control_frequency_hz)
+        self.can_frame_period = 1.0 / max(1e-3, can_frame_frequency_hz)
         self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value
-        self.can_id = self.get_parameter("can_id").get_parameter_value().integer_value
+        self.can_id = int(self.get_parameter("can_id").get_parameter_value().integer_value)
+        self.direction_switch_threshold = self.get_parameter("direction_switch_threshold").get_parameter_value().double_value
+        
+        # Test mode: use vcan0 instead of can0 for testing
+        if test_mode and can_interface == "can0":
+            self.get_logger().info("test_mode enabled: using vcan0 instead of can0")
+            can_interface = "vcan0"
     
         driver_log_level = getattr(logging, driver_log_level_str.upper(), logging.INFO)
 
@@ -97,7 +107,7 @@ class MTTRosWrapper(Node):
             self.get_logger().info("MTT Driver initialized")
         except Exception as e:
             self.get_logger().fatal(f"Could not start driver: {e}")
-            return
+            raise
 
         self.safety_state_machine_cmd_vel = SafetyStateMachine(SafetyState.ESTOPPED)
         self.safety_state_machine_winch = SafetyStateMachine(SafetyState.ESTOPPED)
@@ -107,6 +117,12 @@ class MTTRosWrapper(Node):
         # Deadbands to prevent oscillating idle frames (tolerance)
         self.throttle_deadband = 0.01
         self.steer_deadband = 0.01
+
+        # Direction hysteresis state
+        self._last_direction_state = DirectionState.Forward
+        
+        # Current steering input for odometry feedback (raw value sent to CAN bus)
+        self.current_steering_input = 0.0  # Raw steering input (-1.0 to +1.0)
 
         # Remote controller detection
         self.remote_timeout_seconds = 0.5  # Remote considered lost after 500ms
@@ -131,6 +147,9 @@ class MTTRosWrapper(Node):
         
         # Current driving mode (default: single trailer)
         self.current_driving_mode = 0  # SINGLE_TRAILER
+        
+        # Track current steering input for odometry feedback
+        self.current_steering_input = 0.0
         
         # Keep only essential command feedback
         self.steer_pub = self.create_publisher(UInt8, "mtt_steer_cmd", 10)
@@ -226,10 +245,15 @@ class MTTRosWrapper(Node):
         throttle_percent = min(1.0, abs(lin))
 
         with self.driver_lock:
+            # Origin/main behavior: set direction directly from cmd sign
             self.driver.set_throttle(throttle_percent)
             steer_raw = self.driver.set_steer(max(-1.0, min(1.0, ang)))
             direction = DirectionState.Forward if lin >= 0 else DirectionState.Reverse
             self.driver.set_direction(direction)
+            
+            # Store the actual steering input sent to CAN bus for odometry feedback
+            # This is the raw input value (-1.0 to +1.0) that was sent to the hardware
+            self.current_steering_input = max(-1.0, min(1.0, ang))
 
         steer_msg = UInt8()
         steer_msg.data = steer_raw if steer_raw is not None else 0
@@ -404,6 +428,9 @@ class MTTRosWrapper(Node):
             tachometer_msg.direction = odometry_data["direction"]
             tachometer_msg.main_sensor_temp_a = odometry_data["temperature_a"]
             tachometer_msg.main_sensor_temp_b = odometry_data["temperature_b"]
+            # Include current steering input for articulated vehicle odometry
+            # This is the raw steering command (-1.0 to +1.0) sent to CAN bus
+            tachometer_msg.steer_cmd = self.current_steering_input
             self.tachometer_pub.publish(tachometer_msg)
         else:
             # Set default values when no motion data is available

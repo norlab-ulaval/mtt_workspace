@@ -20,6 +20,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "srv/GetVehiculeTypeSrv.srv"
   "srv/SetLightStateSrv.srv"
   "srv/SetSecuritySwitchSrv.srv"
+  "srv/SetSteerControlMode.srv"
   "srv/SetSteerSrv.srv"
   "srv/SetThrottleSrv.srv"
   "srv/SetVehiculeTypeSrv.srv"

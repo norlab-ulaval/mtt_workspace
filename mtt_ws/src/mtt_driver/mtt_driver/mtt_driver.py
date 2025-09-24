@@ -10,6 +10,7 @@ import fcntl
 import struct
 import threading
 from dataclasses import dataclass, replace
+from .mtt_vehicle_params import get_mtt_params
 
 
 log = logging.getLogger("MTTCanDriver")
@@ -27,17 +28,22 @@ def setup_logging(level=logging.INFO):
 # Default logging setup - can be overridden by calling setup_logging()
 setup_logging()
 
-# MTT-154 Encoder and Odometry Constants
-MTT_GEAR1 = 16
-MTT_GEAR2 = 36
-MTT_GEAR3 = 15
-MTT_GEAR4 = 32
-MTT_GEAR_DRIVE = 8
-MTT_GEAR_TRACK = 54
-MTT_ENCODER_TEETH = 10  # Doubled from 5 to fix 2x overscale in odometry calculations
-MTT_TRACK_LENGTH_CM = 393
-MTT_TRACK_LENGTH_KM = MTT_TRACK_LENGTH_CM / 100000.0  # Firmware convention
-MTT_TRACK_LENGTH_M = MTT_TRACK_LENGTH_CM / 100.0
+# Get real MTT-154 measured parameters - single source of truth
+_mtt_params = get_mtt_params()
+
+# MTT-154 Encoder and Odometry Constants - from real vehicle measurements
+MTT_GEAR1 = _mtt_params.mtt_gear1
+MTT_GEAR2 = _mtt_params.mtt_gear2  
+MTT_GEAR3 = _mtt_params.mtt_gear3
+MTT_GEAR4 = _mtt_params.mtt_gear4
+MTT_GEAR_DRIVE = _mtt_params.mtt_gear_drive
+MTT_GEAR_TRACK = _mtt_params.mtt_gear_track
+MTT_ENCODER_TEETH = _mtt_params.mtt_encoder_teeth  # Legacy (10 ticks per motor rev)
+MTT_SPROCKET_TEETH = _mtt_params.mtt_sprocket_teeth  # Mechanical: 5 teeth  
+MTT_TACHO_TEETH = _mtt_params.mtt_tacho_teeth       # Tachometer: 10 slots
+MTT_TRACK_LENGTH_CM = _mtt_params.mtt_track_length_cm  # Measured track length
+MTT_TRACK_LENGTH_KM = _mtt_params.mtt_track_length_km  # Firmware convention
+MTT_TRACK_LENGTH_M = _mtt_params.mtt_track_length_m
 
 CAN_MAIN_TELEMETRY = 0x2FF
 
@@ -50,7 +56,8 @@ MTT_ANALOG_STEER = 5
 MTT_SWITCHES_DIRECTION_MODE = 6
 
 
-class DirectionMode(Enum):
+class SteeringMode(Enum):
+    """Steering control mode: open loop (yaw rate) vs closed loop (articulation angle)"""
     OpenLoop = 0
     CloseLoop = 1
 
@@ -126,12 +133,12 @@ def interface_exists(ifname):
         return False
 
 
-# Raw device resolution constants
+# Raw device resolution constants - from real MTT-154 measurements
 THROTTLE_MAX = 230  # Firmware defined max usable throttle
 BRAKE_MAX = 255  # Full scale brake
-STEER_MAX = 255  # Steering value range
-STEER_CENTER = 127  # Center position
-STEER_DEADBAND = 0.02  # Normalized deadband for center snap
+STEER_MAX = _mtt_params.steering_max_byte  # Steering value range: 255
+STEER_CENTER = _mtt_params.steering_center_byte  # Center position: 127 (measured)
+STEER_DEADBAND = _mtt_params.steering_deadband_normalized  # Normalized deadband: 0.5°/50° = 0.01
 
 
 class MTTCanDriver:
@@ -160,7 +167,7 @@ class MTTCanDriver:
         self.winch_state = None
         self.security_switch_state = None
         self.direction_state = None
-        self.direction_mode = None
+        self.steering_mode = None
         self.light_state = None
         self.can_listener_running = True
         self.can_array = [0] * 8
@@ -197,11 +204,11 @@ class MTTCanDriver:
         log.debug(f"Brake set: {self.brake_value}")
         
         
-        self._set_steer(0)
+        self._set_steer(STEER_CENTER)
         log.debug(f"Steer set: {self.steer_value}")
         
-        self.set_direction_mode(DirectionMode.CloseLoop)
-        log.debug(f"Direction mode set: {self.direction_mode}")
+        self.set_steering_mode(SteeringMode.CloseLoop)
+        log.debug(f"Steering mode set: {self.steering_mode}")
         
         log.info("Initial frame setup completed - all variables initialized")
 
@@ -247,12 +254,15 @@ class MTTCanDriver:
             log.info("CAN driver cleaned up")
 
     def _calculate_gear_ratio(self):
-        """Compute final gear ratio (matches firmware)."""
-        ratio1 = (MTT_GEAR2 / MTT_GEAR1) * MTT_ENCODER_TEETH
-        ratio2 = (MTT_GEAR4 / MTT_GEAR3) * ratio1
-        final_ratio = ((MTT_GEAR_TRACK / MTT_GEAR_DRIVE) * ratio2) * 2
-
-        log.debug(f"Encoder final ratio calculated: {final_ratio}")
+        """Compute final gear ratio per mtt_encoder_methodology.md."""
+        # Mechanical gear reduction (motor rev per sprocket rev)
+        G_theory = (MTT_GEAR2 / MTT_GEAR1) * (MTT_GEAR4 / MTT_GEAR3) * (MTT_GEAR_TRACK / MTT_GEAR_DRIVE)
+        
+        # Final ratio: mechanical × ticks per motor revolution  
+        final_ratio = G_theory * MTT_TACHO_TEETH
+        
+        log.debug(f"Mechanical gear ratio (G_theory): {G_theory}")
+        log.debug(f"Final encoder ratio: {final_ratio}")
         return final_ratio
 
     def _calculate_absolute_distance(self, cumulative_ticks):
@@ -260,9 +270,9 @@ class MTTCanDriver:
         if cumulative_ticks == 0:
             return 0.0
 
-        # Use the same formula as the original implementation
-        gear_ratio_for_distance = self.encoder_final_ratio / 2
-        absolute_distance_m = (cumulative_ticks / gear_ratio_for_distance) * MTT_TRACK_LENGTH_M
+        # Per mtt_encoder_methodology.md: Use consistent encoder_final_ratio = 324.0
+        # (No division by 2, since final_ratio already accounts for 10 ticks per motor revolution)
+        absolute_distance_m = (cumulative_ticks / self.encoder_final_ratio) * MTT_TRACK_LENGTH_M
         return absolute_distance_m
 
     #######################
@@ -503,21 +513,21 @@ class MTTCanDriver:
             log.error(f"invalid value for light_state: {light_state}")
             return False
 
-    def set_direction_mode(self, direction_mode):
+    def set_steering_mode(self, steering_mode):
         """Set open/close loop bit0 of byte6."""
-        if direction_mode == DirectionMode.CloseLoop:
+        if steering_mode == SteeringMode.CloseLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] |= 0b00000001
-                self.direction_mode = DirectionMode.CloseLoop
+                self.steering_mode = SteeringMode.CloseLoop
             return True
 
-        elif direction_mode == DirectionMode.OpenLoop:
+        elif steering_mode == SteeringMode.OpenLoop:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_DIRECTION_MODE] &= 0b11111110
-                self.direction_mode = DirectionMode.OpenLoop
+                self.steering_mode = SteeringMode.OpenLoop
             return True
         else:
-            log.error(f"invalid value for direction_mode: {direction_mode}")
+            log.error(f"invalid value for steering_mode: {steering_mode}")
             return False
 
     def set_vehicle_type(self, vehicle_type):
@@ -572,8 +582,8 @@ class MTTCanDriver:
             uninitialized_vars.append("security_switch_state")
         if self.direction_state == None:
             uninitialized_vars.append("direction_state")
-        if self.direction_mode == None:
-            uninitialized_vars.append("direction_mode")
+        if self.steering_mode == None:
+            uninitialized_vars.append("steering_mode")
         if self.light_state == None:
             uninitialized_vars.append("light_state")
 

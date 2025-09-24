@@ -21,3 +21,7 @@ float64 distance_km # Cumulative distance in kilometers
 
 # Vehicle direction state
 string direction    # Current direction: "Forward" or "Reverse"
+
+# Steering command value sent to CAN bus
+float64 steer_cmd    # Raw steering command (-1.0 to +1.0) sent to vehicle
+                     # Interpretation depends on control mode (open/closed loop)

@@ -14,7 +14,7 @@ class MTTTeleopJoy(Node):
 
     def __init__(self):
         super().__init__("mtt_teleop_joy")
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel", 10)
+        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel_raw", 10)
         self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
 
         self.create_subscription(Joy, "joy", self.joy_callback, 10)
@@ -94,6 +94,26 @@ class MTTTeleopJoy(Node):
 
         self.is_initialized = True
 
+    def _get_button(self, msg: Joy, name: str, default: bool = False):
+        """Return a button as bool; safe if mapping is missing or out of range."""
+        idx = self.button_map.get(name)
+        if idx is None:
+            return default
+        try:
+            return bool(msg.buttons[idx])
+        except (IndexError, TypeError):
+            return default
+
+    def _get_axis(self, msg: Joy, name: str, default: float = 0.0):
+        """Return an axis as float; safe if mapping is missing or out of range."""
+        idx = self.axis_map.get(name)
+        if idx is None:
+            return default
+        try:
+            return float(msg.axes[idx])
+        except (IndexError, TypeError, ValueError):
+            return default
+
     def event_handler(self, event):
         basename = os.path.basename(event.pathname)
 
@@ -113,19 +133,19 @@ class MTTTeleopJoy(Node):
             return
 
         twist_msg = Twist()
-        twist_msg.linear.x = msg.axes[self.axis_map["linear_speed"]]
-        twist_msg.angular.z = msg.axes[self.axis_map["rotation_speed"]]
+        twist_msg.linear.x = self._get_axis(msg, "linear_speed")
+        twist_msg.angular.z = self._get_axis(msg, "rotation_speed")
         self.cmd_vel_pub.publish(twist_msg)
 
         aux_msg = MttAuxCommand()
-        aux_msg.dead_man_switch = bool(msg.buttons[self.button_map["nav_safety"]])
-        aux_msg.brake = abs(msg.axes[self.axis_map["brake"]])
+        aux_msg.dead_man_switch = self._get_button(msg, "nav_safety")
+        aux_msg.brake = abs(self._get_axis(msg, "brake"))
         
         # Winch safety button
-        aux_msg.winch_safety_button = bool(msg.buttons[self.button_map["winch_safety"]])
+        aux_msg.winch_safety_button = self._get_button(msg, "winch_safety")
          
         # Winch command from D-pad
-        dpad_val = msg.axes[self.axis_map["winch"]]
+        dpad_val = self._get_axis(msg, "winch")
         if dpad_val > 0.5:
             aux_msg.winch_command = MttAuxCommand.WINCH_IN
         elif dpad_val < -0.5:
@@ -134,7 +154,7 @@ class MTTTeleopJoy(Node):
             aux_msg.winch_command = MttAuxCommand.WINCH_NEUTRAL
 
         # Light toggle logic (rising edge detection)
-        light_btn = bool(msg.buttons[self.button_map["light_toggle"]])
+        light_btn = self._get_button(msg, "light_toggle")
         if light_btn == 1 and self.prev_light_btn == 0:
             self.light_state = not self.light_state
         self.prev_light_btn = light_btn
