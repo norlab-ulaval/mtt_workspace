@@ -23,16 +23,10 @@ import xacro
 
 def generate_launch_description():
     # logging.getLogger().setLevel(logging.WARN)
-    # mode = "turtle"
-    mode = "mtt"
 
+    # TODO: test if this is still necessary
     # Without this, the world sdf file has trouble finding gz_ros2_control
     os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = os.environ.get("GZ_SIM_SYSTEM_PLUGIN_PATH", "") + ":/opt/ros/jazzy/lib"
-
-    nav2_bringup_dir = get_package_share_directory('nav2_bringup')
-    launch_dir = os.path.join(nav2_bringup_dir, 'launch')
-    
-
     
     sim_dir = get_package_share_directory('nav2_minimal_tb3_sim')
 
