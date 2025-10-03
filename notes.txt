@@ -19,3 +19,9 @@ ros2 topic pub /wheel_group_controller/commands std_msgs/msg/Float64MultiArray "
 
 ros2 launch mtt_bringup mtt_simulation.launch.py
 ros2 launch mtt_bringup mtt_teleop_controller.launch.py
+
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+
+python3 src/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0

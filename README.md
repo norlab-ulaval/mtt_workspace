@@ -11,7 +11,48 @@ Tested on:
 - Vscode
 - Docker
 
-### Steps
+#### Docker
+Once docker in installed, verify that it is well configured
+
+1. Check if Docker works as root
+sudo docker ps
+
+2. Add your user to the docker group
+
+Run:
+```
+sudo groupadd docker  # (only if the group doesn't exist yet)
+sudo usermod -aG docker $USER
+```
+3. Apply the group membership
+
+Either log out and log back in, or run:
+```
+newgrp docker
+```
+This updates your current session with the new group.
+
+4. Test again by running:
+```
+docker ps
+```
+
+#### Git
+The docker requires a .gitconfig in the home directory. The file can be left empty or with the git user informations. If the github has not been configured on the current system, run:
+```
+touch ~/.gitconfig
+```
+or 
+```
+git config --global user.email "youremail"
+```
+
+#### ROS
+By default the docker does not set a ROS_DOMAIN_ID value to prevent collision on multiple system on the same network, in the computer's .bashrc add the following line where X is the chosen domain id (ROS is not required on the system):
+```
+export ROS_DOMAIN_ID=X
+```
+### Repo installation
 
 1. Clone the repo
 

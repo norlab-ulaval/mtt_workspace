@@ -7,22 +7,40 @@ ROS 2 driver for MTT-154 All-Terrain Vehicle.
 ## Installation
 
 ```bash
-cd ~/ros2_ws
+cd ~/mtt_ws
 colcon build --packages-select mtt_driver
 source install/setup.bash
 ```
 
 ## Usage
 
-```bash
+```bash 
 # Setup CAN interface
 sudo ip link set can0 up type can bitrate 250000
-
-# Launch driver
-ros2 launch mtt_driver mtt_driver.launch.py
-
+```
+Or setup virtual can interface:
+```bash
+# Setup virtual CAN interface
+sudo ip link add dev vcan0 type vcan
+sudo ip link set up vcan0
+```
+To launch only the driver and the teleoperation:
+```
 # Test teleop
 ros2 launch mtt_driver mtt_teleop.launch.py
+```
+To launch the full driver system with the odometry on the mtt launch:
+```bash
+# Launch driver on mtt
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=can0
+```
+In simulation:
+```bash
+# Launch driver in simulation
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0
+
+# in simulation to reproduce the tachometer
+python3 src/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
 ```
 
 ## Components
@@ -83,7 +101,7 @@ The driver uses SocketCAN for communication and implements the current CAN bus s
 - **0x2ff**: Tachometer data (receive only)
 
 ```bash
-sudo ip link set can0 up type can bitrate 500000
+sudo ip link set can0 up type can bitrate 250000
 ```
 
 ### Critical Safety Requirements
@@ -111,23 +129,9 @@ The driver provides comprehensive odometry data compatible with ROS2 navigation:
 - **Standard ROS2 format**: Compatible with nav2 and SLAM algorithms
 - **MSB-first parsing**: Correctly handles CAN 0x2FF byte order per specification
 
-**⚠️ Current Implementation**: The odometry currently assumes straight-line motion. Steering angle integration for accurate 2D pose estimation will be implemented in a future update.
-
 #### Frame IDs
 - **odom**: Fixed odometry frame for navigation
 - **mtt_base_link**: Vehicle base frame for transforms
-
-#### Monitoring
-```bash
-# Monitor speed
-ros2 topic echo /mtt_speed
-
-# Monitor odometry  
-ros2 topic echo /mtt_odometry
-
-# Monitor complete telemetry
-ros2 topic echo /mtt_tachometer
-```
 
 #### Integration with Navigation
 The odometry data is published in standard format for integration with:
@@ -144,6 +148,7 @@ The odometry data is published in standard format for integration with:
 - Verify the correct CAN interface name in the driver
 
 ### Joystick Issues
+- Verify there is a corresponding yaml file in the config and that file is included in `joystick_mappings.yaml`
 - Verify joystick is connected: `ls /dev/input/js*`
 - Check joystick permissions: `sudo chmod a+rw /dev/input/js0`
 - Test joystick input: `ros2 topic echo /joy`
@@ -152,17 +157,3 @@ The odometry data is published in standard format for integration with:
 - Ensure all dependencies are installed
 - Check that the workspace is properly sourced
 - Verify Python path includes the package
-
-## Development
-
-### Adding New Controllers
-
-To add support for a new controller, modify the `axis_map` and `button_map` dictionaries in `mtt_teleop_joy.py`.
-
-### Extending Functionality
-
-The modular architecture allows easy extension:
-- Add new commands to `MttAuxCommand.msg`
-- Implement new control logic in `mtt_driver.py`
-- Create new ROS nodes that publish to `/cmd_vel` and `/mtt_aux_cmd`
-
