@@ -51,7 +51,7 @@ def test_driver_initialization(can_interface='vcan0'):
         log.info("Test 3: Verify initial state values")
         log.info(f"Vehicle type: {driver.vehicle_type}")
         log.info(f"Direction state: {driver.direction_state}")
-        log.info(f"Direction mode: {driver.direction_mode}")
+        log.info(f"Direction mode: {driver.steering_mode}")
         log.info(f"Security switch: {driver.security_switch_state}")
         log.info(f"Light state: {driver.light_state}")
         log.info(f"Winch state: {driver.winch_state}")

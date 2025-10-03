@@ -80,7 +80,7 @@ class MTTCommandTachometerSim:
             # [3] = winch
             # [4] = brake 
             # [5] = steer
-            # [6] = direction_mode
+            # [6] = steering_mode
             
             throttle_raw = data[2]  # 0-230 range
             switches = data[1]
