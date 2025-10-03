@@ -28,8 +28,7 @@ def generate_launch_description():
     # Without this, the world sdf file has trouble finding gz_ros2_control
     os.environ["GZ_SIM_SYSTEM_PLUGIN_PATH"] = os.environ.get("GZ_SIM_SYSTEM_PLUGIN_PATH", "") + ":/opt/ros/jazzy/lib"
     
-    sim_dir = get_package_share_directory('nav2_minimal_tb3_sim')
-
+    nav2_bringup_dir = get_package_share_directory('nav2_bringup')
     mtt_description_dir = get_package_share_directory('mtt_description')
     mtt_bringup_dir = get_package_share_directory('mtt_bringup')
     mtt_bringup_launch_dir = os.path.join(mtt_bringup_dir, 'launch')
@@ -174,30 +173,16 @@ def generate_launch_description():
     )
 
     # tip:  mtt sdf: gz sdf -p robot.urdf.xacro > robot.sdf
-    if mode == "mtt":
-        declare_robot_sdf_cmd = DeclareLaunchArgument(
-            'robot_sdf',
-            default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
+    declare_robot_sdf_cmd = DeclareLaunchArgument(
+        'robot_sdf',
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
 
-            description='Full path to robot sdf file to spawn the robot in gazebo',
-        )
-    else:
-        declare_robot_sdf_cmd = DeclareLaunchArgument(
-            'robot_sdf',
-            default_value=os.path.join(sim_dir, 'urdf', 'gz_waffle.sdf.xacro'),
-            description='Full path to robot sdf file to spawn the robot in gazebo',
-        )
+        description='Full path to robot sdf file to spawn the robot in gazebo',
+    )
 
-    
-    if mode == "mtt":
-        urdf = os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro')
+    urdf = os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro')
 
-        robot_description = xacro.process_file(urdf).toxml()
-
-    else:
-        urdf = os.path.join(sim_dir, 'urdf', 'turtlebot3_waffle.urdf')
-        with open(urdf, 'r') as infp:
-            robot_description = infp.read()
+    robot_description = xacro.process_file(urdf).toxml()
 
 
 
@@ -215,14 +200,13 @@ def generate_launch_description():
         ],
         remappings=remappings,
     )
-    if mode == "mtt":
-        # not necessary when used with the controller_manager joint_state_broadcaster (launched in mtt_controller)
-        joint_state_publisher_node = Node(
-            package='joint_state_publisher',
-            executable='joint_state_publisher',
-            name='joint_state_publisher',
-            output='screen'
-        )
+    # not necessary when used with the controller_manager joint_state_broadcaster (launched in mtt_controller)
+    joint_state_publisher_node = Node(
+        package='joint_state_publisher',
+        executable='joint_state_publisher',
+        name='joint_state_publisher',
+        output='screen'
+    )
 
     # RVIZ
     rviz_cmd = IncludeLaunchDescription(
@@ -248,18 +232,11 @@ def generate_launch_description():
         value=f'{model_path}:{os.environ.get("GZ_SIM_RESOURCE_PATH", "")}'
     )
     # TODO: change to a world used for the mtt
-    if mode == "mtt":
-        declare_world_cmd = DeclareLaunchArgument(
-            'world',
-            default_value=os.path.join(mtt_description_dir, 'worlds', 'test_world.sdf'),
-            description='Full path to world model file to load',
-        )
-    else:
-        declare_world_cmd = DeclareLaunchArgument(
-            'world',
-            default_value=os.path.join(sim_dir, 'worlds', 'tb3_sandbox.sdf.xacro'),
-            description='Full path to world model file to load',
-        )        
+    declare_world_cmd = DeclareLaunchArgument(
+        'world',
+        default_value=os.path.join(mtt_description_dir, 'worlds', 'test_world.sdf'),
+        description='Full path to world model file to load',
+    )      
     # The SDF file for the world is a xacro file because we wanted to
     # conditionally load the SceneBroadcaster plugin based on wheter we're
     # running in headless mode. But currently, the Gazebo command line doesn't
@@ -318,37 +295,20 @@ def generate_launch_description():
     
 
 
-    if mode == "mtt":
-        bringup_cmd = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(mtt_bringup_dir, 'launch', 'mtt_bringup.launch.py')),
-            launch_arguments={
-                'namespace': namespace,
-                'use_namespace': use_namespace,
-                'slam': slam,
-                'map': map_yaml_file,
-                'use_sim_time': use_sim_time,
-                'params_file': params_file,
-                'autostart': autostart,
-                'use_composition': use_composition,
-                'use_respawn': use_respawn,
-            }.items(),
-        )
-    else:
-        bringup_cmd = IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(os.path.join(launch_dir, 'bringup_launch.py')),
-            launch_arguments={
-                'namespace': namespace,
-                'use_namespace': use_namespace,
-                'slam': slam,
-                'map': map_yaml_file,
-                'use_sim_time': use_sim_time,
-                'params_file': params_file,
-                'autostart': autostart,
-                'use_composition': use_composition,
-                'use_respawn': use_respawn,
-            }.items(),
-        )
-    
+    bringup_cmd = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(mtt_bringup_dir, 'launch', 'mtt_bringup.launch.py')),
+        launch_arguments={
+            'namespace': namespace,
+            'use_namespace': use_namespace,
+            'slam': slam,
+            'map': map_yaml_file,
+            'use_sim_time': use_sim_time,
+            'params_file': params_file,
+            'autostart': autostart,
+            'use_composition': use_composition,
+            'use_respawn': use_respawn,
+        }.items(),
+    )    
 
     ld = LaunchDescription()
     ld.add_action(declare_log_level_cmd)
@@ -398,9 +358,7 @@ def generate_launch_description():
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)
-    if mode == "mtt":
-        # ld.add_action(joint_state_publisher_node)
-        pass
+    # ld.add_action(joint_state_publisher_node)
 
     ld.add_action(rviz_cmd)
     # temp zone
