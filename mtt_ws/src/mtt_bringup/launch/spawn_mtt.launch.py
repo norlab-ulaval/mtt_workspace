@@ -15,13 +15,10 @@ from launch_ros.actions import Node
 
 
 def generate_launch_description():
-    # mode = "turtle"
-    mode = "mtt"
 
-    mtt_description_dir = get_package_share_directory('mtt_description')
     bringup_dir = get_package_share_directory('nav2_minimal_tb3_sim')
 
-
+    mtt_description_dir = get_package_share_directory('mtt_description')
 
     namespace = LaunchConfiguration('namespace')
     robot_name = LaunchConfiguration('robot_name')
@@ -45,76 +42,53 @@ def generate_launch_description():
         description='name of the robot')
     
 
-    if mode == "mtt":
-        declare_robot_sdf_cmd = DeclareLaunchArgument(
-            'robot_sdf',
-            default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
-            description='Full path to robot sdf file to spawn the robot in gazebo')
-    else:
-        declare_robot_sdf_cmd = DeclareLaunchArgument(
-            'robot_sdf',
-            default_value=os.path.join(bringup_dir, 'urdf', 'gz_waffle.sdf.xacro'),
-            description='Full path to robot sdf file to spawn the robot in gazebo')
+    declare_robot_sdf_cmd = DeclareLaunchArgument(
+        'robot_sdf',
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
+        description='Full path to robot sdf file to spawn the robot in gazebo')
   
-    if mode == "mtt":
-        bridge = Node(
-            package='ros_gz_bridge',
-            executable='parameter_bridge',
-            namespace=namespace,
-            parameters=[
-                {
-                    'expand_gz_topic_names': True,
-                    'use_sim_time': True,
-                }
-            ],
-            arguments=[
-                '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
-                # Lidar Scan
-                '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-                '/model/mtt_robot/pose@geometry_msgs/msg/Pose[gz.msgs.Pose',
-
-                # ROS remappings
-                '--ros-args', '-r',
-                '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan:=/gz_scan',
-                '-r', '/model/mtt_robot/pose:=/gz_pose',
-
-                # # If only one remap this form works:
-                # '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
-                # '--ros-args', '-r',
-                # '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan:=/gz_scan',
-            ],
-            output='screen',
-        )
-
-        remapper_node = Node(
-            package='mtt_bringup',
-            executable='scan_frame_remapper.py',
-            name='scan_frame_remapper',
-            output='screen')
-        
-        odom_publisher_node = Node(
-            package='mtt_bringup',
-            executable='odom_publisher_simul.py',
-            name='odom_publisher_simul',
-            output='screen')
-
-    else:
-        bridge = Node(
+    bridge = Node(
         package='ros_gz_bridge',
         executable='parameter_bridge',
         namespace=namespace,
         parameters=[
             {
-                'config_file': os.path.join(
-                    bringup_dir, 'configs', 'turtlebot3_waffle_bridge.yaml'
-                ),
                 'expand_gz_topic_names': True,
                 'use_sim_time': True,
             }
         ],
+        arguments=[
+            '/clock@rosgraph_msgs/msg/Clock[gz.msgs.Clock',
+            # Lidar Scan
+            '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            '/model/mtt_robot/pose@geometry_msgs/msg/Pose[gz.msgs.Pose',
+
+            # ROS remappings
+            '--ros-args', '-r',
+            '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan:=/gz_scan',
+            '-r', '/model/mtt_robot/pose:=/gz_pose',
+
+            # # If only one remap this form works:
+            # '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan@sensor_msgs/msg/LaserScan[gz.msgs.LaserScan',
+            # '--ros-args', '-r',
+            # '/world/default/model/mtt_robot/link/base_footprint/sensor/lidar/scan:=/gz_scan',
+        ],
         output='screen',
     )
 
+    remapper_node = Node(
+        package='mtt_bringup',
+        executable='scan_frame_remapper.py',
+        name='scan_frame_remapper',
+        output='screen')
+    
+    odom_publisher_node = Node(
+        package='mtt_bringup',
+        executable='odom_publisher_simul.py',
+        name='odom_publisher_simul',
+        output='screen')
+
+    
     spawn_model = Node(
         package='ros_gz_sim',
         executable='create',
@@ -147,9 +121,8 @@ def generate_launch_description():
     ld.add_action(bridge)
     ld.add_action(spawn_model)
 
-    if mode == "mtt":
-        ld.add_action(remapper_node)
-        ld.add_action(odom_publisher_node)
+    ld.add_action(remapper_node)
+    ld.add_action(odom_publisher_node)
 
         
     return ld
