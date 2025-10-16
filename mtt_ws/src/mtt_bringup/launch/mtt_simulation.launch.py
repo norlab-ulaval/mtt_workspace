@@ -175,7 +175,9 @@ def generate_launch_description():
     # tip:  mtt sdf: gz sdf -p robot.urdf.xacro > robot.sdf
     declare_robot_sdf_cmd = DeclareLaunchArgument(
         'robot_sdf',
-        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.sdf'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.sdf'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
 
         description='Full path to robot sdf file to spawn the robot in gazebo',
     )
@@ -358,12 +360,13 @@ def generate_launch_description():
 
     # Add the actions to launch all of the navigation nodes
     ld.add_action(start_robot_state_publisher_cmd)
-    # ld.add_action(joint_state_publisher_node)
 
-    ld.add_action(rviz_cmd)
-    # temp zone
+    # no longer necessary
+    # ld.add_action(joint_state_publisher_node)
+    # ld.add_action(rviz_cmd)
+
+
     ld.add_action(bringup_cmd)
-    # 
 
     return ld
     

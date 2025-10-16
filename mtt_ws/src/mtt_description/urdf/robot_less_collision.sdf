@@ -1,0 +1,1595 @@
+<sdf version='1.11'>
+  <model name='onshape'>
+    <link name='base_footprint'>
+      <inertial>
+        <pose>-0.077895993849594752 -0.045484125368850339 0.10209758651035911 0 0 0</pose>
+        <mass>150.40000000000001</mass>
+        <inertia>
+          <ixx>11.215394955136221</ixx>
+          <ixy>-0.00037648771659326558</ixy>
+          <ixz>-0.001437969101735215</ixz>
+          <iyy>58.512314565353648</iyy>
+          <iyz>-0.0018269934809705961</iyz>
+          <izz>63.756945860482027</izz>
+        </inertia>
+      </inertial>
+      <visual name='base_footprint_fixed_joint_lump__base_link_visual'>
+        <pose>-0.0034808381178577409 -0.051022168970358453 0.39330103716210751 0 0 3.1415926535897931</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/m500_ra-02_r02.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Orange</name>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+          </script>
+          <diffuse>1 0.892156899 0.00490196096 1</diffuse>
+          <ambient>1 0.892156899 0.00490196096 1</ambient>
+        </material>
+      </visual>
+      <visual name='base_footprint_fixed_joint_lump__lidar_link_visual_1'>
+        <pose>0 0 0.70000000000000007 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.050000000000000003</length>
+            <radius>0.02</radius>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0 1 0 1</diffuse>
+          <ambient>0 1 0 1</ambient>
+        </material>
+      </visual>
+      <visual name='base_footprint_fixed_joint_lump__reference_point_visual_2'>
+        <pose>-0.71748083811785779 0.21597831029643161 0.42330103716210749 0 0 0</pose>
+        <geometry>
+          <sphere>
+            <radius>0.0050000000000000001</radius>
+          </sphere>
+        </geometry>
+        <material>
+          <diffuse>1 0 0 1</diffuse>
+          <ambient>1 0 0 1</ambient>
+        </material>
+      </visual>
+      <visual name='base_footprint_fixed_joint_lump__center_lidar_link_visual_3'>
+        <pose>-0.097480838117857793 -0.050021689703568462 0.77830103716210752 0 0 1.5707963267948959</pose>
+        <geometry>
+          <cylinder>
+            <length>0.10000000000000001</length>
+            <radius>0.050000000000000003</radius>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0.25 0.25 0.25 1</diffuse>
+          <ambient>0.25 0.25 0.25 1</ambient>
+        </material>
+      </visual>
+      <visual name='base_footprint_fixed_joint_lump__front_lidar_link_visual_4'>
+        <pose>0.5225191618821422 -0.050021689703568462 0.75350103716210748 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.10000000000000001</length>
+            <radius>0.050000000000000003</radius>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0.25 0.25 0.25 1</diffuse>
+          <ambient>0.25 0.25 0.25 1</ambient>
+        </material>
+      </visual>
+      <visual name='base_footprint_fixed_joint_lump__rear_lidar_link_visual_5'>
+        <pose>-0.70748083811785778 -0.050021689703568462 0.75350103716210748 0 0 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.10000000000000001</length>
+            <radius>0.050000000000000003</radius>
+          </cylinder>
+        </geometry>
+        <material>
+          <diffuse>0.25 0.25 0.25 1</diffuse>
+          <ambient>0.25 0.25 0.25 1</ambient>
+        </material>
+      </visual>
+      <sensor name='center_lidar' type='gpu_lidar'>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1400000000000001</min_angle>
+              <max_angle>3.1400000000000001</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.10000000000000001</min>
+            <max>30</max>
+          </range>
+        </ray>
+        <pose>-0.097480800000000006 -0.050021700000000002 0.77830100000000002 0 0 1.5708</pose>
+      </sensor>
+      <sensor name='front_lidar' type='gpu_lidar'>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1400000000000001</min_angle>
+              <max_angle>3.1400000000000001</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.10000000000000001</min>
+            <max>30</max>
+          </range>
+        </ray>
+        <pose>0.52251899999999996 -0.050021700000000002 0.75350099999999998 0 0 0</pose>
+      </sensor>
+      <sensor name='rear_lidar' type='gpu_lidar'>
+        <update_rate>10</update_rate>
+        <ray>
+          <scan>
+            <horizontal>
+              <samples>360</samples>
+              <resolution>1</resolution>
+              <min_angle>-3.1400000000000001</min_angle>
+              <max_angle>3.1400000000000001</max_angle>
+            </horizontal>
+          </scan>
+          <range>
+            <min>0.10000000000000001</min>
+            <max>30</max>
+          </range>
+        </ray>
+        <pose>-0.70748100000000003 -0.050021700000000002 0.75350099999999998 0 0 0</pose>
+      </sensor>
+    </link>
+    <joint name='10_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.042674791204848093 -0.30260966897135838 0.037205332913699402 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_10</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_10'>
+      <pose relative_to='10_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0830111450047394e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_10_visual'>
+        <pose>-2.775557561562891e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='11_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.1298179530678156 -0.30260966897135838 0.03721535346950286 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_11</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_11'>
+      <pose relative_to='11_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0830111450047394e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_11_visual'>
+        <pose>-2.775557561562891e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='12_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.21696111493078299 -0.30260966897135833 0.037225374025305319 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_12</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_12'>
+      <pose relative_to='12_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_12_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='13_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.30410427679375029 -0.30260966897135821 0.037235394581107778 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_13</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_13'>
+      <pose relative_to='13_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_13_visual'>
+        <pose>0 0 -0.2619375000000001 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='14_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.39124743865671768 -0.30260966897135821 0.037245415136910293 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_14</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_14'>
+      <pose relative_to='14_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0830111450047394e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_14_visual'>
+        <pose>-2.775557561562891e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='15_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.47839060051968407 -0.30260966897135821 0.037255435692712703 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_15</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_15'>
+      <pose relative_to='15_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0830111450047394e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_15_visual'>
+        <pose>-2.775557561562891e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='16_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.56553376238265152 -0.30260966897135799 0.037265456248515211 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_16</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_16'>
+      <pose relative_to='16_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_16_visual'>
+        <pose>5.5511151231257827e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='17_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.65267692424561885 -0.30260966897135799 0.037275476804317607 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_17</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_17'>
+      <pose relative_to='17_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_17_visual'>
+        <pose>5.5511151231257827e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='18_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.73982008610858641 -0.30260966897135788 0.037285497360120129 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_18</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_18'>
+      <pose relative_to='18_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_18_visual'>
+        <pose>5.5511151231257827e-17 0 -0.2619375000000001 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='19_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.825954608947019 -0.30260966897135783 0.046666820730430297 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_19</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_19'>
+      <pose relative_to='19_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_19_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='1_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.70146757632194523 -0.30260966897135899 0.19942602155526379 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_1</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_1'>
+      <pose relative_to='1_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_1_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -7.7037197775474107e-33 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='20_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>-0.91110403062049183 -0.30260966897135783 0.065200755783730163 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_20</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_20'>
+      <pose relative_to='20_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227480313910583e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <collision name='Rouleau_track_20_collision'>
+        <pose>0 -1.387778780781446e-17 -0.26193749999999999 0 1.0785207688568649e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.5</length>
+            <radius>0.13350000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='Rouleau_track_20_visual'>
+        <pose>0 -1.387778780781446e-17 -0.26193749999999999 -1.5707963267948959 1.0785207688568649e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='2_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.63021293776953013 -0.30260966897135899 0.14925922731169389 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_2</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_2'>
+      <pose relative_to='2_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_2_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -7.7037197775474107e-33 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='3_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.55767703136521962 -0.30260966897135888 0.1017105382069472 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_3</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_3'>
+      <pose relative_to='3_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_3_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='4_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.4743441239043048 -0.30260966897135888 0.07622412429685807 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_4</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_4'>
+      <pose relative_to='4_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_4_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='5_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.39101121644338022 -0.30260966897135883 0.050737710386768858 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_5</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_5'>
+      <pose relative_to='5_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <collision name='Rouleau_track_5_collision'>
+        <pose>0 0 -0.26193749999999999 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.5</length>
+            <radius>0.13350000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='Rouleau_track_5_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='6_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.30589785624702448 -0.30260966897135871 0.037165250690489572 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_6</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_6'>
+      <pose relative_to='6_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829833894291238e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_6_visual'>
+        <pose>0 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='7_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.2187546943840542 -0.30260966897135871 0.037175271246291969 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_7</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_7'>
+      <pose relative_to='7_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_7_visual'>
+        <pose>5.5511151231257827e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='8_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.13161153252108559 -0.30260966897135871 0.037185291802094483 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_8</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_8'>
+      <pose relative_to='8_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_8_visual'>
+        <pose>5.5511151231257827e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='9_continuous' type='revolute'>
+      <pose relative_to='base_footprint'>0.044468370658119268 -0.30260966897135849 0.037195312357896942 1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Rouleau_track_9</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Rouleau_track_9'>
+      <pose relative_to='9_continuous'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-9.0829278782778925e-12 -8.2227341536032505e-12 -0.26193750000873389 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.025399999999999999</ixx>
+          <ixy>0</ixy>
+          <ixz>0</ixz>
+          <iyy>0.025399999999999999</iyy>
+          <iyz>0</iyz>
+          <izz>0.0088900000000000003</izz>
+        </inertia>
+      </inertial>
+      <visual name='Rouleau_track_9_visual'>
+        <pose>5.5511151231257827e-17 0 -0.26193749999999999 -1.5707963267948959 -2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/rouleaufaketrack_525po.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='pitch' type='revolute'>
+      <pose relative_to='base_footprint'>-1.051187837601858 0.2125028310306423 0.25775105114691788 -1.5707963267948959 0 -7.563394355258877e-16</pose>
+      <parent>base_footprint</parent>
+      <child>Frame_fixation_articule</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.570796326794897</lower>
+          <upper>1.570796326794897</upper>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Frame_fixation_articule'>
+      <pose relative_to='pitch'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-3.9892756405493079e-11 -1.1475286443859221e-10 -0.26817516801928171 0 0 0</pose>
+        <mass>4.2856980941026048</mass>
+        <inertia>
+          <ixx>0.15081833822080551</ixx>
+          <ixy>-3.1493952847483553e-14</ixy>
+          <ixz>-2.729130143354647e-09</ixz>
+          <iyy>0.14291517499876991</iyy>
+          <iyz>4.1782617806359028e-10</iyz>
+          <izz>0.008772976040851534</izz>
+        </inertia>
+      </inertial>
+      <visual name='Frame_fixation_articule_visual'>
+        <pose>0 0 -0.26352500000103002 1.5707963267948959 2.9274135154685974e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/m500_fa-f-01_r00.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Blue</name>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+          </script>
+          <diffuse>1 0.892156899 0.00490196096 1</diffuse>
+          <ambient>1 0.892156899 0.00490196096 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='yaw' type='revolute'>
+      <pose relative_to='Frame_fixation_articule'>3.9990233346998139e-13 0.057149999999500017 -0.26352500000202989 -1.5707963267948959 2.9274135154685974e-32 0</pose>
+      <parent>Frame_fixation_articule</parent>
+      <child>joint_remorque_simple</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.0471975511965981</lower>
+          <upper>1.0471975511965981</upper>
+          <effort>1000000000</effort>
+          <velocity>20</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='joint_remorque_simple'>
+      <pose relative_to='yaw'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-0.06664907839728397 -1.326404872336092e-08 -0.05714999999985157 0 0 0</pose>
+        <mass>2.4244944218593218</mass>
+        <inertia>
+          <ixx>0.0045362397987309356</ixx>
+          <ixy>2.7180197249639031e-09</ixy>
+          <ixz>2.2800525023181051e-41</ixz>
+          <iyy>0.0080855686635830839</iyy>
+          <iyz>-9.2489917741012919e-10</iyz>
+          <izz>0.0077799714228289117</izz>
+        </inertia>
+      </inertial>
+      <visual name='joint_remorque_simple_visual'>
+        <pose>0 0 -0.114299999999703 3.1415926535897931 1.094764425253763e-47 2.4651903288156619e-32</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/joint_remorque_simple.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Black</name>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+          </script>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='roll' type='revolute'>
+      <pose relative_to='joint_remorque_simple'>0 -1.110223024625157e-16 -0.057149999999851597 -1.5707963267948959 -5.5511151231257827e-17 -1.5707963267948959</pose>
+      <parent>joint_remorque_simple</parent>
+      <child>MTT_remorque</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-1.570796326794897</lower>
+          <upper>1.570796326794897</upper>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='MTT_remorque'>
+      <pose relative_to='roll'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-1.3754218481959809e-07 0.003423650117086926 -1.2492342427482761 0 0 0</pose>
+        <mass>75</mass>
+        <inertia>
+          <ixx>19.609999999999999</ixx>
+          <ixy>1.9694375352015791e-06</ixy>
+          <ixz>3.4143802835478519e-05</ixz>
+          <iyy>22.119</iyy>
+          <iyz>0.089480447349249051</iyz>
+          <izz>4.3689999999999998</izz>
+        </inertia>
+      </inertial>
+      <visual name='MTT_remorque_visual'>
+        <pose>0 0 0 -1.5707963267948959 -2.9274135154686073e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorquegrise_corps.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <script>
+            <name>Gazebo/Orange</name>
+            <uri>file://media/materials/scripts/gazebo.material</uri>
+          </script>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='Remorque_lien_roue_droite_joint' type='revolute'>
+      <pose relative_to='MTT_remorque'>-0.27939999999999998 -0.13792199999999999 -1.27 0 -1.5707963267948966 0</pose>
+      <parent>MTT_remorque</parent>
+      <child>Remorque_lien_roue_droite</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-0.52359877559829882</lower>
+          <upper>0.52359877559829882</upper>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Remorque_lien_roue_droite'>
+      <pose relative_to='Remorque_lien_roue_droite_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-2.2204460492503131e-16 -1.7347234759768071e-18 -0.011962764931897961 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.001548161430997771</ixx>
+          <ixy>0</ixy>
+          <ixz>-3.3987014700653987e-33</ixz>
+          <iyy>0.11698078969574199</iyy>
+          <iyz>0</iyz>
+          <izz>0.1176472862080913</izz>
+        </inertia>
+      </inertial>
+      <visual name='Remorque_lien_roue_droite_visual'>
+        <pose>-0.46990000000101517 -0.0144779999670738 -0.02540000000000003 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorquebarrelienroues.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='backright_wheel' type='revolute'>
+      <pose relative_to='Remorque_lien_roue_droite'>-0.24130000000000029 0 0.050799999999999852 0 -2.9274135154685979e-32 0</pose>
+      <parent>Remorque_lien_roue_droite</parent>
+      <child>remorque_roue_BR</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='remorque_roue_BR'>
+      <pose relative_to='backright_wheel'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-5.5159452104843918e-18 -3.3329708142992709e-16 -0.01270000000000001 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.0149</ixx>
+          <ixy>0</ixy>
+          <ixz>-1.374351346663825e-32</ixz>
+          <iyy>0.0149</iyy>
+          <iyz>0</iyz>
+          <izz>0.029595</izz>
+        </inertia>
+      </inertial>
+      <collision name='remorque_roue_BR_collision'>
+        <pose>0 -3.3306690738754701e-16 0 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.12</length>
+            <radius>0.20000000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='remorque_roue_BR_visual'>
+        <pose>0 -3.3306690738754701e-16 0 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorqueroue.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='frontright_wheel' type='revolute'>
+      <pose relative_to='Remorque_lien_roue_droite'>0.24129999999999979 -1.110223024625157e-16 0.050799999999999963 0 -2.9274135154685979e-32 0</pose>
+      <parent>Remorque_lien_roue_droite</parent>
+      <child>remorque_roue_FR</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='remorque_roue_FR'>
+      <pose relative_to='frontright_wheel'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-5.5159452104843918e-18 -3.3329708142992709e-16 -0.012699999999999949 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.0149</ixx>
+          <ixy>0</ixy>
+          <ixz>-1.374351346663825e-32</ixz>
+          <iyy>0.0149</iyy>
+          <iyz>0</iyz>
+          <izz>0.029595</izz>
+        </inertia>
+      </inertial>
+      <collision name='remorque_roue_FR_collision'>
+        <pose>0 -3.3306690738754701e-16 5.5511151231257827e-17 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.12</length>
+            <radius>0.20000000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='remorque_roue_FR_visual'>
+        <pose>0 -3.3306690738754701e-16 5.5511151231257827e-17 0 -2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorqueroue.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='Remorque_lien_roue_gauche_joint' type='revolute'>
+      <pose relative_to='MTT_remorque'>0.27939999999999998 -0.13792199999999999 -1.27 -3.1415926535897931 -1.5707963267948966 0</pose>
+      <parent>MTT_remorque</parent>
+      <child>Remorque_lien_roue_gauche</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <lower>-0.52359877559829882</lower>
+          <upper>0.52359877559829882</upper>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='Remorque_lien_roue_gauche'>
+      <pose relative_to='Remorque_lien_roue_gauche_joint'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-2.2204460492503131e-16 -1.7347234759768071e-18 -0.011962764931897929 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.001548161430997771</ixx>
+          <ixy>0</ixy>
+          <ixz>3.3987014700653987e-33</ixz>
+          <iyy>0.11698078969574199</iyy>
+          <iyz>0</iyz>
+          <izz>0.1176472862080913</izz>
+        </inertia>
+      </inertial>
+      <visual name='Remorque_lien_roue_gauche_visual'>
+        <pose>-0.46990000000101517 -0.0144779999670738 -0.025400000000000009 0 2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorquebarrelienroues.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='backleft_wheel' type='revolute'>
+      <pose relative_to='Remorque_lien_roue_gauche'>-0.24129999999999979 0 0.050799999999999977 0 2.9274135154685979e-32 0</pose>
+      <parent>Remorque_lien_roue_gauche</parent>
+      <child>remorque_roue_BL</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='remorque_roue_BL'>
+      <pose relative_to='backleft_wheel'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-5.5159452104843918e-18 -3.3329708142992709e-16 -0.01270000000000001 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.0149</ixx>
+          <ixy>0</ixy>
+          <ixz>1.374351346663825e-32</ixz>
+          <iyy>0.0149</iyy>
+          <iyz>0</iyz>
+          <izz>0.029595</izz>
+        </inertia>
+      </inertial>
+      <collision name='remorque_roue_BL_collision'>
+        <pose>0 -3.3306690738754701e-16 0 0 2.9274135154685979e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.12</length>
+            <radius>0.20000000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='remorque_roue_BL_visual'>
+        <pose>0 -3.3306690738754701e-16 0 0 2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorqueroue.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <joint name='frontleft_wheel' type='revolute'>
+      <pose relative_to='Remorque_lien_roue_gauche'>0.24129999999999979 0 0.05080000000000004 0 2.9274135154685979e-32 0</pose>
+      <parent>Remorque_lien_roue_gauche</parent>
+      <child>remorque_roue_FL</child>
+      <axis>
+        <xyz>0 0 1</xyz>
+        <limit>
+          <effort>-1</effort>
+          <velocity>20</velocity>
+          <lower>-inf</lower>
+          <upper>inf</upper>
+        </limit>
+        <dynamics>
+          <spring_reference>0</spring_reference>
+          <spring_stiffness>0</spring_stiffness>
+        </dynamics>
+      </axis>
+    </joint>
+    <link name='remorque_roue_FL'>
+      <pose relative_to='frontleft_wheel'>0 0 0 0 0 0</pose>
+      <inertial>
+        <pose>-5.5159452104843918e-18 -3.3329708142992709e-16 -0.01270000000000001 0 0 0</pose>
+        <mass>1</mass>
+        <inertia>
+          <ixx>0.0149</ixx>
+          <ixy>0</ixy>
+          <ixz>1.374351346663825e-32</ixz>
+          <iyy>0.0149</iyy>
+          <iyz>0</iyz>
+          <izz>0.029595</izz>
+        </inertia>
+      </inertial>
+      <collision name='remorque_roue_FL_collision'>
+        <pose>0 -3.3306690738754701e-16 0 0 2.9274135154685979e-32 0</pose>
+        <geometry>
+          <cylinder>
+            <length>0.12</length>
+            <radius>0.20000000000000001</radius>
+          </cylinder>
+        </geometry>
+      </collision>
+      <visual name='remorque_roue_FL_visual'>
+        <pose>0 -3.3306690738754701e-16 0 0 2.9274135154685979e-32 0</pose>
+        <geometry>
+          <mesh>
+            <scale>1 1 1</scale>
+            <uri>file:///home/ws/mtt_ws/install/mtt_description/share/mtt_description/meshes/visual/remorqueroue.stl</uri>
+          </mesh>
+        </geometry>
+        <material>
+          <diffuse>0.632352948 0.666666687 0.686274529 1</diffuse>
+          <ambient>0.632352948 0.666666687 0.686274529 1</ambient>
+        </material>
+      </visual>
+    </link>
+    <plugin name='gz_ros2_control::GazeboSimROS2ControlPlugin' filename='gz_ros2_control-system'>
+      <parameters>/home/ws/mtt_ws/install/mtt_bringup/share/mtt_bringup/config/control_config.yaml</parameters>
+    </plugin>
+    <plugin name='gz::sim::systems::PosePublisher' filename='gz-sim-pose-publisher-system'>
+      <publish_model_pose>true</publish_model_pose>
+    </plugin>
+    <frame name='lidar_joint' attached_to='base_link'>
+      <pose>0 0 0.80000000000000004 0 0 0</pose>
+    </frame>
+    <frame name='lidar_link' attached_to='lidar_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='center_lidar_joint' attached_to='reference_point'>
+      <pose>0.62 -0.26600000000000001 0.35499999999999998 0 0 1.5707963267948959</pose>
+    </frame>
+    <frame name='center_lidar_link' attached_to='center_lidar_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='front_lidar_joint' attached_to='reference_point'>
+      <pose>1.24 -0.26600000000000001 0.33019999999999999 0 0 0</pose>
+    </frame>
+    <frame name='front_lidar_link' attached_to='front_lidar_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='rear_lidar_joint' attached_to='reference_point'>
+      <pose>0.01 -0.26600000000000001 0.33019999999999999 0 0 0</pose>
+    </frame>
+    <frame name='rear_lidar_link' attached_to='rear_lidar_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='reference_point_joint' attached_to='base_link'>
+      <pose>-0.71748083811785779 0.21597831029643161 0.52330103716210752 0 0 0</pose>
+    </frame>
+    <frame name='reference_point' attached_to='reference_point_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+    <frame name='base_joint' attached_to='base_footprint'>
+      <pose>0 0 -0.10000000000000001 0 0 0</pose>
+    </frame>
+    <frame name='base_link' attached_to='base_joint'>
+      <pose>0 0 0 0 0 0</pose>
+    </frame>
+  </model>
+</sdf>

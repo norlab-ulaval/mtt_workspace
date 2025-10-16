@@ -26,6 +26,9 @@ def generate_launch_description():
     mtt_bringup_dir = get_package_share_directory('mtt_bringup')
     mtt_bringup_launch_dir = os.path.join(mtt_bringup_dir, 'launch')
 
+    mtt_driver_dir = get_package_share_directory('mtt_driver')
+    mtt_driver_launch_dir = os.path.join(mtt_driver_dir, 'launch/production')
+
     # Create the launch configuration variables
     namespace = LaunchConfiguration('namespace')
     use_namespace = LaunchConfiguration('use_namespace')
@@ -204,6 +207,13 @@ def generate_launch_description():
         }.items(),
     )
 
+    mtt_driver = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(mtt_driver_launch_dir, 'mtt_composable_system.launch.py')),
+        # PythonLaunchDescriptionSource(os.path.join(mtt_driver_launch_dir, 'mtt_driver_simulation.launch.py'))
+        launch_arguments={
+            'can_interface': "vcan0",
+        }.items(),
+    )
     # Create the launch description and populate
     ld = LaunchDescription()
 
@@ -224,8 +234,9 @@ def generate_launch_description():
     ld.add_action(declare_use_localization_cmd)
 
     # Add the actions to launch all of the navigation nodes
-    ld.add_action(bringup_cmd_group)
+    # ld.add_action(bringup_cmd_group)
 
     ld.add_action(mtt_controller)
+    ld.add_action(mtt_driver)
 
     return ld

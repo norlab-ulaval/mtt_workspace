@@ -26,6 +26,7 @@ setup(
     entry_points={
         'console_scripts': [
             'mtt_driver = mtt_driver.mtt_driver:main',
+            'mtt_vehicle_params = mtt_driver.vehicle_params:main',
             'mtt_ros_wrapper = mtt_driver.mtt_ros_wrapper:main',
             'mtt_teleop_joy = mtt_driver.mtt_teleop_joy:main',
             'mtt_test_node = mtt_driver.mtt_test_node:main',

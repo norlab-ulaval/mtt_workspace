@@ -11,8 +11,6 @@ import os
 import xacro
 
 def generate_launch_description():
-    mode = "mtt"
-
     rvizRelativePath = "config/config.rviz"
 
     # absolute package path
@@ -23,12 +21,8 @@ def generate_launch_description():
     description_path = launch_ros.substitutions.FindPackageShare(package=mtt_description_package).find(mtt_description_package)
 
     # absolute Xacro model path
-    if mode == "mtt":
-        xacroModelPath = os.path.join(description_path, 'urdf', 'robot.urdf.xacro')
-        ros2controlRelativePath = 'config/control_config.yaml'
-    else:
-        xacroModelPath = os.path.join(pkgPath, 'tutorial', 'model.xacro')
-        ros2controlRelativePath = 'config/robot_controller.yaml'
+    xacroModelPath = os.path.join(description_path, 'urdf', 'robot.urdf.xacro')
+    ros2controlRelativePath = 'config/control_config.yaml'
 
 
     # absolute rviz config file path
@@ -126,37 +120,26 @@ def generate_launch_description():
         arguments=["joint_state_broadcaster"],
     )
 
+    robot_controller_spawner = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["wheel_group_controller", "--param-file", ros2controlPath],
+        output="screen"
+    )
 
+    yaw_controller_spawner = launch_ros.actions.Node(
+        package="controller_manager",
+        executable="spawner",
+        arguments=["yaw_controller", "--param-file", ros2controlPath],
+        output="screen"
+    )
 
-    if mode == "mtt":
-        robot_controller_spawner = launch_ros.actions.Node(
-            package="controller_manager",
-            executable="spawner",
-            arguments=["wheel_group_controller", "--param-file", ros2controlPath],
-            output="screen"
-        )
-
-        yaw_controller_spawner = launch_ros.actions.Node(
-            package="controller_manager",
-            executable="spawner",
-            arguments=["yaw_controller", "--param-file", ros2controlPath],
-            output="screen"
-        )
-
-        mtt_controller_interface = launch_ros.actions.Node(
-            package='mtt_bringup',
-            executable='mtt_controller_interface.py',
-            name='mtt_controller_interface',
-            output='screen'
-        )
-
-    else:
-        # forward position controller
-        robot_controller_spawner = launch_ros.actions.Node(
-            package="controller_manager",
-            executable="spawner",
-            arguments=["forward_position_controller", "--param-file", ros2controlPath],
-        )
+    mtt_controller_interface = launch_ros.actions.Node(
+        package='mtt_bringup',
+        executable='mtt_controller_interface.py',
+        name='mtt_controller_interface',
+        output='screen'
+    )
 
     
     ld = launch.LaunchDescription()
@@ -174,8 +157,7 @@ def generate_launch_description():
     # ld.add_action(rviz_node)
     # ld.add_action(control_node)
     ld.add_action(robot_controller_spawner)
-    if mode == "mtt":
-        ld.add_action(mtt_controller_interface)
-        ld.add_action(yaw_controller_spawner)
+    ld.add_action(mtt_controller_interface)
+    ld.add_action(yaw_controller_spawner)
     
     return ld

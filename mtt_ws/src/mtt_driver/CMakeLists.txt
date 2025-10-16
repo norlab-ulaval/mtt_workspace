@@ -19,6 +19,7 @@ install(TARGETS
 
 install(PROGRAMS
   ${PROJECT_NAME}/mtt_driver.py
+  ${PROJECT_NAME}/mtt_vehicle_params.py
   DESTINATION lib/${PROJECT_NAME})
 
 ament_package()

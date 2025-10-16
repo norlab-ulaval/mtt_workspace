@@ -3,6 +3,7 @@ import rclpy
 from rclpy.node import Node
 from geometry_msgs.msg import Twist
 from std_msgs.msg import Float64MultiArray
+from mtt_driver.mtt_vehicle_params import get_mtt_params
 
 class MttControllerInterface(Node):
 
@@ -12,14 +13,16 @@ class MttControllerInterface(Node):
         self.yaw_publisher = self.create_publisher(Float64MultiArray, '/yaw_controller/commands', 10)
 
         self.subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
-        # self.timer = self.create_timer(0.1, self.publish_message)  # Publish every second
+
+        self.mtt_params = get_mtt_params()
+        self.gear_ratio = self.mtt_params.mechanical_gear_ratio
 
 
     def cmd_vel_callback(self, cmd_vel_msg: Twist):
 
         # negative sign to have the right direction
         # *20 to make an array for each of the 20 wheels
-        wheel_speeds = [-cmd_vel_msg.linear.x] * 20
+        wheel_speeds = [-self.gear_ratio*cmd_vel_msg.linear.x] * 20
 
         wheel_cmd_msg = Float64MultiArray()
         wheel_cmd_msg.data = wheel_speeds

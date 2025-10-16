@@ -10,6 +10,11 @@ gz topic --echo --topic /world/default/model/mtt_robot/link/base_footprint/senso
 gz topic --list
 
 gz sdf -p robot.urdf.xacro > robot.sdf
+ros2 run xacro xacro robot_no_collision.urdf.xacro -o robot_no_collision.urdf
+ros2 run xacro xacro robot_less_collision.urdf.xacro -o robot_less_collision.urdf
+Then convert that URDF to SDF:
+gz sdf -p robot_no_collision.urdf > robot_no_collision.sdf
+gz sdf -p robot_less_collision.urdf > robot_less_collision.sdf
 
 ros2 control list_controllers
 

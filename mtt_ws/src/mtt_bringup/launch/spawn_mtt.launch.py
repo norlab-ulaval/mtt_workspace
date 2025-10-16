@@ -44,7 +44,9 @@ def generate_launch_description():
 
     declare_robot_sdf_cmd = DeclareLaunchArgument(
         'robot_sdf',
-        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.sdf'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.sdf'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
         description='Full path to robot sdf file to spawn the robot in gazebo')
   
     bridge = Node(
@@ -122,7 +124,7 @@ def generate_launch_description():
     ld.add_action(spawn_model)
 
     ld.add_action(remapper_node)
-    ld.add_action(odom_publisher_node)
+    # ld.add_action(odom_publisher_node)
 
         
     return ld
