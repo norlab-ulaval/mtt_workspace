@@ -170,7 +170,7 @@ class MTTTeleopJoy(Node):
             return
 
         if msg.buttons[5]:
-            if msg.buttons[0]:
+            if msg. [0]:
                     
 
 

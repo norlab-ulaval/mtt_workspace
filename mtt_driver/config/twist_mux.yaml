@@ -2,10 +2,10 @@ twist_mux:
   ros__parameters:
     use_stamped: false
     topics:
-      teleop_smoothed:
-        topic: cmd_vel/teleop_smoothed
+      controller:
+        topic: cmd_vel/controller
         timeout: 0.5
-        priority: 10
+        priority: 15
       teleop:
         topic: cmd_vel/teleop
         timeout: 0.5

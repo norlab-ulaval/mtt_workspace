@@ -168,30 +168,30 @@ def generate_launch_description():
         ),
 
 
-        # Node(
-        #     package='mtt_driver',
-        #     executable='mtt_odometry_manager',
-        #     name='mtt_odometry_manager',
-        #     arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
-        #     parameters=[{
-        #         'base_frame': LaunchConfiguration('base_frame'),
-        #         'odom_frame': LaunchConfiguration('odom_frame'),
-        #         # Odometry now listens to the final muxed cmd_vel topic
-        #         'cmd_vel_topic': 'cmd_vel',
-        #         # Toggle TF broadcasting via launch arg
-        #         'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
-        #         # Steering control and anti-drift tuning - using centralized vehicle parameters
-        #         'steer_control_mode': 'closed_loop',
-        #         # max_articulation_angle and max_yaw_rate now come from centralized vehicle parameters
-        #         'pivot_turn_enabled': False,
-        #         'min_turn_speed_ms': 0.05,
-        #         'yaw_slip_factor': 0.6,
-        #     }],
-        #     output='screen',
-        #     emulate_tty=True,
-        #     respawn=True,
-        #     respawn_delay=2.0
-        # ),
+        Node(
+            package='mtt_driver',
+            executable='mtt_odometry_manager',
+            name='mtt_odometry_manager',
+            arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
+            parameters=[{
+                'base_frame': LaunchConfiguration('base_frame'),
+                'odom_frame': LaunchConfiguration('odom_frame'),
+                # Odometry now listens to the final muxed cmd_vel topic
+                'cmd_vel_topic': 'cmd_vel',
+                # Toggle TF broadcasting via launch arg
+                'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
+                # Steering control and anti-drift tuning - using centralized vehicle parameters
+                'steer_control_mode': 'closed_loop',
+                # max_articulation_angle and max_yaw_rate now come from centralized vehicle parameters
+                'pivot_turn_enabled': False,
+                'min_turn_speed_ms': 0.05,
+                'yaw_slip_factor': 0.6,
+            }],
+            output='screen',
+            emulate_tty=True,
+            respawn=True,
+            respawn_delay=2.0
+        ),
 
         # 4.5) Twist Mux - Command multiplexer (replaces internal muxing)
         Node(

@@ -12,7 +12,7 @@ setup(
         ('share/ament_index/resource_index/packages',
             ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
-        (os.path.join('share', package_name, 'launch', 'production'), glob('launch/production/*.launch.py')),
+        (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'launch', 'development'), glob('launch/development/*.launch.py')),
         (os.path.join('share', package_name, 'launch', 'tests'), glob('launch/tests/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*')),

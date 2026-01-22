@@ -30,7 +30,6 @@ class MTTTeleopJoy(Node):
         self.create_subscription(Joy, "joy", self.joy_callback, 10)
         self.get_logger().info("MTT Teleop Node started.")
 
-        self.mapping_registry = self.load_mapping_registry()
 
         self.axis_map = {"linear_speed": None, "rotation_speed": None, "brake": None, "winch": None}
         self.button_map = {"deadman": None, "light_toggle": None, "winch_safety": None}
@@ -38,135 +37,52 @@ class MTTTeleopJoy(Node):
         self.light_state = False
         self.safety_state = False
 
-        self.is_initialized = False
-
-        self.joystick_name = self._get_joystick_name("/dev/input/js0")
-        self.get_logger().info(f"Initial joystick: {self.joystick_name}")
-        self.set_joystick_mapper(self.joystick_name)
-
-        # pyinotify setup
-        self.wm = pyinotify.WatchManager()
-        mask = pyinotify.IN_CREATE | pyinotify.IN_DELETE | pyinotify.IN_ATTRIB | pyinotify.IN_MOVED_TO | pyinotify.IN_MOVED_FROM
-
-        # Add watch to /dev/input
-        self.notifier = pyinotify.ThreadedNotifier(self.wm, self.event_handler)
-        self.wm.add_watch("/dev/input", mask)
-        self.notifier.start()
-
-        pkg_share = get_package_share_directory("mtt_driver")
-        config_dir = os.path.join(pkg_share, "config")
-        self.wm.add_watch(config_dir, mask, rec=False)
-
-    def _get_joystick_name(self, js_dev="/dev/input/js0"):
-
-        try:
-            with open(f"/sys/class/input/{js_dev.split('/')[-1]}/device/name") as f:
-                return f.read().strip()
-        except Exception as e:
-            self.get_logger().error(f"Could not read joystick name: {e}")
-            return "Unknown"
-        
-    def set_joystick_mapper(self, received_string):
-        for name, yaml_file in self.mapping_registry.items():
-            if name in received_string:
-                self.load_params_from_file(yaml_file)
-                return
-        self.get_logger().warn(f"No mapping found for joystick: {received_string}")
-
-    def load_mapping_registry(self):
-        pkg_share = get_package_share_directory("mtt_driver")
-        mapping_path = os.path.join(pkg_share, "config", "joystick_mappings.yaml")
-        try:
-            with open(mapping_path, 'r') as f:
-                data = yaml.safe_load(f)
-            return data.get("joystick_mappings", {})
-        except Exception as e:
-            self.get_logger().error(f"Failed to load joystick mapping registry: {e}")
-            return {}
-    
-    def load_params_from_file(self, yaml_file: str):
-        pkg_share = get_package_share_directory("mtt_driver")
-        yaml_path = os.path.join(pkg_share, "config", yaml_file)
-    
-        with open(yaml_path, 'r') as f:
-            data = yaml.safe_load(f)
-
-        self.get_logger().debug(f"Loaded parameters from {yaml_file}")
-
-        params = data["mtt_teleop_joy"]
-        self.axis_map["linear_speed"] = params["axis"]["linear_speed"]
-        self.axis_map["rotation_speed"] = params["axis"]["rotation_speed"]
-        self.axis_map["brake"] = params["axis"]["brake"]
-        self.axis_map["winch"] = params["axis"]["winch"]
-        
-        self.button_map["deadman"] = params["buttons"]["deadman"]
-        self.button_map["winch_safety"] = params["buttons"]["winch_safety"]
-        self.button_map["light_toggle"] = params["buttons"]["light_toggle"]
-
-        self.is_initialized = True
-
-    def _get_button(self, msg: Joy, name: str, default: bool = False):
-        """Return a button as bool; safe if mapping is missing or out of range."""
-        idx = self.button_map.get(name)
-        if idx is None:
-            return default
-        try:
-            return bool(msg.buttons[idx])
-        except (IndexError, TypeError):
-            return default
-
-    def _get_axis(self, msg: Joy, name: str, default: float = 0.0):
-        """Return an axis as float; safe if mapping is missing or out of range."""
-        idx = self.axis_map.get(name)
-        if idx is None:
-            return default
-        try:
-            return float(msg.axes[idx])
-        except (IndexError, TypeError, ValueError):
-            return default
-
-    def event_handler(self, event):
-        basename = os.path.basename(event.pathname)
-
-        # Check if the event concerns js0
-        if basename == "js0":
-            new_name = self._get_joystick_name()
-            if new_name != self.joystick_name:
-                self.is_initialized = False
-                self.get_logger().info(f"Joystick changed: {self.joystick_name} → {new_name}")
-                self.joystick_name = new_name
-                self.set_joystick_mapper(new_name)
-
     def joy_callback(self, msg: Joy):
+        
+        twist_msg = Twist()
+        aux_msg = MttAuxCommand()
+
 
         if msg.buttons[5]:
-            twist_msg = Twist()
-            twist_msg.linear.x = 0.3 + self._get_axis(msg, "linear_speed") * 0.3
-            twist_msg.angular.z = self._get_axis(msg, "rotation_speed")
-            self.cmd_vel_pub.publish(twist_msg)
 
-        aux_msg = MttAuxCommand()
-        aux_msg.brake = (-self._get_axis(msg, "brake") + 1 )/2
-        
-         
-        # Winch command from D-pad
-        dpad_val = self._get_axis(msg, "winch")
-        if dpad_val > 0.5:
-            aux_msg.winch_command = 1
-        elif dpad_val < -0.5:
-            aux_msg.winch_command = 2
-        else:
-            aux_msg.winch_command = 0
+            if msg.axes[4] < -0.05:
+                twist_msg.linear.x = - 0.3 + msg.axes[4] * 0.3
+            elif msg.axes[4] > 0.05:
+                twist_msg.linear.x = 0.3 + msg.axes[4] * 0.3
+            else:
+                twist_msg.linear.x = 0.0
+                
+            if msg.axes[3] < -0.05 or msg.axes[3] > 0.05:
+                twist_msg.angular.z = msg.axes[3]
+            else:
+                twist_msg.angular.z = 0.0
 
-        # Light toggle logic (rising edge detection)
-        light_btn = self._get_button(msg, "light_toggle")
-        if light_btn == 1 and self.prev_light_btn == 0:
-            self.light_state = not self.light_state
-        self.prev_light_btn = light_btn
+            aux_msg.brake = (-msg.axes[5] + 1 )/2
+            
+            
+            # Winch command from D-pad
+            # dpad_val = msg.axes[7]
+            # if dpad_val > 0.5:
+            #     aux_msg.winch_command = 1
+            # elif dpad_val < -0.5:
+            #     aux_msg.winch_command = 2
+            # else:
+            #     aux_msg.winch_command = 0
 
-        # Set light state if supported
-        aux_msg.light_state = self.light_state
+            # Light toggle logic (rising edge detection)
+            light_btn = msg.buttons[2]
+            if light_btn == 1 and self.prev_light_btn == 0:
+                self.light_state = not self.light_state
+            self.prev_light_btn = light_btn
 
+            # Set light state if supported
+            aux_msg.light_state = self.light_state
+
+        else: 
+            twist_msg.linear.x = 0.0
+            twist_msg.angular.z = 0.0
+
+        self.cmd_vel_pub.publish(twist_msg)
         self.aux_cmd_pub.publish(aux_msg)
 
 def main(args=None):
