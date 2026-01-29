@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from std_msgs.msg import Float64MultiArray
 from mtt_driver.mtt_vehicle_params import get_mtt_params
 
@@ -12,17 +12,17 @@ class MttControllerInterface(Node):
         self.wheel_publisher = self.create_publisher(Float64MultiArray, '/wheel_group_controller/commands', 10)
         self.yaw_publisher = self.create_publisher(Float64MultiArray, '/yaw_controller/commands', 10)
 
-        self.subscription = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
+        self.subscription = self.create_subscription(TwistStamped, '/cmd_vel', self.cmd_vel_callback, 10)
 
         self.mtt_params = get_mtt_params()
         self.gear_ratio = self.mtt_params.mechanical_gear_ratio
 
 
-    def cmd_vel_callback(self, cmd_vel_msg: Twist):
+    def cmd_vel_callback(self, cmd_vel_msg: TwistStamped):
 
         # negative sign to have the right direction
         # *20 to make an array for each of the 20 wheels
-        wheel_speeds = [-self.gear_ratio*cmd_vel_msg.linear.x] * 20
+        wheel_speeds = [-self.gear_ratio*cmd_vel_msg.twist.linear.x] * 20
 
         wheel_cmd_msg = Float64MultiArray()
         wheel_cmd_msg.data = wheel_speeds
@@ -30,7 +30,7 @@ class MttControllerInterface(Node):
 
         yaw_cmd_msg = Float64MultiArray()
        
-        yaw = [-cmd_vel_msg.angular.z]
+        yaw = [-cmd_vel_msg.twist.angular.z]
         yaw_cmd_msg.data = yaw
         self.yaw_publisher.publish(yaw_cmd_msg)
 

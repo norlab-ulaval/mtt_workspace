@@ -204,15 +204,41 @@ def generate_launch_description():
             respawn=True,
             respawn_delay=2.0
         ),
+        # Node(
+        #     package='twist_stamper',
+        #     executable='twist_stamper',
+        #     name='twist_stamper',
+        #     parameters=[{
+        #         'input_topic': 'cmd_vel',
+        #         'output_topic': 'cmd_vel_stamped',
+        #         'frame_id': 'base_link'
+        #     }],
+        #     output='screen',
+        #     respawn=True,
+        #     respawn_delay=2.0
+        # ),
+
 
         # 6) Joystick (joy_linux)
+        # Node(
+        #     package='joy_linux',
+        #     executable='joy_linux_node',
+        #     name='joy_node',
+        #     parameters=[{
+        #         'deadzone': 0.15,
+        #         'device_name': '/dev/input/js0'
+        #     }],
+        #     output='screen',
+        #     condition=IfCondition(LaunchConfiguration('enable_joystick')),
+        #     respawn=True
+        # ),
         Node(
-            package='joy_linux',
-            executable='joy_linux_node',
+            package='joy',
+            executable='joy_node',
             name='joy_node',
             parameters=[{
                 'deadzone': 0.15,
-                'device_name': '/dev/input/js0'
+
             }],
             output='screen',
             condition=IfCondition(LaunchConfiguration('enable_joystick')),

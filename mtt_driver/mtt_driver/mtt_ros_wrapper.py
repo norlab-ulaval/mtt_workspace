@@ -9,7 +9,7 @@ import math
 import time
 from enum import Enum
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from std_msgs.msg import UInt8,String
 from mtt_msgs.msg import MttTachometerData, MttVehicleStatus, MttAuxCommand, MttDrivingMode
 from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
@@ -75,7 +75,7 @@ class MTTRosWrapper(Node):
         self.remote_timeout_seconds = 0.5  # Remote considered lost after 500ms
         self.last_remote_command_time = None
 
-        self.create_subscription(Twist, "cmd_vel", self.cmd_vel_callback, 10)
+        self.create_subscription(TwistStamped, "cmd_vel", self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
         
         # Single aggregated publisher for all vehicle status
@@ -113,9 +113,9 @@ class MTTRosWrapper(Node):
                 self.driver._set_security_switch(SecuritySwitchState.SafetyUnlocked)
 
 
-    def cmd_vel_callback(self, msg: Twist):
-        lin = float(msg.linear.x)
-        ang = float(msg.angular.z)
+    def cmd_vel_callback(self, msg: TwistStamped):
+        lin = float(msg.twist.linear.x)
+        ang = float(msg.twist.angular.z)
 
         if abs(lin) < self.throttle_deadband:
             lin = 0.0

@@ -13,17 +13,17 @@ import time
 import math
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 
 
 class _Helper(Node):
     def __init__(self):
         super().__init__('test_smoother_helper')
-        self.pub = self.create_publisher(Twist, 'test/smoother/in', 10)
+        self.pub = self.create_publisher(TwistStamped, 'test/smoother/in', 10)
         self.last = None
-        self.sub = self.create_subscription(Twist, 'test/smoother/out', self._cb, 10)
+        self.sub = self.create_subscription(TwistStamped, 'test/smoother/out', self._cb, 10)
 
-    def _cb(self, msg: Twist):
+    def _cb(self, msg: TwistStamped):
         self.last = msg
 
     def spin_for(self, sec: float):
@@ -64,19 +64,19 @@ def test_decay_to_zero_after_timeout():
         # Wait for ROS graph discovery to connect endpoints
         assert node.wait_connections(3.0), 'Graph did not connect endpoints in time'
         # Send one twist
-        t = Twist()
-        t.linear.x = 0.5
+        t = TwistStamped()
+        t.twist.linear.x = 0.5
         # Publish a few times to avoid missing first message before discovery
         for _ in range(5):
             node.pub.publish(t)
             node.spin_for(0.1)
         assert node.last is not None, 'No output from smoother'
-        assert node.last.linear.x > 0.0
+        assert node.last.twist.linear.x > 0.0
         # Wait beyond input_timeout
         node.spin_for(1.0)
         assert node.last is not None
-        assert math.isclose(node.last.linear.x, 0.0, abs_tol=1e-2)
-        assert math.isclose(node.last.angular.z, 0.0, abs_tol=1e-2)
+        assert math.isclose(node.last.twist.linear.x, 0.0, abs_tol=1e-2)
+        assert math.isclose(node.last.twist.angular.z, 0.0, abs_tol=1e-2)
     finally:
         node.destroy_node()
         rclpy.shutdown()

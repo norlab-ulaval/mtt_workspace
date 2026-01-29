@@ -110,10 +110,10 @@ class MttJointController(Node):
 
         # Publishers
         self.joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
-        self.cmd_vel_pid_pub = self.create_publisher(Twist, "/cmd_vel/pid", 10)
+        self.cmd_vel_pid_pub = self.create_publisher(TwistStamped, "/cmd_vel/pid", 10)
 
         # Subscribers
-        self.cmd_vel_sub = self.create_subscription(Twist, "/cmd_vel", self.cmd_vel_callback, 10)
+        self.cmd_vel_sub = self.create_subscription(TwistStamped, "/cmd_vel", self.cmd_vel_callback, 10)
         self.odom_sub = self.create_subscription(Odometry, "/mtt_odometry", self.odometry_callback, 10)
         self.articulation_sub = self.create_subscription(Float64, "/mtt_articulation_angle", self.articulation_callback, 10)
 
@@ -180,10 +180,10 @@ class MttJointController(Node):
 
         self.get_logger().info("MTT Joint Controller started")
 
-    def cmd_vel_callback(self, msg: Twist):
+    def cmd_vel_callback(self, msg: TwistStamped):
         """Store cmd targets: linear.x in [-1,1], angular.z normalized steering [-1,1]."""
-        raw_linear = float(msg.linear.x)
-        raw_angular = float(msg.angular.z)
+        raw_linear = float(msg.twist.linear.x)
+        raw_angular = float(msg.twist.angular.z)
 
         # Targets only; integration happens in the timer with consistent dt
         self.target_linear = max(-1.0, min(1.0, raw_linear))

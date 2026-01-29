@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from mtt_msgs.msg import MttAuxCommand
 import pyinotify
 import os
@@ -24,7 +24,7 @@ class MTTTeleopJoy(Node):
         self.maximum_angular_speed = self.get_parameter("max_angular_speed").value  
 
 
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel_raw", 10)
+        self.cmd_vel_pub = self.create_publisher(TwistStamped, "cmd_vel_raw", 10)
         self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
 
         self.create_subscription(Joy, "joy", self.joy_callback, 10)
@@ -39,23 +39,23 @@ class MTTTeleopJoy(Node):
 
     def joy_callback(self, msg: Joy):
         
-        twist_msg = Twist()
+        twist_msg = TwistStamped()
         aux_msg = MttAuxCommand()
 
 
         if msg.buttons[5]:
 
             if msg.axes[4] < -0.05:
-                twist_msg.linear.x = - 0.3 + msg.axes[4] * 0.3
+                twist_msg.twist.linear.x = - 0.3 + msg.axes[4] * 0.3
             elif msg.axes[4] > 0.05:
-                twist_msg.linear.x = 0.3 + msg.axes[4] * 0.3
+                twist_msg.twist.linear.x = 0.3 + msg.axes[4] * 0.3
             else:
-                twist_msg.linear.x = 0.0
+                twist_msg.twist.linear.x = 0.0
                 
             if msg.axes[3] < -0.05 or msg.axes[3] > 0.05:
-                twist_msg.angular.z = msg.axes[3]
+                twist_msg.twist.angular.z = msg.axes[3]
             else:
-                twist_msg.angular.z = 0.0
+                twist_msg.twist.angular.z = 0.0
 
             aux_msg.brake = (-msg.axes[5] + 1 )/2
             
@@ -79,8 +79,8 @@ class MTTTeleopJoy(Node):
             aux_msg.light_state = self.light_state
 
         else: 
-            twist_msg.linear.x = 0.0
-            twist_msg.angular.z = 0.0
+            twist_msg.twist.linear.x = 0.0
+            twist_msg.twist.angular.z = 0.0
 
         self.cmd_vel_pub.publish(twist_msg)
         self.aux_cmd_pub.publish(aux_msg)

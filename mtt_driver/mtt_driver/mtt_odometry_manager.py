@@ -12,7 +12,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, HistoryPolicy, DurabilityPolicy
 
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from std_msgs.msg import Float64
 from mtt_msgs.msg import MttTachometerData
 from mtt_msgs.msg import MttTachometerData, MttDrivingMode
@@ -755,7 +755,7 @@ class MttOdometryManager(Node):
 
         # Subscribe to cmd_vel for angular velocity information
         self.cmd_vel_sub = self.create_subscription(
-            Twist,
+            TwistStamped,
             self.cmd_vel_topic,
             self.cmd_vel_callback,
             10,
@@ -904,7 +904,7 @@ class MttOdometryManager(Node):
 
     def cmd_vel_callback(self, msg: Twist) -> None:
         """Store current angular velocity for steering odometry calculations"""
-        self.current_angular_vel = msg.angular.z
+        self.current_angular_vel = msg.twist.angular.z
 
     # --------------- Mode switching --------------- #
     def _transfer_state(self, src: OdometryInterface, dst: OdometryInterface) -> None:

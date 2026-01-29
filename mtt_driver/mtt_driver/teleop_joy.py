@@ -1,7 +1,7 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Joy
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from mtt_msgs.msg import MttAuxCommand
 import pyinotify
 import os
@@ -46,7 +46,7 @@ class MTTTeleopJoy(Node):
         self.can_frame_timer = self.create_timer(0.05, self.send_can_frame)  #THIS IS SHIT
 
 
-        self.cmd_vel_pub = self.create_publisher(Twist, "cmd_vel_raw", 10)
+        self.cmd_vel_pub = self.create_publisher(TwistStamped, "cmd_vel_raw", 10)
         self.aux_cmd_pub = self.create_publisher(MttAuxCommand, "mtt_aux_cmd", 10)
 
         self.create_subscription(Joy, "joy", self.joy_callback, 10)

@@ -3,11 +3,11 @@ import time
 import unittest
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 
 """
 Contract:
-- Publish one Twist on input topic (default: cmd_vel/teleop)
+- Publish one TwistStamped on input topic (default: cmd_vel/teleop)
 - Expect smoother to emit same direction immediately (within 0.5s)
 - After input_timeout, output should decay to ~0 (abs < 1e-3)
 Assumptions:
@@ -18,15 +18,15 @@ class TestSmootherDecay(unittest.TestCase):
     def setUp(self):
         rclpy.init(args=None)
         self.node = Node('test_cmd_smoother_timeout')
-        self.in_pub = self.node.create_publisher(Twist, 'cmd_vel/teleop', 10)
+        self.in_pub = self.node.create_publisher(TwistStamped, 'cmd_vel/teleop', 10)
         self.last_out = None
-        self.out_sub = self.node.create_subscription(Twist, 'cmd_vel/teleop_smoothed', self._out_cb, 10)
+        self.out_sub = self.node.create_subscription(TwistStamped, 'cmd_vel/teleop_smoothed', self._out_cb, 10)
 
     def tearDown(self):
         self.node.destroy_node()
         rclpy.shutdown()
 
-    def _out_cb(self, msg: Twist):
+    def _out_cb(self, msg: TwistStamped):
         self.last_out = msg
 
     def spin_for(self, seconds: float):
@@ -36,9 +36,9 @@ class TestSmootherDecay(unittest.TestCase):
 
     def test_decay_to_zero(self):
         # Send one input
-        t = Twist()
-        t.linear.x = 0.5
-        t.angular.z = 0.0
+        t = TwistStamped()
+        t.twist.linear.x = 0.5
+        t.twist.angular.z = 0.0
         self.in_pub.publish(t)
         self.spin_for(0.3)
         # Should have some output soon
