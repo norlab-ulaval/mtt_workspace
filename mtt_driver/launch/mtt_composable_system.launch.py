@@ -11,22 +11,40 @@ This launch file starts the complete MTT composable architecture including:
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
-from launch.substitutions import LaunchConfiguration, Command, PythonExpression
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
 def generate_launch_description():
     description_share = FindPackageShare(package='mtt_description').find('mtt_description')
-    urdf_path = os.path.join(description_share, 'urdf', 'robot.urdf.xacro')
+    driver_share = FindPackageShare(package='mtt_driver').find('mtt_driver')
 
-    # --- real CAN bring-up (with bitrate) ---
+    # --- optional host-side CAN bring-up ---
+    setup_vcan_process = ExecuteProcess(
+        cmd=[
+            'bash', '-lc',
+            'IFACE="${CAN_IFACE}"; '
+            'sudo modprobe vcan; '
+            'sudo ip link add dev "${IFACE}" type vcan 2>/dev/null || true; '
+            'sudo ip link set "${IFACE}" up; '
+            'echo "[can] ${IFACE} VCAN up."'
+        ],
+        additional_env={
+            'CAN_IFACE': LaunchConfiguration('can_interface'),
+        },
+        name='setup_vcan',
+        output='screen',
+        condition=IfCondition(LaunchConfiguration('setup_vcan')),
+    )
+
     setup_real_can_process = ExecuteProcess(
         cmd=[
-            'bash', '-c',
-            # uses launch args via env-style expansion by passing them into the shell
+            'bash', '-lc',
             'IFACE="$(echo $CAN_IFACE)"; RATE="$(echo $CAN_RATE)"; '
             'sudo ip link set "$IFACE" down 2>/dev/null || true; '
             'sudo ip link set "$IFACE" up type can bitrate "$RATE"; '
@@ -39,6 +57,15 @@ def generate_launch_description():
         name='setup_real_can',
         output='screen',
         condition=IfCondition(LaunchConfiguration('setup_real_can')),
+    )
+
+    robot_description = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(description_share, 'launch', 'mtt_description.launch.py')),
+        launch_arguments={
+            'use_rviz': LaunchConfiguration('use_rviz'),
+            'use_joint_state_gui': 'false',
+        }.items(),
+        condition=IfCondition(LaunchConfiguration('publish_description')),
     )
 
     return LaunchDescription([
@@ -62,6 +89,11 @@ def generate_launch_description():
             'can_bitrate',
             default_value='250000',
             description='Bitrate for real CAN interface (e.g., 250000, 500000).'
+        ),
+        DeclareLaunchArgument(
+            'can_id',
+            default_value='1',
+            description='Command CAN arbitration ID as a decimal integer (1 means 0x001).'
         ),
         DeclareLaunchArgument(
             'driver_log_level',
@@ -126,11 +158,12 @@ def generate_launch_description():
 
         # -------- Actions / Nodes --------
 
-        # 0b) (Optional) Ensure real CAN is up with bitrate BEFORE anything else
+        # 0) Optional host-side CAN interface setup
+        setup_vcan_process,
         setup_real_can_process,
 
-        # 1) Robot description (URDF → TF tree for real runs)
-        
+        # 1) Robot description / TF tree
+        robot_description,
 
         # 2) Joint controller (cmd_vel → joints) and joint_states
         # Node(
@@ -156,6 +189,7 @@ def generate_launch_description():
             name='mtt_ros_wrapper',
             parameters=[{
                 'can_interface': LaunchConfiguration('can_interface'),
+                'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
                 'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
@@ -198,7 +232,7 @@ def generate_launch_description():
             package='twist_mux',
             executable='twist_mux',
             name='twist_mux',
-            parameters=[os.path.join(FindPackageShare(package='mtt_driver').find('mtt_driver'), 'config', 'twist_mux.yaml')],
+            parameters=[os.path.join(driver_share, 'config', 'twist_mux.yaml')],
             remappings=[('cmd_vel_out', 'cmd_vel')],
             output='screen',
             respawn=True,

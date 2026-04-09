@@ -37,7 +37,8 @@ ps4_controller:
     dead_man_switch: 5
 
 can_interface: "vcan0"
-can_node_id: 0x100
+can_id: 0x001
+can_node_id: 0x001  # Legacy key kept for backward compatibility with older configs.
 can_bitrate: 250000
 
 max_throttle: 230

@@ -32,12 +32,12 @@ ros2 launch mtt_driver mtt_teleop.launch.py
 To launch the full driver system with the odometry on the mtt launch:
 ```bash
 # Launch driver on mtt
-ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=can0
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=can0 can_id:=1
 ```
 In simulation:
 ```bash
 # Launch driver in simulation
-ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0 can_id:=1
 
 # in simulation to reproduce the tachometer
 python3 src/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
@@ -97,8 +97,17 @@ The default controller mapping is configured for 8BitDo controllers:
 The driver uses SocketCAN for communication and implements the current CAN bus specification:
 
 - **0x001**: Joystick/remote controller 
-- **0x100**: Auxiliary control (this driver) - **overrides 0x001 when active**
+- **0x001**: Current default command arbitration ID used by this stack and observed on the vehicle
+- **0x100**: Historical/alternate control ID still mentioned in the CAN spec and older notes
 - **0x2ff**: Tachometer data (receive only)
+
+The launch file now exposes the command arbitration ID explicitly:
+
+```bash
+ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=can0 can_id:=1
+```
+
+`can_id:=1` corresponds to `0x001`.
 
 ```bash
 sudo ip link set can0 up type can bitrate 250000
