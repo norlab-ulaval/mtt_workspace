@@ -1,90 +1,87 @@
-# mtt_project
+# mtt_tools
 
-## Installation
+ROS 2 Jazzy workspace for the MTT-154 stack.
 
-Tested on:
-- Ubuntu 24
-- Ubuntu 22
+This repository is a native `colcon` workspace. You can work with it:
+- directly on the host,
+- in a regular Docker/Compose workflow,
+- or through the VS Code devcontainer.
 
-### Prerequistes
+## Workspace layout
 
-- Vscode
-- Docker
+The repository root is the workspace root:
 
-#### Docker
-Once docker in installed, verify that it is well configured
-
-1. Check if Docker works as root
-sudo docker ps
-
-2. Add your user to the docker group
-
-Run:
-```
-sudo groupadd docker  # (only if the group doesn't exist yet)
-sudo usermod -aG docker $USER
-```
-3. Apply the group membership
-
-Either log out and log back in, or run:
-```
-newgrp docker
-```
-This updates your current session with the new group.
-
-4. Test again by running:
-```
-docker ps
+```text
+mtt_tools/
+  mtt_bringup/
+  mtt_description/
+  mtt_driver/
+  mtt_interfaces/
+  mtt_msgs/
+  docker/
+  compose.yaml
 ```
 
-#### Git
-The docker requires a .gitconfig in the home directory. The file can be left empty or with the git user informations. If the github has not been configured on the current system, run:
-```
-touch ~/.gitconfig
-```
-or 
-```
-git config --global user.email "youremail"
-```
+Generated artifacts (`build/`, `install/`, `log/`) stay local and are ignored.
 
-#### ROS
-By default the docker does not set a ROS_DOMAIN_ID value to prevent collision on multiple system on the same network, in the computer's .bashrc add the following line where X is the chosen domain id (ROS is not required on the system):
-```
-export ROS_DOMAIN_ID=X
-```
-### Repo installation
+## Local development
 
-1. Clone the repo
+Tested on Ubuntu 24.04 with ROS 2 Jazzy.
 
 ```bash
-git clone git@github.com:AlexCampanozzi/mtt_project.git
+source /opt/ros/jazzy/setup.bash
+colcon build --symlink-install
+source install/setup.bash
 ```
 
-2. Enable xhost to properly forward GUI
+Useful checks:
+
+```bash
+ros2 launch mtt_description mtt_description.launch.py
+ros2 launch mtt_driver mtt_composable_system.launch.py --show-args
+```
+
+## Docker workflow
+
+The repo now ships a regular Docker workflow instead of relying only on VS Code.
+
+Build the development image:
+
+```bash
+docker compose -f docker/build.yaml build devel
+```
+
+Start an interactive development shell:
+
 ```bash
 xhost +local:docker
+docker compose run --rm dev
 ```
 
-3. Open in vscode
+Inside the container:
 
 ```bash
-cd mtt_project
-code .
+colcon build --symlink-install
+source install/setup.bash
 ```
 
-4. Make sure you have the "Dev Containers" and "Remote - SSH" extension installed in vscode
+Build the fully compiled image:
 
-![](documentations/img/vscode-extensions.png)
-
-5. Build the container with Ctrl+Shift+P and select "Dev Containers: Rebuild and Reopen in Container". Vscode should build the container and open your vscode frontend inside of it
-
-6. Now you should be inside the container, on the bottom left of the screen, make sure you see this
-
-![](documentations/img/vscode-opened-in-devcontainer.png)
-
-7. You can now try to launch the simulation in a vscode terminal
 ```bash
-ros2 launch mtt_bringup mtt_simulation.launch.py
+docker compose -f docker/build.yaml build full
 ```
 
-8. If you want to rebuild the workspace, do Ctrl+Shift+B and select "colcon: Colcon Build with compile_commands"
+## VS Code devcontainer
+
+The devcontainer now reuses the same `docker/Dockerfile` as the regular Docker workflow.
+
+1. Open the repo in VS Code.
+2. Make sure `Dev Containers` is installed.
+3. Run `Dev Containers: Rebuild and Reopen in Container`.
+
+## Notes
+
+- `mtt_description` is the visualization/description package.
+- `mtt_bringup` contains simulation and higher-level launch flows.
+- `mtt_driver` contains the current Python CAN/teleop/odometry stack.
+- For real CAN use, bring interfaces up explicitly on the host before launching the driver.

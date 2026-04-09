@@ -1,0 +1,31 @@
+services:
+  base:
+    image: ${MTT_IMAGE:-mtt_tools:devel}
+    network_mode: host
+    pid: host
+    ipc: host
+    cap_add:
+      - NET_ADMIN
+    working_dir: /workspaces/mtt_tools
+    environment:
+      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      - DISPLAY
+      - WAYLAND_DISPLAY
+      - XDG_RUNTIME_DIR
+    stop_signal: SIGINT
+    volumes:
+      - ${HOME}/.ros:/home/mtt/.ros
+      - ${HOME}/.bash_history:/home/mtt/.bash_history
+      - ${HOME}/.gitconfig:/home/mtt/.gitconfig:ro
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+
+  x11_base:
+    extends:
+      service: base
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix
+      - ${XDG_RUNTIME_DIR:-/run/user/1000}:${XDG_RUNTIME_DIR:-/run/user/1000}
+      - /dev/dri:/dev/dri
+      - /dev/input:/dev/input

@@ -1,0 +1,22 @@
+services:
+  dev:
+    extends:
+      file: docker/common.yaml
+      service: x11_base
+    image: ${MTT_IMAGE:-mtt_tools:devel}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: devel
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        USERNAME: mtt
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    tty: true
+    stdin_open: true
+    command: zsh
+    volumes:
+      - .:/workspaces/mtt_tools
+      - ${HOME}/.ssh:/home/mtt/.ssh:ro

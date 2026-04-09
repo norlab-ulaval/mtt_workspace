@@ -3,16 +3,16 @@
   "privileged": true,
   "remoteUser": "mtt",
   "build": {
-    "dockerfile": "Dockerfile",
-    "target": "dev",
+    "dockerfile": "../docker/Dockerfile",
+    "target": "devel",
     "args": {
       "USERNAME": "mtt",
       "ROS_DISTRO": "jazzy",
       "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp"
     }
   },
-  "workspaceFolder": "/home/ws",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/home/ws,type=bind",
+  "workspaceFolder": "/workspaces/mtt_tools",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/mtt_tools,type=bind",
   "customizations": {
     "vscode": {
       "extensions": [

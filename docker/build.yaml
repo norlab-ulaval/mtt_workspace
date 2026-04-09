@@ -1,0 +1,26 @@
+services:
+  devel:
+    image: ${MTT_IMAGE:-mtt_tools:devel}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: devel
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        USERNAME: mtt
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+
+  full:
+    image: ${MTT_FULL_IMAGE:-mtt_tools:full}
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: builder
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        USERNAME: mtt
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}

@@ -1,0 +1,9 @@
+.git
+.devcontainer
+.vscode
+build
+install
+log
+__pycache__
+*.pyc
+*.pyo
