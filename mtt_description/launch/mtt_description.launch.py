@@ -1,8 +1,8 @@
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument
 from launch.substitutions import Command, LaunchConfiguration
+from launch.conditions import IfCondition
 from launch_ros.actions import Node
-from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.substitutions import FindPackageShare
 import os
 
@@ -11,10 +11,21 @@ def generate_launch_description():
     urdf_path = os.path.join(pkg_share, 'urdf', 'robot.urdf.xacro')
     rviz_config_path = os.path.join(pkg_share, 'rviz', 'urdf_config.rviz')
 
-    gazebo_pkg_share = FindPackageShare('gazebo_ros').find('gazebo_ros')
-    gazebo_launch_file = os.path.join(gazebo_pkg_share, 'launch', 'gazebo.launch.py')
+    use_rviz = LaunchConfiguration('use_rviz')
+    use_joint_state_gui = LaunchConfiguration('use_joint_state_gui')
 
     return LaunchDescription([
+        DeclareLaunchArgument(
+            'use_rviz',
+            default_value='true',
+            description='Launch RViz for robot visualization.'
+        ),
+        DeclareLaunchArgument(
+            'use_joint_state_gui',
+            default_value='true',
+            description='Launch the joint_state_publisher_gui for interactive joint inspection.'
+        ),
+
         Node(
             package='robot_state_publisher',
             executable='robot_state_publisher',
@@ -23,25 +34,17 @@ def generate_launch_description():
             }]
         ),
 
-        IncludeLaunchDescription(
-            PythonLaunchDescriptionSource(gazebo_launch_file)
-        ),
-
-        Node(
-            package='gazebo_ros',
-            executable='spawn_entity.py',
-            arguments=['-topic', 'robot_description', '-entity', 'my_robot']
-        ),
-
         Node(
             package='joint_state_publisher_gui',
             executable='joint_state_publisher_gui',
+            condition=IfCondition(use_joint_state_gui)
         ),
 
         Node(
             package='rviz2',
             executable='rviz2',
             arguments=['-d', rviz_config_path],
-            output='screen'
+            output='screen',
+            condition=IfCondition(use_rviz)
         ),
     ])

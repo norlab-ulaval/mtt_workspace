@@ -5,19 +5,17 @@
      <let name="rviz_config_path"
           value="$(find-pkg-share mtt_description)/rviz/urdf_config.rviz" />
 
+     <arg name="use_rviz" default="true"/>
+     <arg name="use_joint_state_gui" default="true"/>
+
      <node pkg="robot_state_publisher" exec="robot_state_publisher">
           <param name="robot_description"
                value="$(command 'xacro $(var urdf_path)')"/>
      </node>
-    
-    <include file="$(find-pkg-share gazebo_ros)/launch/gazebo.launch.py"/>
 
-    <node pkg='gazebo_ros' exec="spawn_entity.py"
-          args="-topic robot_description -entity my_robot"/>
-
-     <node pkg="joint_state_publisher_gui" exec="joint_state_publisher_gui" />
+     <node pkg="joint_state_publisher_gui" exec="joint_state_publisher_gui" if="$(var use_joint_state_gui)" />
 
      <node pkg="rviz2" exec="rviz2" output="screen"
-           args="-d $(var rviz_config_path)"/>
+           args="-d $(var rviz_config_path)" if="$(var use_rviz)"/>
 
 </launch>
