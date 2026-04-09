@@ -27,7 +27,7 @@ def generate_launch_description():
     mtt_bringup_launch_dir = os.path.join(mtt_bringup_dir, 'launch')
 
     mtt_driver_dir = get_package_share_directory('mtt_driver')
-    mtt_driver_launch_dir = os.path.join(mtt_driver_dir, 'launch/production')
+    mtt_driver_launch_dir = os.path.join(mtt_driver_dir, 'launch')
 
     # Create the launch configuration variables
     namespace = LaunchConfiguration('namespace')
