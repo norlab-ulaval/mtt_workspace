@@ -49,10 +49,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-xacro && \
     rm -rf /var/lib/apt/lists/*
 
-RUN if ! getent group "${USER_GID}" >/dev/null; then groupadd --gid "${USER_GID}" "${USERNAME}"; fi && \
-    if ! id -u "${USERNAME}" >/dev/null 2>&1; then \
-      useradd --uid "${USER_UID}" --gid "${USER_GID}" -m -s /bin/bash "${USERNAME}"; \
+RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
+    existing_group="$(getent group "${USER_GID}" | cut -d: -f1 || true)" && \
+    if [ -n "${existing_group}" ] && [ "${existing_group}" != "${USERNAME}" ]; then \
+      groupmod -n "${USERNAME}" "${existing_group}"; \
+    elif ! getent group "${USERNAME}" >/dev/null; then \
+      groupadd --gid "${USER_GID}" "${USERNAME}"; \
     fi && \
+    if [ -n "${existing_user}" ] && [ "${existing_user}" != "${USERNAME}" ]; then \
+      usermod -l "${USERNAME}" "${existing_user}" && \
+      usermod -d "/home/${USERNAME}" -m "${USERNAME}"; \
+    elif ! id -u "${USERNAME}" >/dev/null 2>&1; then \
+      useradd --uid "${USER_UID}" --gid "${USERNAME}" -m -s /bin/bash "${USERNAME}"; \
+    fi && \
+    usermod --gid "${USERNAME}" "${USERNAME}" && \
     echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/${USERNAME} && \
     chmod 0440 /etc/sudoers.d/${USERNAME}
 
@@ -79,4 +89,3 @@ RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     rosdep update && \
     rosdep install -iyr --from-paths . --ignore-src && \
     colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
-

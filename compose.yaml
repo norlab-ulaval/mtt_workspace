@@ -17,6 +17,9 @@ services:
     tty: true
     stdin_open: true
     command: zsh
+    working_dir: ${PWD}
+    environment:
+      WORKSPACE: ${PWD}
     volumes:
-      - .:/workspaces/mtt_tools
+      - .:${PWD}
       - ${HOME}/.ssh:/home/mtt/.ssh:ro
