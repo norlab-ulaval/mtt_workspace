@@ -63,3 +63,6 @@ mtt_test_tools/**/mtt_mock_server
 
 # Python cache
 __pycache__/
+
+# VS Code stays local
+.vscode/
