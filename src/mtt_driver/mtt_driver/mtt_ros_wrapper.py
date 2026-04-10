@@ -7,7 +7,7 @@ import threading
 import logging
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
-from std_msgs.msg import UInt8
+from std_msgs.msg import Bool, UInt8
 from mtt_msgs.msg import MttTachometerData, MttVehicleStatus, MttAuxCommand, MttDrivingMode
 from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
 from .mtt_driver import (
@@ -77,9 +77,13 @@ class MTTRosWrapper(Node):
         self.current_steering_input = 0.0  # Raw steering input (-1.0 to +1.0)
         self.last_cmd_vel_time = None
         self.command_timeout_active = False
+        self.teleop_estop_active = False
+        self.teleop_estop_seen = False
+        self.active_safety_locks = set()
 
         self.create_subscription(TwistStamped, "cmd_vel", self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
+        self.create_subscription(Bool, "teleop_estop", self.estop_callback, 10)
         
         # Single aggregated publisher for all vehicle status
         # Publishers for telemetry data
@@ -106,14 +110,38 @@ class MTTRosWrapper(Node):
         with self.driver_lock:
             self.driver.send_can_frame()
 
-    def apply_safety_state(self, state): 
-        # not use, waiting for the e-stop
-        with self.driver_lock:
-            if state == 0:
-                self.driver._set_security_switch(SecuritySwitchState.SafetyLocked)
-            else :
-                self.driver._set_security_switch(SecuritySwitchState.SafetyUnlocked)
+    def _set_safety_lock(self, reason: str, active: bool):
+        if active:
+            if reason in self.active_safety_locks:
+                return
+            self.active_safety_locks.add(reason)
+        else:
+            if reason not in self.active_safety_locks:
+                return
+            self.active_safety_locks.remove(reason)
+        self._sync_safety_switch()
 
+    def _sync_safety_switch(self):
+        desired_state = (
+            SecuritySwitchState.SafetyLocked
+            if self.active_safety_locks
+            else SecuritySwitchState.SafetyUnlocked
+        )
+        with self.driver_lock:
+            if self.driver.get_security_switch_state() == desired_state:
+                return
+            self.driver._set_security_switch(desired_state)
+
+    def _describe_safety_state(self, driver_state: str) -> str:
+        if not self.active_safety_locks:
+            return driver_state
+        reasons = ",".join(sorted(self.active_safety_locks))
+        return f"{driver_state}:{reasons}"
+
+    def estop_callback(self, msg: Bool):
+        self.teleop_estop_seen = True
+        self.teleop_estop_active = bool(msg.data)
+        self._set_safety_lock("teleop_estop", self.teleop_estop_active)
 
     def cmd_vel_callback(self, msg: TwistStamped):
         lin = float(msg.twist.linear.x)
@@ -302,10 +330,12 @@ class MTTRosWrapper(Node):
             status_msg.tachometer_cumulative = 0
         
         status_msg.steer_position = command_state["steer_raw"]
-        status_msg.emergency_stop_active = command_state["safety_state"] == SecuritySwitchState.SafetyLocked.name
+        status_msg.emergency_stop_active = bool(self.active_safety_locks) or (
+            command_state["safety_state"] == SecuritySwitchState.SafetyLocked.name
+        )
         status_msg.remote_connected = False
-        status_msg.deadman_active = cmd_vel_is_fresh
-        status_msg.safety_state = command_state["safety_state"]
+        status_msg.deadman_active = self.teleop_estop_seen and not self.teleop_estop_active
+        status_msg.safety_state = self._describe_safety_state(command_state["safety_state"])
         self.vehicle_status_pub.publish(status_msg)
 
     def destroy_node(self):
