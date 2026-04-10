@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Share this Linux laptop Internet connection with the MTT high-level computer.
+# This script is meant for the MTT network used in the lab.
+# It is flexible on interface names, but it still assumes:
+# - Linux
+# - iptables
+# - a robot reachable on the 192.168.2.x network
+
+ROBOT_NAME="${ROBOT_NAME:-mtt-high-level}"
+ROBOT_USER="${ROBOT_USER:-robot}"
+ROBOT_HOST="${ROBOT_HOST:-192.168.2.2}"
+ROBOT_ROUTE_IFACE="${ROBOT_ROUTE_IFACE:-enp5s0}"
+ROBOT_SUBNET="${ROBOT_SUBNET:-192.168.2.0/24}"
+UP_IFACE="${UP_IFACE:-}"
+DOWN_IFACE="${DOWN_IFACE:-}"
+DRY_RUN=false
+
+run() {
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY] $*"
+  else
+    "$@"
+  fi
+}
+
+ensure_rule() {
+  local add_cmd=("$@")
+  local check_cmd=()
+  local replaced=false
+  local arg
+
+  for arg in "${add_cmd[@]}"; do
+    if [[ "$replaced" == "false" && "$arg" == "-A" ]]; then
+      check_cmd+=("-C")
+      replaced=true
+    else
+      check_cmd+=("$arg")
+    fi
+  done
+
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY] ${add_cmd[*]}"
+    return 0
+  fi
+
+  if ! "${check_cmd[@]}" 2>/dev/null; then
+    "${add_cmd[@]}"
+  fi
+}
+
+if [[ "${1:-}" == "--dry-run" ]]; then
+  DRY_RUN=true
+  shift
+fi
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  cat <<'EOF'
+Usage:
+  bash internet_via_usb
+  bash internet_via_usb --dry-run
+
+This script is for Linux laptops.
+It is fine with different phone tethering or Ethernet interface names,
+but it is not a macOS/Windows script.
+
+Optional overrides:
+  ROBOT_NAME         SSH alias or label shown in logs                (default: mtt-high-level)
+  ROBOT_USER         remote user                                     (default: robot)
+  ROBOT_HOST         robot IP reachable from this laptop             (default: 192.168.2.2)
+  ROBOT_SUBNET       robot subnet to NAT                             (default: 192.168.2.0/24)
+  ROBOT_ROUTE_IFACE  robot interface to use for default route tip    (default: enp5s0)
+  DOWN_IFACE         local interface connected to the robot
+  UP_IFACE           local interface that has Internet access
+
+Examples:
+  # Current Mohamed setup: iPhone tethering gives Internet, Wi-Fi reaches MTT
+  UP_IFACE=enxf6a3105a3133 DOWN_IFACE=wlp0s20f3 bash internet_via_usb
+
+  # Same script with another phone or Ethernet uplink:
+  UP_IFACE=<internet_iface> DOWN_IFACE=<iface_to_robot> bash internet_via_usb
+
+  # If the robot is reached on another IP/interface:
+  ROBOT_HOST=192.168.2.102 ROBOT_ROUTE_IFACE=enp4s0 bash internet_via_usb
+
+Useful checks before running:
+  ip route show default
+  ip route get <robot_ip>
+  ip -o -4 addr show
+EOF
+  exit 0
+fi
+
+for cmd in ip awk cut sysctl iptables sudo; do
+  command -v "$cmd" >/dev/null 2>&1 || { echo "Commande manquante: $cmd"; exit 1; }
+done
+
+# Interface that reaches the robot.
+DOWN="$DOWN_IFACE"
+if [[ -z "${DOWN:-}" ]]; then
+  DOWN="$(ip route get "$ROBOT_HOST" 2>/dev/null | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+fi
+if [[ -z "${DOWN:-}" ]]; then
+  DOWN="$(ip -o -4 addr show | awk '$4 ~ /^192\.168\.2\./ {print $2; exit}')"
+fi
+[[ -n "${DOWN:-}" ]] || { echo "DOWN introuvable pour ${ROBOT_HOST}"; exit 1; }
+
+# Internet-facing interface: first default route that is not the robot link.
+UP="$UP_IFACE"
+if [[ -z "${UP:-}" ]]; then
+  UP="$(ip route show default | awk -v down="$DOWN" '{for(i=1;i<=NF;i++) if($i=="dev" && $(i+1)!=down){print $(i+1); exit}}')"
+fi
+if [[ -z "${UP:-}" ]]; then
+  UP="$(ip route show default | awk '{for(i=1;i<=NF;i++) if($i=="dev"){print $(i+1); exit}}')"
+fi
+[[ -n "${UP:-}" ]] || { echo "UP introuvable (pas d'interface internet)"; exit 1; }
+[[ "$UP" != "$DOWN" ]] || { echo "UP et DOWN pointent vers la meme interface ($UP)"; exit 1; }
+
+IP_PC="$(ip -o -4 addr show dev "$DOWN" | awk '{print $4}' | cut -d/ -f1)"
+[[ -n "${IP_PC:-}" ]] || { echo "IP locale introuvable sur $DOWN"; exit 1; }
+
+echo "[INFO] Robot      = ${ROBOT_NAME} (${ROBOT_USER}@${ROBOT_HOST})"
+echo "[INFO] DOWN robot = ${DOWN} (${IP_PC})"
+echo "[INFO] UP internet= ${UP}"
+echo "[INFO] Hint       = use UP_IFACE=<internet_iface> DOWN_IFACE=<iface_to_robot> if autodetection is wrong"
+[[ "$DRY_RUN" == "true" ]] && echo "[INFO] Mode       = dry-run (no system change)"
+
+if [[ "$DRY_RUN" == "true" ]]; then
+  echo "[DRY] sudo sysctl -w net.ipv4.ip_forward=1"
+else
+  sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null
+fi
+
+ensure_rule sudo iptables -t nat -A POSTROUTING -s "$ROBOT_SUBNET" -o "$UP" -j MASQUERADE
+ensure_rule sudo iptables -A FORWARD -i "$DOWN" -o "$UP" -j ACCEPT
+ensure_rule sudo iptables -A FORWARD -i "$UP" -o "$DOWN" -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+echo "[OK] NAT actif pour ${ROBOT_SUBNET} via ${UP}"
+echo "[TIP] Test SSH : ssh ${ROBOT_NAME}"
+echo "[TIP] Route robot : ssh ${ROBOT_USER}@${ROBOT_HOST} \"sudo ip route replace default via ${IP_PC} dev ${ROBOT_ROUTE_IFACE}\""
+echo "[TIP] Vérif robot : ssh ${ROBOT_USER}@${ROBOT_HOST} 'ip route show default'"
