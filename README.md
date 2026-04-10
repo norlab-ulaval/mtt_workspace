@@ -1,11 +1,50 @@
 # mtt_tools
 
-ROS 2 Jazzy workspace for the MTT-154 stack.
+ROS 2 Jazzy workspace for the MTT-154 platform.
 
-This repository is a native `colcon` workspace. You can work with it:
+This repository contains the current MTT bringup, description, driver, interfaces, and messages in a regular `colcon` workspace.
+
+You can work with it:
 - directly on the host,
-- in a regular Docker/Compose workflow,
+- in Docker with the local compose workflow,
 - or through the VS Code devcontainer.
+
+## Quick start
+
+Start in the repository root and create the local Docker environment once:
+
+```bash
+./scripts/create_env
+```
+
+For host-side development:
+
+```bash
+source /opt/ros/jazzy/setup.bash
+colcon build --base-paths src --symlink-install
+source install/setup.bash
+```
+
+If you are coming from the old flat layout, clean generated artifacts once before rebuilding:
+
+```bash
+rm -rf build install log
+```
+
+For Docker-first development:
+
+```bash
+./scripts/create_env
+docker compose -f docker/build.yaml build devel
+docker compose run --rm bash
+```
+
+Inside the container:
+
+```bash
+colcon build --base-paths src --symlink-install
+source install/setup.bash
+```
 
 ## Workspace layout
 
@@ -13,12 +52,16 @@ The repository root is the workspace root:
 
 ```text
 mtt_tools/
-  mtt_bringup/
-  mtt_description/
-  mtt_driver/
-  mtt_interfaces/
-  mtt_msgs/
+  src/
+    mtt_bringup/
+    mtt_description/
+    mtt_driver/
+    mtt_interfaces/
+    mtt_msgs/
   docker/
+  demos/
+  doc/
+  data/
   compose.yaml
 ```
 
@@ -30,7 +73,7 @@ Tested on Ubuntu 24.04 with ROS 2 Jazzy.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --symlink-install
+colcon build --base-paths src --symlink-install
 source install/setup.bash
 ```
 
@@ -43,26 +86,19 @@ ros2 launch mtt_driver mtt_composable_system.launch.py --show-args
 
 ## Docker workflow
 
-The repo now ships a regular Docker workflow instead of relying only on VS Code.
-It now follows the same spirit as the TIRREX workspace:
-- a generated `.env`,
-- a reusable multi-stage Dockerfile,
-- shared Docker service definitions,
-- and a root `compose.yaml` for the interactive dev shell.
+The repo ships a regular Docker workflow for local MTT work:
+- `./scripts/create_env` prepares `.env` and the host-side bind mounts,
+- `docker/build.yaml` builds the development and full images,
+- `compose.yaml` provides the interactive shell, compile flow, and monitor service.
 
-Initialize the local Docker environment once:
+Start with:
 
 ```bash
 ./scripts/create_env
+docker compose -f docker/build.yaml build devel
 ```
 
 Run the Docker commands from the repository root so Compose picks up the local `.env`.
-
-Build the development image:
-
-```bash
-docker compose -f docker/build.yaml build devel
-```
 
 Start an interactive development shell:
 
@@ -74,7 +110,7 @@ docker compose run --rm bash
 Inside the container:
 
 ```bash
-colcon build --symlink-install
+colcon build --base-paths src --symlink-install
 source install/setup.bash
 ```
 
@@ -100,7 +136,16 @@ docker compose run --rm dev
 docker compose up monitor
 ```
 
-For local monitoring, reuse the same Foxglove bridge pattern as the robot stack:
+Demo wrappers are available under `demos/` and can be launched from the workspace root:
+
+```bash
+xhost +local:docker
+docker compose --env-file .env -f demos/description/compose.yaml up description
+docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
+docker compose --env-file .env -f demos/monitor/compose.yaml up monitor_demo
+```
+
+For local monitoring, the `monitor` service starts a Foxglove bridge with the same parameters used in the MTT stack:
 
 ```bash
 docker compose up monitor
@@ -121,4 +166,5 @@ The devcontainer now reuses the same `docker/Dockerfile` as the regular Docker w
 - `mtt_description` is the visualization/description package.
 - `mtt_bringup` contains simulation and higher-level launch flows.
 - `mtt_driver` contains the current Python CAN/teleop/odometry stack.
+- All ROS packages now live under `src/`.
 - For real CAN use, bring interfaces up explicitly on the host before launching the driver.
