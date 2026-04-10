@@ -1,6 +1,7 @@
 .git
 .devcontainer
 .vscode
+.env
 build
 install
 log

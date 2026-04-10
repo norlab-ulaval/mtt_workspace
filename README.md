@@ -44,6 +44,19 @@ ros2 launch mtt_driver mtt_composable_system.launch.py --show-args
 ## Docker workflow
 
 The repo now ships a regular Docker workflow instead of relying only on VS Code.
+It now follows the same spirit as the TIRREX workspace:
+- a generated `.env`,
+- a reusable multi-stage Dockerfile,
+- shared Docker service definitions,
+- and a root `compose.yaml` for the interactive dev shell.
+
+Initialize the local Docker environment once:
+
+```bash
+./scripts/create_env
+```
+
+Run the Docker commands from the repository root so Compose picks up the local `.env`.
 
 Build the development image:
 
@@ -55,7 +68,7 @@ Start an interactive development shell:
 
 ```bash
 xhost +local:docker
-docker compose run --rm dev
+docker compose run --rm bash
 ```
 
 Inside the container:
@@ -70,6 +83,30 @@ Build the fully compiled image:
 ```bash
 docker compose -f docker/build.yaml build full
 ```
+
+Small helpers:
+
+```bash
+./scripts/status
+./scripts/pull
+```
+
+Useful compose services:
+
+```bash
+docker compose run --rm bash
+docker compose run --rm compile
+docker compose run --rm dev
+docker compose up monitor
+```
+
+For local monitoring, reuse the same Foxglove bridge pattern as the robot stack:
+
+```bash
+docker compose up monitor
+```
+
+Then connect Foxglove Studio to `ws://localhost:8765`.
 
 ## VS Code devcontainer
 

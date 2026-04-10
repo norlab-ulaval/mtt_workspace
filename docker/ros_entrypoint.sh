@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -e
 
-source "/opt/ros/${ROS_DISTRO}/setup.bash"
-
-if [ -f "${WORKSPACE}/install/setup.bash" ]; then
-  source "${WORKSPACE}/install/setup.bash"
+if [[ -z "${WORKSPACE}" ]]; then
+  echo >&2 "Missing environment variable 'WORKSPACE'"
+  exit 1
 fi
 
-exec "$@"
+cd -- "${WORKSPACE}"
+mkdir -p "${HOME}/.ros"
+
+exec /ros_setup.sh "$@"

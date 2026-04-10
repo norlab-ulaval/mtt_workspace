@@ -1,5 +1,5 @@
 services:
-  dev:
+  bash:
     extends:
       file: docker/common.yaml
       service: x11_base
@@ -16,10 +16,61 @@ services:
         USER_GID: ${GID:-1000}
     tty: true
     stdin_open: true
-    command: zsh
-    working_dir: ${PWD}
-    environment:
-      WORKSPACE: ${PWD}
+    command: bash
     volumes:
-      - .:${PWD}
       - ${HOME}/.ssh:/home/mtt/.ssh:ro
+
+  dev:
+    extends:
+      service: bash
+    command: zsh
+
+  build:
+    extends:
+      file: docker/common.yaml
+      service: base
+    image: ${MTT_IMAGE:-mtt_tools:devel}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: devel
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        USERNAME: mtt
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    command:
+      - bash
+      - -lc
+      - colcon build --symlink-install
+    volumes:
+      - ${HOME}/.ssh:/home/mtt/.ssh:ro
+
+  compile:
+    extends:
+      service: build
+
+  monitor:
+    extends:
+      file: docker/common.yaml
+      service: base
+    image: ${MTT_IMAGE:-mtt_tools:devel}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+      target: devel
+      args:
+        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+        USERNAME: mtt
+        USER_UID: ${UID:-1000}
+        USER_GID: ${GID:-1000}
+    command:
+      - ros2
+      - run
+      - foxglove_bridge
+      - foxglove_bridge
+      - --ros-args
+      - --params-file
+      - ${WORKSPACE}/docker/foxglove_bridge.yaml

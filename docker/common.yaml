@@ -6,17 +6,23 @@ services:
     ipc: host
     cap_add:
       - NET_ADMIN
-    working_dir: /workspaces/mtt_tools
+    working_dir: ${WORKSPACE}
     environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-      - RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+      - WORKSPACE
+      - ROS_DOMAIN_ID
+      - RMW_IMPLEMENTATION
+      - USER=mtt
+      - HOME=/home/mtt
       - DISPLAY
       - WAYLAND_DISPLAY
       - XDG_RUNTIME_DIR
     stop_signal: SIGINT
     volumes:
+      - ${WORKSPACE}:${WORKSPACE}
       - ${HOME}/.ros:/home/mtt/.ros
       - ${HOME}/.bash_history:/home/mtt/.bash_history
+      - ${HOME}/.config/ros.org:/home/mtt/.config/ros.org
+      - ${HOME}/.gazebo:/home/mtt/.gazebo
       - ${HOME}/.gitconfig:/home/mtt/.gitconfig:ro
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
@@ -27,5 +33,8 @@ services:
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XDG_RUNTIME_DIR:-/run/user/1000}:${XDG_RUNTIME_DIR:-/run/user/1000}
+      - ${HOME}/.Xauthority:/home/mtt/.Xauthority:ro
       - /dev/dri:/dev/dri
       - /dev/input:/dev/input
+    environment:
+      - XAUTHORITY=/home/mtt/.Xauthority

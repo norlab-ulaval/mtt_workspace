@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+set -e
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+add_variable_to_env_file() {
+  if ! grep -q "^$1=" .env 2>/dev/null; then
+    echo "  - Add $1=$2 to .env"
+    echo "$1=$2" >> .env
+  fi
+}
+
+initialize_env_file() {
+  echo 'Initialize ".env" file'
+  add_variable_to_env_file UID "$(id -u)"
+  add_variable_to_env_file GID "$(id -g)"
+  add_variable_to_env_file USER "$(whoami)"
+  add_variable_to_env_file WORKSPACE "$(pwd)"
+  add_variable_to_env_file MTT_IMAGE "mtt_tools:devel"
+  add_variable_to_env_file MTT_FULL_IMAGE "mtt_tools:full"
+  add_variable_to_env_file ROS_DISTRO "jazzy"
+  add_variable_to_env_file ROS_DOMAIN_ID "${ROS_DOMAIN_ID:-0}"
+  add_variable_to_env_file RMW_IMPLEMENTATION "${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+}
+
+create_binded_files() {
+  mkdir -p "${HOME}/.config/ros.org"
+  mkdir -p "${HOME}/.gazebo"
+  mkdir -p "${HOME}/.ros"
+  touch -a "${HOME}/.bash_history"
+  touch -a "${HOME}/.gitconfig"
+  touch -a "${HOME}/.Xauthority"
+}
+
+initialize_env_file
+create_binded_files

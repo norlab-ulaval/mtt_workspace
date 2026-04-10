@@ -35,10 +35,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     zsh \
     ros-${ROS_DISTRO}-controller-manager \
     ros-${ROS_DISTRO}-forward-command-controller \
+    ros-${ROS_DISTRO}-foxglove-bridge \
     ros-${ROS_DISTRO}-gz-ros2-control \
     ros-${ROS_DISTRO}-joint-state-publisher-gui \
     ros-${ROS_DISTRO}-joy-linux \
     ros-${ROS_DISTRO}-nav2-bringup \
+    ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
     ros-${ROS_DISTRO}-robot-state-publisher \
     ros-${ROS_DISTRO}-ros-gz-bridge \
     ros-${ROS_DISTRO}-ros-gz-sim \
@@ -69,7 +71,8 @@ RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
 RUN rosdep init 2>/dev/null || true
 
 COPY docker/ros_entrypoint.sh /ros_entrypoint.sh
-RUN chmod +x /ros_entrypoint.sh
+COPY docker/ros_setup.sh /ros_setup.sh
+RUN chmod +x /ros_entrypoint.sh /ros_setup.sh
 
 ENTRYPOINT ["/ros_entrypoint.sh"]
 CMD ["bash"]
