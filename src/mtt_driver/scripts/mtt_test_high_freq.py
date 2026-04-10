@@ -86,13 +86,14 @@ class MTTUnifiedHighFreqTester:
         # Processus externes
         self.fake_tacho_process: Optional[subprocess.Popen] = None
         self.mtt_processes: Dict[str, psutil.Process] = {}
+        self.workspace_root = Path(__file__).resolve().parents[3]
         
         # Thread de monitoring
         self.monitor_thread: Optional[threading.Thread] = None
         
         # Résultats
-        self.results_dir = Path("/home/ws/mtt_ws/performance_results")
-        self.results_dir.mkdir(exist_ok=True)
+        self.results_dir = self.workspace_root / "data" / "performance_results"
+        self.results_dir.mkdir(parents=True, exist_ok=True)
         
         # Signal handling
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -135,13 +136,14 @@ class MTTUnifiedHighFreqTester:
     def start_fake_tachometer(self) -> bool:
         """Démarre le fake tachometer à la fréquence cible."""
         print(f"INFO: Démarrage fake tachometer {self.target_frequency}Hz...")
-        
-        script_path = "/home/ws/mtt_ws/src/mtt_driver/scripts/mtt_fake_tachometer_400hz.py"
+
+        script_path = self.workspace_root / "src" / "mtt_driver" / "scripts" / "mtt_cmd_tachometer_sim.py"
+        if not script_path.is_file():
+            print(f"ERROR: Tachometer simulator introuvable: {script_path}")
+            return False
         
         cmd = [
-            "/home/ws/.venv/bin/python", script_path,
-            "--frequency", str(self.target_frequency),
-            "--duration", str(self.duration + 5),  # +5s pour sécurité
+            sys.executable, str(script_path),
             "--can-interface", "vcan0"
         ]
         

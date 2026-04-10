@@ -90,5 +90,5 @@ COPY . /workspaces/mtt_tools
 
 RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
     rosdep update && \
-    rosdep install -iyr --from-paths . --ignore-src && \
-    colcon build --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    rosdep install -iyr --from-paths src --ignore-src && \
+    colcon build --base-paths src --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo

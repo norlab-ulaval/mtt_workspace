@@ -1,0 +1,6 @@
+services:
+  simulation:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+    command: ros2 launch mtt_bringup mtt_simulation.launch.py

@@ -1,19 +1,21 @@
+x-build: &mtt_devel_build
+  context: .
+  dockerfile: docker/Dockerfile
+  target: devel
+  args:
+    ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    USERNAME: mtt
+    USER_UID: ${UID:-1000}
+    USER_GID: ${GID:-1000}
+
 services:
   bash:
     extends:
       file: docker/common.yaml
       service: x11_base
     image: ${MTT_IMAGE:-mtt_tools:devel}
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: devel
-      args:
-        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
-        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-        USERNAME: mtt
-        USER_UID: ${UID:-1000}
-        USER_GID: ${GID:-1000}
+    build: *mtt_devel_build
     tty: true
     stdin_open: true
     command: bash
@@ -30,20 +32,11 @@ services:
       file: docker/common.yaml
       service: base
     image: ${MTT_IMAGE:-mtt_tools:devel}
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: devel
-      args:
-        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
-        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-        USERNAME: mtt
-        USER_UID: ${UID:-1000}
-        USER_GID: ${GID:-1000}
+    build: *mtt_devel_build
     command:
       - bash
       - -lc
-      - colcon build --symlink-install
+      - colcon build --base-paths src --symlink-install
     volumes:
       - ${HOME}/.ssh:/home/mtt/.ssh:ro
 
@@ -54,18 +47,9 @@ services:
   monitor:
     extends:
       file: docker/common.yaml
-      service: base
+      service: ros_runtime_base
     image: ${MTT_IMAGE:-mtt_tools:devel}
-    build:
-      context: .
-      dockerfile: docker/Dockerfile
-      target: devel
-      args:
-        ROS_DISTRO: ${ROS_DISTRO:-jazzy}
-        RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
-        USERNAME: mtt
-        USER_UID: ${UID:-1000}
-        USER_GID: ${GID:-1000}
+    build: *mtt_devel_build
     command:
       - ros2
       - run

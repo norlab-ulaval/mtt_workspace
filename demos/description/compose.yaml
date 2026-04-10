@@ -1,0 +1,6 @@
+services:
+  description:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+    command: ros2 launch mtt_description mtt_description.launch.py

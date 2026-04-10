@@ -66,3 +66,24 @@ __pycache__/
 
 # VS Code stays local
 .vscode/
+
+# Local environment
+.env
+.env.*
+
+# Local workspace noise
+.pytest_cache/
+.mypy_cache/
+compile_commands.json
+*.swp
+*.swo
+.DS_Store
+
+# Data stays local by default
+data/raw/
+data/processed/
+tmp/
+
+# Generated robot artifacts
+src/mtt_description/urdf/*.urdf
+src/mtt_description/urdf/*.sdf

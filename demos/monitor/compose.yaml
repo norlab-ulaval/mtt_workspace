@@ -1,0 +1,5 @@
+services:
+  monitor_demo:
+    extends:
+      file: ../../compose.yaml
+      service: monitor

@@ -175,11 +175,11 @@ def generate_launch_description():
     # tip:  mtt sdf: gz sdf -p robot.urdf.xacro > robot.sdf
     declare_robot_sdf_cmd = DeclareLaunchArgument(
         'robot_sdf',
-        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.sdf'),
-        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.sdf'),
-        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.urdf.xacro'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.urdf.xacro'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro'),
 
-        description='Full path to robot sdf file to spawn the robot in gazebo',
+        description='Full path to the robot xacro file used to spawn the robot in Gazebo',
     )
 
     urdf = os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro')

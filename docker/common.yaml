@@ -1,11 +1,6 @@
 services:
   base:
     image: ${MTT_IMAGE:-mtt_tools:devel}
-    network_mode: host
-    pid: host
-    ipc: host
-    cap_add:
-      - NET_ADMIN
     working_dir: ${WORKSPACE}
     environment:
       - WORKSPACE
@@ -27,9 +22,18 @@ services:
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
 
-  x11_base:
+  ros_runtime_base:
     extends:
       service: base
+    network_mode: host
+    pid: host
+    ipc: host
+    cap_add:
+      - NET_ADMIN
+
+  x11_base:
+    extends:
+      service: ros_runtime_base
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix
       - ${XDG_RUNTIME_DIR:-/run/user/1000}:${XDG_RUNTIME_DIR:-/run/user/1000}

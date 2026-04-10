@@ -44,10 +44,10 @@ def generate_launch_description():
 
     declare_robot_sdf_cmd = DeclareLaunchArgument(
         'robot_sdf',
-        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.sdf'),
-        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.sdf'),
-        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.sdf'),
-        description='Full path to robot sdf file to spawn the robot in gazebo')
+        default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_less_collision.urdf.xacro'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot_no_collision.urdf.xacro'),
+        # default_value=os.path.join(mtt_description_dir, 'urdf', 'robot.urdf.xacro'),
+        description='Full path to the robot xacro file used to spawn the robot in Gazebo')
   
     bridge = Node(
         package='ros_gz_bridge',
