@@ -156,6 +156,7 @@ Then connect Foxglove Studio to `ws://localhost:8765`.
 ## VS Code devcontainer
 
 The devcontainer now reuses the same `docker/Dockerfile` as the regular Docker workflow.
+Its internal `colcon` cache is kept separate from the host `build/`, `install/`, and `log/` directories so reopening the project in VS Code does not fight with a host-side build.
 
 1. Open the repo in VS Code.
 2. Make sure `Dev Containers` is installed.

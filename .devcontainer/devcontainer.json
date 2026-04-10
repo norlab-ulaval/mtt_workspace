@@ -3,6 +3,7 @@
   "privileged": true,
   "remoteUser": "mtt",
   "build": {
+    "context": "..",
     "dockerfile": "../docker/Dockerfile",
     "target": "devel",
     "args": {
