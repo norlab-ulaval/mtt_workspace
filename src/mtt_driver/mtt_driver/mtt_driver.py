@@ -98,6 +98,7 @@ class TachometerData:
     tachometer_instant: int = 0
     tachometer_cumulative: int = 0
     timestamp: float = 0.0
+    monotonic_timestamp: float = 0.0
     new_data_available: bool = False
 
     def get_speed_ms(self, final_ratio: float) -> float:
@@ -148,15 +149,25 @@ class MTTCanDriver:
     raw device resolution values from upstream clients.
     """
 
-    def __init__(self, can_interface="can0", log_level=logging.INFO, can_id=0x001):
+    def __init__(
+        self,
+        can_interface="can0",
+        log_level=logging.INFO,
+        can_id=0x001,
+        telemetry_timeout_seconds=0.5,
+    ):
         """Construct driver."""
         # Configure this driver's logging level
         setup_logging(log_level)
         self.frame_lock = threading.RLock()  # Re-entrant lock to avoid self-deadlock
+        self.bus_reset_lock = threading.Lock()
         self.can_id = can_id
         self.can_interface = can_interface
-
-
+        self.telemetry_timeout_seconds = max(0.0, float(telemetry_timeout_seconds))
+        self._last_bus_reset_monotonic = 0.0
+        self.bus_reset_cooldown_seconds = 1.0
+        self.current_direction = DirectionState.Forward
+        self.bus = None
 
         # Check CAN interface availability and initialize
         self._check_and_initialize_can_interface()
@@ -236,11 +247,16 @@ class MTTCanDriver:
             raise Exception(f"CAN interface '{self.can_interface}' not available")
 
         try:
-            self.bus = can.interface.Bus(self.can_interface, bustype="socketcan")
+            self.bus = self._open_can_bus()
             log.info(f"Successfully initialized CAN bus on '{self.can_interface}'")
         except OSError as e:
             log.error(f"Failed to initialize CAN bus: {e}")
             raise
+
+    def _open_can_bus(self):
+        """Open the CAN bus with thread-safe send/recv operations when available."""
+        bus_class = getattr(can, "ThreadSafeBus", can.interface.Bus)
+        return bus_class(interface="socketcan", channel=self.can_interface)
 
     def __del__(self):
         self.cleanup()
@@ -251,9 +267,11 @@ class MTTCanDriver:
         if hasattr(self, "can_listener_thread"):
             self.can_listener_thread.join(timeout=1.0)
 
-        if hasattr(self, "bus") and self.bus:
-            self.bus.shutdown()
-            log.info("CAN driver cleaned up")
+        with self.bus_reset_lock:
+            if hasattr(self, "bus") and self.bus:
+                self.bus.shutdown()
+                self.bus = None
+                log.info("CAN driver cleaned up")
 
     def _calculate_gear_ratio(self):
         """Compute final gear ratio per mtt_encoder_methodology.md."""
@@ -282,15 +300,21 @@ class MTTCanDriver:
         """Listener thread: processes 0x2FF frames."""
         while self.can_listener_running:
             try:
-                if self.bus is None:
+                bus = self.bus
+                if bus is None:
                     time.sleep(0.1)
                     continue
-                message = self.bus.recv(timeout=0.1)
+                message = bus.recv(timeout=0.1)
                 if message and message.arbitration_id == CAN_MAIN_TELEMETRY:
                     self._process_tachometer_data(message.data)
+            except (OSError, can.CanOperationError) as e:
+                if self.can_listener_running:
+                    log.warning(f"CAN listener error on {self.can_interface}: {e}")
+                    self._reset_can_bus("receive failure")
+                    time.sleep(0.1)
             except Exception as e:
                 if self.can_listener_running:
-                    log.debug(f"CAN listener error: {e}")
+                    log.debug(f"Unexpected CAN listener error: {e}")
                     time.sleep(0.1)
 
     def _process_tachometer_data(self, data):
@@ -308,6 +332,7 @@ class MTTCanDriver:
             self.tachometer_data.tachometer_instant = tachimeter_instant
             self.tachometer_data.tachometer_cumulative = tachimeter_cumulative
             self.tachometer_data.timestamp = time.time()
+            self.tachometer_data.monotonic_timestamp = time.monotonic()
             self.tachometer_data.new_data_available = True
 
             # Convert cumulative ticks to absolute distance (hardware specification)
@@ -324,7 +349,7 @@ class MTTCanDriver:
     def _get_current_speed_ms(self) -> float:
         """Signed speed (m/s)."""
         with self.frame_lock:
-            if not self.tachometer_data.new_data_available:
+            if not self._tachometer_is_fresh_locked():
                 return 0.0
             speed = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
             if self.current_direction == DirectionState.Reverse:
@@ -334,27 +359,48 @@ class MTTCanDriver:
     def _get_current_speed_kmh(self) -> float:
         """Signed speed (km/h)."""
         with self.frame_lock:
-            if not self.tachometer_data.new_data_available:
+            if not self._tachometer_is_fresh_locked():
                 return 0.0
             speed = self.tachometer_data.get_speed_kmh(self.encoder_final_ratio)
             if self.current_direction == DirectionState.Reverse:
                 speed = -speed
             return speed
 
+    def _tachometer_is_fresh_locked(self) -> bool:
+        """Return True when telemetry has arrived recently enough to trust motion outputs."""
+        if not self.tachometer_data.new_data_available:
+            return False
+        if self.telemetry_timeout_seconds <= 0.0:
+            return True
+        if self.tachometer_data.monotonic_timestamp <= 0.0:
+            self.tachometer_data.new_data_available = False
+            return False
+        is_fresh = (time.monotonic() - self.tachometer_data.monotonic_timestamp) <= self.telemetry_timeout_seconds
+        if not is_fresh:
+            self.tachometer_data.new_data_available = False
+        return is_fresh
+
     def get_tachometer_snapshot(self) -> TachometerData:
         """Return an immutable snapshot (copy) of tachometer data."""
         with self.frame_lock:
-            return replace(self.tachometer_data)
+            snapshot = replace(self.tachometer_data)
+            snapshot.new_data_available = self._tachometer_is_fresh_locked()
+            return snapshot
 
     def get_odometry_snapshot(self) -> dict:
         """Return a consistent snapshot dict (distance always positive)."""
         with self.frame_lock:
-            speed_ms = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
-            speed_kmh = self.tachometer_data.get_speed_kmh(self.encoder_final_ratio)
-            if self.current_direction == DirectionState.Reverse:
-                speed_ms = -speed_ms
-                speed_kmh = -speed_kmh
+            telemetry_is_fresh = self._tachometer_is_fresh_locked()
+            speed_ms = 0.0
+            speed_kmh = 0.0
+            if telemetry_is_fresh:
+                speed_ms = self.tachometer_data.get_speed_ms(self.encoder_final_ratio)
+                speed_kmh = self.tachometer_data.get_speed_kmh(self.encoder_final_ratio)
+                if self.current_direction == DirectionState.Reverse:
+                    speed_ms = -speed_ms
+                    speed_kmh = -speed_kmh
             ts = self.tachometer_data.timestamp
+            monotonic_ts = self.tachometer_data.monotonic_timestamp
             return {
                 "speed_ms": speed_ms,
                 "speed_kmh": speed_kmh,
@@ -364,9 +410,21 @@ class MTTCanDriver:
                 "temperature_a": self.tachometer_data.main_sensor_temp_a,
                 "temperature_b": self.tachometer_data.main_sensor_temp_b,
                 "direction": self.get_direction().name,
-                "data_age_ms": ((time.time() - ts) * 1000 if ts > 0 else 0),
+                "data_age_ms": ((time.monotonic() - monotonic_ts) * 1000 if monotonic_ts > 0 else 0),
+                "telemetry_is_fresh": telemetry_is_fresh,
             }
             # "direction": self.current_direction.name if self.current_direction else "Unknown",
+
+    def get_command_state_snapshot(self) -> dict:
+        """Return the current command-side state sent to the vehicle."""
+        with self.frame_lock:
+            return {
+                "steer_raw": int(self.steer_value) if self.steer_value is not None else 0,
+                "throttle_raw": int(self.throttle_value) if self.throttle_value is not None else 0,
+                "brake_raw": int(self.brake_value) if self.brake_value is not None else 0,
+                "direction": self.direction_state.name if self.direction_state else "Unknown",
+                "safety_state": self.security_switch_state.name if self.security_switch_state else "Unknown",
+            }
 
 
     #########################
@@ -398,14 +456,14 @@ class MTTCanDriver:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] &= 0b11110111
                 self.security_switch_state = SecuritySwitchState.SafetyLocked
-                print("Safety Locked")
+                log.debug("Safety locked")
             return True
 
         elif switch_value == SecuritySwitchState.SafetyUnlocked:
             with self.frame_lock:
                 self.can_array[MTT_SWITCHES_GLOBAL] |= 0b00001000
                 self.security_switch_state = SecuritySwitchState.SafetyUnlocked
-                print("Safety Unlocked")
+                log.debug("Safety unlocked")
             return True
 
         else:
@@ -498,7 +556,7 @@ class MTTCanDriver:
 
             return True
         else:
-            print("ERROR: invalid value for winch_state: " + str(winch_state))
+            log.error(f"invalid value for winch_state: {winch_state}")
             return False
 
     def set_light_state(self, light_state):
@@ -604,7 +662,8 @@ class MTTCanDriver:
             log.warning(f"CAN driver variables not initialized: {', '.join(uninitialized_vars)}")
             return
 
-        if self.bus is None:
+        bus = self.bus
+        if bus is None:
             log.warning("CAN bus not initialized")
             return
 
@@ -613,24 +672,15 @@ class MTTCanDriver:
                 frame_data = self.can_array.copy()
 
             message = can.Message(arbitration_id=self.can_id, data=frame_data, is_extended_id=False)
-            self.bus.send(message)
+            bus.send(message)
 
         except (OSError, can.CanOperationError) as e:
-            log.error(f"CAN send failed: {e}")
-            try:
-                self.bus.shutdown()
-            except Exception:
-                pass
-            try:
-                self.bus = can.interface.Bus(self.can_interface, bustype="socketcan")
-                log.info("Reinitialized CAN bus.")
-            except Exception as init_e:
-                log.error(f"Failed to reinitialize CAN bus: {init_e}")
-                self.bus = None
+            log.error(f"CAN send failed on {self.can_interface}: {e}")
+            self._reset_can_bus("send failure")
 
     def set_throttle(self, percent: float):
         """Set throttle using percentage 0..1 (values outside range are clamped)."""
-        if isinstance(percent, float):
+        if isinstance(percent, (int, float)) and not isinstance(percent, bool):
             percent = max(0.0, min(1.0, float(percent)))
             raw = int(round(percent * THROTTLE_MAX))
             self._set_throttle(raw)
@@ -644,7 +694,7 @@ class MTTCanDriver:
 
     def set_brake(self, percent: float):
         """Set brake using percentage 0..1 (values outside range are clamped)."""
-        if isinstance(percent, float):
+        if isinstance(percent, (int, float)) and not isinstance(percent, bool):
             percent = max(0.0, min(1.0, float(percent)))
             raw = int(round(percent * BRAKE_MAX))
             self._set_brake(raw)
@@ -655,7 +705,7 @@ class MTTCanDriver:
 
     def set_steer(self, steer_value: float):
         """Set steering using normalized value -1..1 (values outside range are clamped)."""
-        if isinstance(steer_value, float):
+        if isinstance(steer_value, (int, float)) and not isinstance(steer_value, bool):
             clamped_value = max(-1.0, min(1.0, float(steer_value)))
             if abs(clamped_value) < STEER_DEADBAND:
                 raw = STEER_CENTER
@@ -668,6 +718,35 @@ class MTTCanDriver:
         else:
             log.error(f"steer normalized not numeric: {steer_value}")
             return False
+
+    def _reset_can_bus(self, reason: str):
+        """Re-open the CAN bus after a transport-level failure without spamming resets."""
+        now = time.monotonic()
+        if (now - self._last_bus_reset_monotonic) < self.bus_reset_cooldown_seconds:
+            return False
+
+        with self.bus_reset_lock:
+            now = time.monotonic()
+            if (now - self._last_bus_reset_monotonic) < self.bus_reset_cooldown_seconds:
+                return False
+            self._last_bus_reset_monotonic = now
+            old_bus = self.bus
+            self.bus = None
+
+            if old_bus is not None:
+                try:
+                    old_bus.shutdown()
+                except Exception:
+                    pass
+
+            try:
+                self.bus = self._open_can_bus()
+                log.warning(f"Reinitialized CAN bus on '{self.can_interface}' after {reason}")
+                return True
+            except Exception as init_e:
+                log.error(f"Failed to reinitialize CAN bus on '{self.can_interface}': {init_e}")
+                self.bus = None
+                return False
 
 
 def main(args=None):

@@ -5,12 +5,9 @@ import rclpy
 import time
 import threading
 import logging
-import math
-import time
-from enum import Enum
 from rclpy.node import Node
 from geometry_msgs.msg import TwistStamped
-from std_msgs.msg import UInt8,String
+from std_msgs.msg import UInt8
 from mtt_msgs.msg import MttTachometerData, MttVehicleStatus, MttAuxCommand, MttDrivingMode
 from mtt_interfaces.srv import SetVehiculeTypeSrv, GetVehiculeTypeSrv
 from .mtt_driver import (
@@ -34,6 +31,8 @@ class MTTRosWrapper(Node):
         self.declare_parameter("base_frame", "base_link")
         self.declare_parameter("can_id", 0x001)
         self.declare_parameter("direction_switch_threshold", 0.05)
+        self.declare_parameter("telemetry_timeout_seconds", 0.5)
+        self.declare_parameter("command_timeout_seconds", 0.5)
 
         can_interface = self.get_parameter("can_interface").get_parameter_value().string_value
         driver_log_level_str = self.get_parameter("driver_log_level").get_parameter_value().string_value
@@ -45,7 +44,9 @@ class MTTRosWrapper(Node):
         self.base_frame = self.get_parameter("base_frame").get_parameter_value().string_value
         self.can_id = int(self.get_parameter("can_id").get_parameter_value().integer_value)
         self.direction_switch_threshold = self.get_parameter("direction_switch_threshold").get_parameter_value().double_value
-    
+        self.telemetry_timeout_seconds = self.get_parameter("telemetry_timeout_seconds").get_parameter_value().double_value
+        self.command_timeout_seconds = self.get_parameter("command_timeout_seconds").get_parameter_value().double_value
+
     
         driver_log_level = getattr(logging, driver_log_level_str.upper(), logging.INFO)
 
@@ -53,7 +54,12 @@ class MTTRosWrapper(Node):
         self.get_logger().info(f"CAN interface: {can_interface}")
 
         try:
-            self.driver = MTTCanDriver(can_interface, log_level=driver_log_level, can_id=self.can_id)
+            self.driver = MTTCanDriver(
+                can_interface,
+                log_level=driver_log_level,
+                can_id=self.can_id,
+                telemetry_timeout_seconds=self.telemetry_timeout_seconds,
+            )
             self.get_logger().info("MTT Driver initialized")
         except Exception as e:
             self.get_logger().fatal(f"Could not start driver: {e}")
@@ -65,15 +71,12 @@ class MTTRosWrapper(Node):
         self.throttle_deadband = 0.345
         self.steer_deadband = 0.1
 
-        self._last_aux_cmd = MttAuxCommand()
         self._last_aux_cmd = None
         
         # Current steering input for odometry feedback (raw value sent to CAN bus)
         self.current_steering_input = 0.0  # Raw steering input (-1.0 to +1.0)
-
-        # Remote controller detection
-        self.remote_timeout_seconds = 0.5  # Remote considered lost after 500ms
-        self.last_remote_command_time = None
+        self.last_cmd_vel_time = None
+        self.command_timeout_active = False
 
         self.create_subscription(TwistStamped, "cmd_vel", self.cmd_vel_callback, 10)
         self.create_subscription(MttAuxCommand, "mtt_aux_cmd", self.aux_cmd_callback, 10)
@@ -97,8 +100,7 @@ class MTTRosWrapper(Node):
         self.steer_pub = self.create_publisher(UInt8, "mtt_steer_cmd", 10)
 
         self.ctrl_timer = self.create_timer(self.control_period, self.control_loop)
-
-        self.can_frame_timer = self.create_timer(self.can_frame_period, self.send_can_frame)  #THIS IS SHIT
+        self.can_frame_timer = self.create_timer(self.can_frame_period, self.send_can_frame)
 
     def send_can_frame(self):
         with self.driver_lock:
@@ -129,13 +131,16 @@ class MTTRosWrapper(Node):
         with self.driver_lock:
             # Origin/main behavior: set direction directly from cmd sign
             self.driver.set_throttle(throttle_percent)
-            steer_raw = self.driver.set_steer(max(-1.0, min(1.0, ang)))
+            self.driver.set_steer(max(-1.0, min(1.0, ang)))
             direction = DirectionState.Forward if lin >= 0 else DirectionState.Reverse
             self.driver.set_direction(direction)
             
             # Store the actual steering input sent to CAN bus for odometry feedback
             # This is the raw input value (-1.0 to +1.0) that was sent to the hardware
             self.current_steering_input = max(-1.0, min(1.0, ang))
+            self.last_cmd_vel_time = time.monotonic()
+            self.command_timeout_active = False
+            steer_raw = self.driver.get_command_state_snapshot()["steer_raw"]
 
         steer_msg = UInt8()
         steer_msg.data = steer_raw if steer_raw is not None else 0
@@ -159,8 +164,31 @@ class MTTRosWrapper(Node):
 
     def control_loop(self):
         """Main control loop - publishes tachometer data."""
+        self._apply_command_timeout_if_needed()
+        self._publish_vehicle_data()
+
+    def _cmd_vel_is_fresh(self):
+        if self.last_cmd_vel_time is None:
+            return False
+        if self.command_timeout_seconds <= 0.0:
+            return True
+        return (time.monotonic() - self.last_cmd_vel_time) <= self.command_timeout_seconds
+
+    def _apply_command_timeout_if_needed(self):
+        if self._cmd_vel_is_fresh() or self.last_cmd_vel_time is None:
+            return
+        if self.command_timeout_active:
+            return
+
         with self.driver_lock:
-            self._publish_vehicle_data()
+            self.driver.set_throttle(0.0)
+            self.driver.set_steer(0.0)
+            self.current_steering_input = 0.0
+            self.command_timeout_active = True
+
+        self.get_logger().warning(
+            f"No cmd_vel received for {self.command_timeout_seconds:.2f}s; neutralizing throttle and steering"
+        )
 
     def _set_driving_mode(self, mode: int):
         """
@@ -227,6 +255,8 @@ class MTTRosWrapper(Node):
         # Use snapshot methods to avoid torn reads
         tach_data = self.driver.get_tachometer_snapshot()
         odometry_data = self.driver.get_odometry_snapshot()
+        command_state = self.driver.get_command_state_snapshot()
+        cmd_vel_is_fresh = self._cmd_vel_is_fresh()
         
         # Always publish vehicle status for safety monitoring, regardless of tachometer data
         status_msg = MttVehicleStatus()
@@ -271,7 +301,11 @@ class MTTRosWrapper(Node):
             status_msg.tachometer_instant = 0
             status_msg.tachometer_cumulative = 0
         
-        status_msg.steer_position = 0          # Will be enhanced when steering is implemented
+        status_msg.steer_position = command_state["steer_raw"]
+        status_msg.emergency_stop_active = command_state["safety_state"] == SecuritySwitchState.SafetyLocked.name
+        status_msg.remote_connected = False
+        status_msg.deadman_active = cmd_vel_is_fresh
+        status_msg.safety_state = command_state["safety_state"]
         self.vehicle_status_pub.publish(status_msg)
 
     def destroy_node(self):

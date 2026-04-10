@@ -3,6 +3,7 @@ from rclpy.node import Node
 from sensor_msgs.msg import Joy
 from geometry_msgs.msg import TwistStamped
 from mtt_msgs.msg import MttAuxCommand
+import logging
 import pyinotify
 import os
 from ament_index_python.packages import get_package_share_directory
@@ -31,19 +32,23 @@ class MTTTeleopJoy(Node):
         self.maximum_angular_speed = 0.1  # rad/s
         self.declare_parameter("max_linear_speed", self.maximmum_linear_speed)
         self.declare_parameter("max_angular_speed", self.maximum_angular_speed) 
+        self.declare_parameter("joy_timeout_seconds", 0.5)
         self.maximmum_linear_speed = self.get_parameter("max_linear_speed").value
         self.maximum_angular_speed = self.get_parameter("max_angular_speed").value 
+        self.joy_timeout_seconds = float(self.get_parameter("joy_timeout_seconds").value)
 
  
 
         try:
-            self.driver = MTTCanDriver("can0", log_level="INFO", can_id=0x001)
+            self.driver = MTTCanDriver("can0", log_level=logging.INFO, can_id=0x001)
         except Exception as e:
             raise
 
         self.driver_lock = threading.RLock()
+        self.last_joy_message_time = None
+        self.joy_timeout_active = False
 
-        self.can_frame_timer = self.create_timer(0.05, self.send_can_frame)  #THIS IS SHIT
+        self.can_frame_timer = self.create_timer(0.05, self.send_can_frame)
 
 
         self.cmd_vel_pub = self.create_publisher(TwistStamped, "cmd_vel_raw", 10)
@@ -79,9 +84,32 @@ class MTTTeleopJoy(Node):
         self.wm.add_watch(config_dir, mask, rec=False)
 
     def send_can_frame(self):
+        self._apply_joy_timeout_if_needed()
         with self.driver_lock:
             self.driver.send_can_frame()
             # self.get_logger().info(f"MHC")
+
+    def _joy_is_fresh(self):
+        if self.last_joy_message_time is None:
+            return False
+        if self.joy_timeout_seconds <= 0.0:
+            return True
+        return (time.monotonic() - self.last_joy_message_time) <= self.joy_timeout_seconds
+
+    def _apply_joy_timeout_if_needed(self):
+        if self._joy_is_fresh() or self.last_joy_message_time is None:
+            return
+        if self.joy_timeout_active:
+            return
+
+        with self.driver_lock:
+            self.driver.set_throttle(0.0)
+            self.driver.set_light_state(LightState.Off)
+            self.joy_timeout_active = True
+
+        self.get_logger().warning(
+            f"No Joy message received for {self.joy_timeout_seconds:.2f}s; neutralizing direct teleop output"
+        )
 
 
     def _get_joystick_name(self, js_dev="/dev/input/js0"):
@@ -183,6 +211,8 @@ class MTTTeleopJoy(Node):
             else:
                 self.driver.set_throttle(0.0)
                 self.driver.set_light_state(LightState.Off)
+            self.last_joy_message_time = time.monotonic()
+            self.joy_timeout_active = False
 
 
 

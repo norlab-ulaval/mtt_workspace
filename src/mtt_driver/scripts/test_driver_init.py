@@ -44,7 +44,7 @@ def test_driver_initialization(can_interface='vcan0'):
         # Configure driver to get the desired frame [0, 64, 0, 127, 0, 128, 0, 0]
         from mtt_driver import DirectionState
         driver.set_direction(DirectionState.Reverse)  # To get byte 1 = 64 instead of 96
-        driver.set_steer(128)  # To get byte 5 = 128 instead of 127
+        driver._set_steer(128)  # Raw frame check: force byte 5 = 128 instead of 127
         log.info("✓ Driver initialized successfully")
         
         # Test 2: Check initial frame

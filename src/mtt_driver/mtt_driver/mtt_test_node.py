@@ -31,7 +31,8 @@ def test_driver_initialization(can_interface: str = "vcan0") -> bool:
         LOG.info("Test 1: Basic driver initialization on %s", can_interface)
         driver = MTTCanDriver(can_interface=can_interface)
         driver.set_direction(DirectionState.Reverse)
-        driver.set_steer(128)
+        # This test checks the raw frame layout, so it uses the raw helper on purpose.
+        driver._set_steer(128)
         LOG.info("Driver initialized successfully")
 
         LOG.info("Test 2: Check initial CAN frame")

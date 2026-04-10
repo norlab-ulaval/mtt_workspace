@@ -51,13 +51,14 @@ def main():
         
         if args.test_mode:
             print("Running basic test...")
-            print(f"E-STOP status: {driver.estop_active}")
+            print(f"Safety state: {driver.get_security_switch_state().name}")
             driver.release_estop()
-            print(f"E-STOP released: {not driver.estop_active}")
+            print(f"Safety state after release: {driver.get_security_switch_state().name}")
             
-            driver.set_throttle_percent(0.1)
-            driver.set_steer_normalized(0.0)
-            driver.set_brake_percent(0.0)
+            driver.set_throttle(0.1)
+            driver.set_steer(0.0)
+            driver.set_brake(0.0)
+            driver.send_can_frame()
             
             print("Basic test completed successfully")
             driver.cleanup()

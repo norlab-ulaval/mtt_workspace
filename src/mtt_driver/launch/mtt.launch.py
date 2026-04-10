@@ -15,6 +15,7 @@ from launch.actions import DeclareLaunchArgument, ExecuteProcess
 from launch.substitutions import LaunchConfiguration, Command, PythonExpression
 from launch.conditions import IfCondition
 from launch_ros.actions import Node
+from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
 
@@ -64,6 +65,11 @@ def generate_launch_description():
             description='Bitrate for real CAN interface (e.g., 250000, 500000).'
         ),
         DeclareLaunchArgument(
+            'can_id',
+            default_value='1',
+            description='Command CAN arbitration ID as a decimal integer (1 means 0x001).'
+        ),
+        DeclareLaunchArgument(
             'driver_log_level',
             default_value='INFO',
             description='Driver logging level (DEBUG, INFO, WARNING, ERROR)'
@@ -77,6 +83,16 @@ def generate_launch_description():
             'can_frame_frequency_hz',
             default_value='20.0',
             description='CAN frame frequency (Hz)'
+        ),
+        DeclareLaunchArgument(
+            'telemetry_timeout_seconds',
+            default_value='0.5',
+            description='Maximum age for 0x2FF telemetry before motion state is treated as stale'
+        ),
+        DeclareLaunchArgument(
+            'command_timeout_seconds',
+            default_value='0.5',
+            description='Maximum age for cmd_vel before throttle and steering are neutralized'
         ),
         DeclareLaunchArgument(
             'enable_teleop',
@@ -156,9 +172,12 @@ def generate_launch_description():
             name='mtt_ros_wrapper',
             parameters=[{
                 'can_interface': LaunchConfiguration('can_interface'),
+                'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
                 'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
+                'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
+                'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
                 'base_frame': LaunchConfiguration('base_frame'),
             }],
             output='screen',

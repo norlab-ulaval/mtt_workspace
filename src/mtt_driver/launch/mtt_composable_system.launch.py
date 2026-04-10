@@ -111,6 +111,16 @@ def generate_launch_description():
             description='CAN frame frequency (Hz)'
         ),
         DeclareLaunchArgument(
+            'telemetry_timeout_seconds',
+            default_value='0.5',
+            description='Maximum age for 0x2FF telemetry before motion state is treated as stale'
+        ),
+        DeclareLaunchArgument(
+            'command_timeout_seconds',
+            default_value='0.5',
+            description='Maximum age for cmd_vel before throttle and steering are neutralized'
+        ),
+        DeclareLaunchArgument(
             'enable_teleop',
             default_value='true',
             description='Enable teleoperation (joystick + teleop controller + smoother)'
@@ -193,6 +203,8 @@ def generate_launch_description():
                 'driver_log_level': LaunchConfiguration('driver_log_level'),
                 'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
                 'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
+                'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
+                'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
                 'base_frame': LaunchConfiguration('base_frame'),
             }],
             output='screen',
