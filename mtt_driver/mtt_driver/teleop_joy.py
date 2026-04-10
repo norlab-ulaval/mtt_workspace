@@ -169,27 +169,20 @@ class MTTTeleopJoy(Node):
         if not self.is_initialized:
             return
 
-        if msg.buttons[5]:
-            if msg. [0]:
-                    
+        deadman_pressed = len(msg.buttons) > 5 and bool(msg.buttons[5])
+        throttle_pressed = len(msg.buttons) > 0 and bool(msg.buttons[0])
+        stop_pressed = len(msg.buttons) > 1 and bool(msg.buttons[1])
 
-
-                    with self.driver_lock:
-                        self.driver.set_throttle(0.4)
-                        self.driver.set_light_state(LightState.On)
-                    # self.driver.send_can_frame()
-                        # self.get_logger().info(f"jbd")
-
-                    # time.sleep(duration)
-
-            if msg.buttons[1]:
-                with self.driver_lock:
-                    self.driver.set_throttle(0.0)
-                    self.driver.set_light_state(LightState.Off)
-
-        else:
-            self.driver.set_light_state(LightState.Off)
-            self.driver.set_throttle(0.0)
+        with self.driver_lock:
+            if deadman_pressed and throttle_pressed:
+                self.driver.set_throttle(0.4)
+                self.driver.set_light_state(LightState.On)
+            elif deadman_pressed and stop_pressed:
+                self.driver.set_throttle(0.0)
+                self.driver.set_light_state(LightState.Off)
+            else:
+                self.driver.set_throttle(0.0)
+                self.driver.set_light_state(LightState.Off)
 
 
 
