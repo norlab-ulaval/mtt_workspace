@@ -1,4 +1,9 @@
 services:
+  bash:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+
   description:
     extends:
       file: ../../compose.yaml

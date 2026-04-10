@@ -1,4 +1,9 @@
 services:
+  bash:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+
   monitor_demo:
     extends:
       file: ../../compose.yaml
