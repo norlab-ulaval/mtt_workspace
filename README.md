@@ -17,6 +17,12 @@ Start in the repository root and create the local Docker environment once:
 ./scripts/create_env
 ```
 
+If you plan to work with the real robot, the same script also writes the variables used by the live demos:
+- `ROBOT_SSH_TARGET`
+- `ROBOT_WORKSPACE`
+- `ZENOH_ROUTER_ENDPOINT`
+- `FOXGLOVE_WS_URL`
+
 For host-side development:
 
 ```bash
@@ -86,7 +92,7 @@ ros2 launch mtt_driver mtt_composable_system.launch.py --show-args
 
 ## Docker workflow
 
-The repo ships a regular Docker workflow for local MTT work:
+Docker support in this repo is built around:
 - `./scripts/create_env` prepares `.env` and the host-side bind mounts,
 - `docker/build.yaml` builds the development and full images,
 - `compose.yaml` provides the interactive shell, compile flow, and monitor service.
@@ -125,6 +131,7 @@ Small helpers:
 ```bash
 ./scripts/status
 ./scripts/pull
+./scripts/autosync_ws
 ```
 
 Useful compose services:
@@ -143,6 +150,7 @@ xhost +local:docker
 docker compose --env-file .env -f demos/description/compose.yaml up description
 docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
 docker compose --env-file .env -f demos/monitor/compose.yaml up monitor_demo
+docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
 ```
 
 For local monitoring, the `monitor` service starts a Foxglove bridge with the same parameters used in the MTT stack:
@@ -152,6 +160,48 @@ docker compose up monitor
 ```
 
 Then connect Foxglove Studio to `ws://localhost:8765`.
+
+## Robot sync
+
+Use this helper to sync the workspace to the robot:
+
+```bash
+./scripts/autosync_ws
+```
+
+By default it sends `src`, `docker`, `scripts`, `demos`, `doc`, `compose.yaml`, and `README.md` to `ROBOT_WORKSPACE`. It skips build artifacts, `.vscode`, `.env`, local data, and git internals.
+
+For a continuous sync loop while you work:
+
+```bash
+./scripts/autosync_ws --watch
+```
+
+## Live robot demos
+
+The `demos/live_robot/` directory is the laptop-side setup for the real MTT.
+It assumes the robot is already up and its Zenoh router and Foxglove bridge are reachable.
+
+A common flow is:
+
+```bash
+./scripts/create_env
+./scripts/autosync_ws
+docker compose -f docker/build.yaml build devel
+docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
+```
+
+Then connect Foxglove Studio to `ws://localhost:8766`.
+
+Other useful services:
+
+```bash
+docker compose --env-file .env -f demos/live_robot/compose.yaml up teleop_pc
+docker compose --env-file .env -f demos/live_robot/compose.yaml up constant_speed
+docker compose --env-file .env -f demos/live_robot/compose.yaml up record
+```
+
+The `record` service stores a bag under `data/records/live_robot/<timestamp>/` and also saves the demo config, the local git state, the local `.env`, and a small SSH snapshot of the robot runtime. The helper scripts live in `demos/live_robot/scripts/`.
 
 ## VS Code devcontainer
 

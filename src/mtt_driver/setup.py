@@ -28,6 +28,7 @@ setup(
             'mtt_driver = mtt_driver.mtt_driver:main',
             'mtt_ros_wrapper = mtt_driver.mtt_ros_wrapper:main',
             'mtt_teleop_joy = mtt_driver.mtt_teleop_joy:main',
+            'mtt_constant_command = mtt_driver.mtt_constant_command:main',
             'teleop_joy = mtt_driver.teleop_joy:main',
             'mtt_odometry_manager = mtt_driver.mtt_odometry_manager:main',
             'mtt_joint_controller = mtt_driver.mtt_joint_controller:main',

@@ -1,0 +1,34 @@
+# Directory can be relative to the workspace root or absolute.
+# The record helper will create: <directory>/<demo_name>/<timestamp>/
+name: live_robot
+directory: data/records
+config: true
+vcs: true
+remote_snapshot: true
+storage: mcap
+max_cache_size: 1048576000
+storage_config: demos/live_robot/config/mcap_writer_options.yaml
+topics:
+  - /cmd_vel
+  - /cmd_vel/nav
+  - /cmd_vel/teleop
+  - /controller/cmd_vel
+  - /joint_states
+  - /joy
+  - /mtt_articulation_angle
+  - /mtt_aux_cmd
+  - /mtt_driving_mode
+  - /mtt_odometry
+  - /mtt_status
+  - /mtt_steer_cmd
+  - /mtt_tachometer
+  - /robot_description
+  - /tf
+  - /tf_static
+  - /mti100/data
+  - /mti100/data_raw
+  - /mti10/data
+  - /mapping/icp_odom
+  - /mapping/map
+  - /hesai_lidar/points
+  - /rsairy_ns/points

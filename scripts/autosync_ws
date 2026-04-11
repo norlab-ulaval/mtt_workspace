@@ -1,0 +1,150 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+print_usage() {
+  cat <<'EOF'
+Usage: ./scripts/autosync_ws [--watch] [--dry-run] [--no-prepare] [[user@]host] [remote_path]
+
+Examples:
+  ./scripts/autosync_ws
+  ./scripts/autosync_ws <robot_user>@192.168.2.2
+  ./scripts/autosync_ws --watch <robot_user>@192.168.2.2 /home/<robot_user>/Project/mtt_ws
+
+The sync sends the workspace files that matter:
+  compose.yaml  src/  docker/  scripts/  demos/  doc/  README.md
+
+It skips local files:
+  .git  .vscode  .devcontainer  .env  build/install/log  caches  local data
+EOF
+}
+
+watch_mode=false
+dry_run=false
+prepare_remote=true
+positionals=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --watch)
+      watch_mode=true
+      shift
+      ;;
+    --dry-run)
+      dry_run=true
+      shift
+      ;;
+    --no-prepare)
+      prepare_remote=false
+      shift
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      positionals+=("$1")
+      shift
+      ;;
+  esac
+done
+
+read_env_value() {
+  local key="$1"
+  if [[ ! -f .env ]]; then
+    return 1
+  fi
+  awk -F= -v lookup="${key}" '$1 == lookup {print substr($0, index($0, "=") + 1)}' .env | tail -n 1
+}
+
+host="${positionals[0]:-${ROBOT_SSH_TARGET:-$(read_env_value ROBOT_SSH_TARGET || true)}}"
+remote_path="${positionals[1]:-${ROBOT_WORKSPACE:-$(read_env_value ROBOT_WORKSPACE || true)}}"
+host="${host:-${ROBOT_USER:-$USER}@${ROBOT_HOST:-192.168.2.2}}"
+remote_path="${remote_path:-/home/${ROBOT_USER:-$USER}/Project/mtt_ws}"
+remote_path_quoted="$(printf '%q' "${remote_path}")"
+
+rsync_args=(
+  -az
+  --delete
+  --delete-excluded
+  --info=NAME,STATS
+)
+
+if [[ "${dry_run}" == true ]]; then
+  rsync_args+=(-n)
+fi
+
+exclude_args=(
+  --exclude=.git/
+  --exclude=.vscode/
+  --exclude=.devcontainer/
+  --exclude=.env
+  --exclude=.env.*
+  --exclude=build/
+  --exclude=install/
+  --exclude=log/
+  --exclude=__pycache__/
+  --exclude=.pytest_cache/
+  --exclude=.mypy_cache/
+  --exclude=data/live_robot/
+  --exclude=data/records/
+  --exclude=data/raw/
+  --exclude=data/processed/
+  --exclude=tmp/
+  --exclude='*.pyc'
+  --exclude='*.pyo'
+)
+
+sync_entries=(
+  compose.yaml
+  src
+  docker
+  scripts
+  demos
+  doc
+  README.md
+)
+
+prepare_remote_workspace() {
+  if [[ "${dry_run}" == true ]]; then
+    echo "[autosync] dry-run: remote prepare skipped"
+    return
+  fi
+
+  ssh "${host}" "mkdir -p ${remote_path_quoted}"
+}
+
+finalize_remote_workspace() {
+  if [[ "${prepare_remote}" != true || "${dry_run}" == true ]]; then
+    return
+  fi
+
+  ssh "${host}" "cd ${remote_path_quoted} && if [[ -x scripts/create_env ]]; then ./scripts/create_env >/dev/null; fi"
+}
+
+sync_workspace() {
+  prepare_remote_workspace
+  rsync "${rsync_args[@]}" "${exclude_args[@]}" -e ssh -- "${sync_entries[@]}" "${host}:${remote_path}"
+  finalize_remote_workspace
+}
+
+echo "[autosync] target: ${host}:${remote_path}"
+sync_workspace
+
+if [[ "${watch_mode}" != true ]]; then
+  exit 0
+fi
+
+if ! command -v inotifywait >/dev/null 2>&1; then
+  echo >&2 "[autosync] --watch needs inotifywait (install inotify-tools)"
+  exit 1
+fi
+
+echo "[autosync] watching for changes..."
+while inotifywait -rqq -e modify -e create -e move -e delete \
+  --exclude '(\.git|\.vscode|\.devcontainer|build|install|log|__pycache__|\.pytest_cache|\.mypy_cache|data/live_robot|data/records|data/raw|data/processed|tmp)' \
+  .; do
+  echo "[autosync] change detected, syncing..."
+  sync_workspace
+done

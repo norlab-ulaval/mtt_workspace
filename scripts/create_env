@@ -19,22 +19,47 @@ set_variable_in_env_file() {
 }
 
 initialize_env_file() {
+  local project_root
+  local robot_user="${ROBOT_USER:-$(whoami)}"
+  local robot_host="${ROBOT_HOST:-192.168.2.2}"
+  local robot_workspace="${ROBOT_WORKSPACE:-/home/${robot_user}/Project/mtt_ws}"
+  local robot_ssh_target="${ROBOT_SSH_TARGET:-${robot_user}@${robot_host}}"
+  local zenoh_router_endpoint="${ZENOH_ROUTER_ENDPOINT:-tcp/${robot_host}:7447}"
+  local local_foxglove_port="${LOCAL_FOXGLOVE_PORT:-8766}"
+  project_root="$(pwd)"
+
   echo 'Initialize ".env" file'
   set_variable_in_env_file UID "$(id -u)"
   set_variable_in_env_file GID "$(id -g)"
   set_variable_in_env_file USER "$(whoami)"
-  set_variable_in_env_file WORKSPACE "$(pwd)"
+  set_variable_in_env_file WORKSPACE "${project_root}"
   set_variable_in_env_file MTT_IMAGE "mtt_tools:devel"
   set_variable_in_env_file MTT_FULL_IMAGE "mtt_tools:full"
   set_variable_in_env_file ROS_DISTRO "jazzy"
   set_variable_in_env_file ROS_DOMAIN_ID "${ROS_DOMAIN_ID:-0}"
   set_variable_in_env_file RMW_IMPLEMENTATION "${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+  set_variable_in_env_file MTT_DATA_DIR "${project_root}/data"
+  set_variable_in_env_file LIVE_ROBOT_DOMAIN_ID "${LIVE_ROBOT_DOMAIN_ID:-2}"
+  set_variable_in_env_file ROBOT_USER "${robot_user}"
+  set_variable_in_env_file ROBOT_HOST "${robot_host}"
+  set_variable_in_env_file ROBOT_SSH_TARGET "${robot_ssh_target}"
+  set_variable_in_env_file ROBOT_WORKSPACE "${robot_workspace}"
+  set_variable_in_env_file ZENOH_ROUTER_ENDPOINT "${zenoh_router_endpoint}"
+  set_variable_in_env_file ROBOT_ZENOH_ENDPOINT "${zenoh_router_endpoint}"
+  set_variable_in_env_file FOXGLOVE_WS_URL "${FOXGLOVE_WS_URL:-ws://${robot_host}:8765}"
+  set_variable_in_env_file ROBOT_FOXGLOVE_URL "${ROBOT_FOXGLOVE_URL:-ws://${robot_host}:8765}"
+  set_variable_in_env_file LIVE_DEMO_NAME "${LIVE_DEMO_NAME:-live_robot}"
+  set_variable_in_env_file ZENOH_ROUTER_CHECK_ATTEMPTS "${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}"
+  set_variable_in_env_file LOCAL_FOXGLOVE_PORT "${local_foxglove_port}"
 }
 
 create_binded_files() {
   mkdir -p "${HOME}/.config/ros.org"
   mkdir -p "${HOME}/.gazebo"
   mkdir -p "${HOME}/.ros"
+  mkdir -p data
+  mkdir -p data/records
+  mkdir -p data/cache
   touch -a "${HOME}/.bash_history"
   touch -a "${HOME}/.gitconfig"
   touch -a "${HOME}/.Xauthority"

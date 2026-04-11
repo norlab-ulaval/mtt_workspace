@@ -1,0 +1,47 @@
+{
+  mode: "client",
+  connect: {
+    timeout_ms: { router: -1, peer: -1, client: 0 },
+    endpoints: [
+      "tcp/__ROBOT_HOST__:__ROBOT_ZENOH_PORT__"
+    ],
+    exit_on_failure: { router: false, peer: false, client: true },
+    retry: {
+      period_init_ms: 1000,
+      period_max_ms: 4000,
+      period_increase_factor: 2,
+    },
+  },
+  listen: {
+    timeout_ms: 0,
+    endpoints: [
+      "tcp/localhost:0"
+    ],
+    exit_on_failure: true,
+    retry: {
+      period_init_ms: 1000,
+      period_max_ms: 4000,
+      period_increase_factor: 2,
+    },
+  },
+  scouting: {
+    multicast: {
+      enabled: false,
+    },
+    gossip: {
+      enabled: true,
+      multihop: false,
+      autoconnect: { router: [], peer: ["router", "peer"] },
+    },
+  },
+  timestamping: {
+    enabled: { router: true, peer: true, client: true },
+    drop_future_timestamp: false,
+  },
+  queries_default_timeout: 10000,
+  routing: {
+    peer: {
+      mode: "peer_to_peer",
+    },
+  },
+}
