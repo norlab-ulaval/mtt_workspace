@@ -23,6 +23,18 @@ If you plan to work with the real robot, the same script also writes the variabl
 - `ZENOH_ROUTER_ENDPOINT`
 - `FOXGLOVE_WS_URL`
 
+The file is local and ignored by git. It is safe for each person to keep their own robot target.
+
+Examples:
+
+```bash
+./scripts/create_env
+./scripts/create_env --robot-target mohamed@192.168.2.2
+./scripts/create_env --robot-target robot@192.168.2.2
+```
+
+If you run `./scripts/create_env` again later, it keeps the current robot target unless you change it or use `--reset-robot-target`.
+
 For host-side development:
 
 ```bash
@@ -170,6 +182,15 @@ Use this helper to sync the workspace to the robot:
 ```
 
 By default it sends `src`, `docker`, `scripts`, `demos`, `doc`, `compose.yaml`, and `README.md` to `ROBOT_WORKSPACE`. It skips build artifacts, `.vscode`, `.env`, local data, and git internals.
+
+You can also override the target once from the command line:
+
+```bash
+./scripts/autosync_ws mohamed@192.168.2.2
+./scripts/autosync_ws robot@192.168.2.2
+```
+
+When you pass `user@host` without a path, the script now uses `/home/<user>/Project/mtt_ws`.
 
 For a continuous sync loop while you work:
 

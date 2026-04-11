@@ -4,6 +4,8 @@ log/
 build/
 bin/
 lib/
+!scripts/lib/
+!scripts/lib/*.sh
 install/
 msg_gen/
 srv_gen/

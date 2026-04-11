@@ -1,7 +1,67 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+. "$(pwd)/scripts/lib/mtt_env.sh"
+
+print_usage() {
+  cat <<'EOF'
+Usage: ./scripts/create_env [options]
+
+Options:
+  --robot-target user@host   set both robot user and host
+  --robot-user user          set the robot user
+  --robot-host host          set the robot host
+  --robot-workspace path     set the remote workspace path
+  --reset-robot-target       go back to the default robot target
+  -h, --help                 show this help
+
+Examples:
+  ./scripts/create_env
+  ./scripts/create_env --robot-target mohamed@192.168.2.2
+  ./scripts/create_env --robot-target robot@192.168.2.2
+EOF
+}
+
+robot_target_override=""
+robot_user_override=""
+robot_host_override=""
+robot_workspace_override=""
+reset_robot_target=false
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --robot-target)
+      robot_target_override="${2:?missing value for --robot-target}"
+      shift 2
+      ;;
+    --robot-user)
+      robot_user_override="${2:?missing value for --robot-user}"
+      shift 2
+      ;;
+    --robot-host)
+      robot_host_override="${2:?missing value for --robot-host}"
+      shift 2
+      ;;
+    --robot-workspace)
+      robot_workspace_override="${2:?missing value for --robot-workspace}"
+      shift 2
+      ;;
+    --reset-robot-target)
+      reset_robot_target=true
+      shift
+      ;;
+    -h|--help)
+      print_usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      print_usage >&2
+      exit 1
+      ;;
+  esac
+done
 
 set_variable_in_env_file() {
   local key="$1"
@@ -20,13 +80,104 @@ set_variable_in_env_file() {
 
 initialize_env_file() {
   local project_root
-  local robot_user="${ROBOT_USER:-$(whoami)}"
-  local robot_host="${ROBOT_HOST:-192.168.2.2}"
-  local robot_workspace="${ROBOT_WORKSPACE:-/home/${robot_user}/Project/mtt_ws}"
-  local robot_ssh_target="${ROBOT_SSH_TARGET:-${robot_user}@${robot_host}}"
-  local zenoh_router_endpoint="${ZENOH_ROUTER_ENDPOINT:-tcp/${robot_host}:7447}"
-  local local_foxglove_port="${LOCAL_FOXGLOVE_PORT:-8766}"
+  local existing_robot_user=""
+  local existing_robot_host=""
+  local existing_robot_target=""
+  local existing_robot_workspace=""
+  local explicit_robot_target=""
+  local parsed_robot_user=""
+  local parsed_robot_host=""
+  local robot_user=""
+  local robot_host=""
+  local robot_workspace=""
+  local robot_ssh_target=""
+  local robot_domain_id=""
+  local live_robot_domain_id=""
+  local rmw_implementation=""
+  local zenoh_router_endpoint=""
+  local robot_zenoh_endpoint=""
+  local foxglove_ws_url=""
+  local robot_foxglove_url=""
+  local local_foxglove_port=""
   project_root="$(pwd)"
+
+  if [[ "${reset_robot_target}" != true ]]; then
+    existing_robot_user="$(mtt_read_env_value "${project_root}" ROBOT_USER || true)"
+    existing_robot_host="$(mtt_read_env_value "${project_root}" ROBOT_HOST || true)"
+    existing_robot_target="$(mtt_read_env_value "${project_root}" ROBOT_SSH_TARGET || true)"
+    existing_robot_workspace="$(mtt_read_env_value "${project_root}" ROBOT_WORKSPACE || true)"
+  fi
+
+  explicit_robot_target="${robot_target_override:-${ROBOT_SSH_TARGET-}}"
+  if [[ -n "${explicit_robot_target}" ]]; then
+    parsed_robot_user="$(mtt_target_user "${explicit_robot_target}" || true)"
+    parsed_robot_host="$(mtt_target_host "${explicit_robot_target}" || true)"
+  fi
+
+  robot_user="${robot_user_override:-${ROBOT_USER-}}"
+  if [[ -z "${robot_user}" ]]; then
+    robot_user="${parsed_robot_user:-${existing_robot_user:-$(mtt_target_user "${existing_robot_target}" || true)}}"
+  fi
+  robot_user="${robot_user:-robot}"
+
+  robot_host="${robot_host_override:-${ROBOT_HOST-}}"
+  if [[ -z "${robot_host}" ]]; then
+    robot_host="${parsed_robot_host:-${existing_robot_host:-$(mtt_target_host "${existing_robot_target}" || true)}}"
+  fi
+  robot_host="${robot_host:-192.168.2.2}"
+
+  robot_ssh_target="${explicit_robot_target:-${existing_robot_target}}"
+  if [[ -z "${robot_ssh_target}" ]]; then
+    robot_ssh_target="${robot_user}@${robot_host}"
+  elif [[ "${robot_ssh_target}" != *"@"* ]]; then
+    robot_ssh_target="${robot_user}@${robot_ssh_target}"
+  fi
+
+  robot_workspace="${robot_workspace_override:-${ROBOT_WORKSPACE-}}"
+  if [[ -z "${robot_workspace}" ]]; then
+    if [[ -n "${existing_robot_workspace}" && -z "${explicit_robot_target}" && -z "${robot_user_override}" && -z "${ROBOT_USER-}" ]]; then
+      robot_workspace="${existing_robot_workspace}"
+    else
+      robot_workspace="$(mtt_default_robot_workspace "${robot_user}")"
+    fi
+  fi
+
+  robot_domain_id="$(mtt_env_or_file_or_default "${project_root}" ROS_DOMAIN_ID "0")"
+  live_robot_domain_id="$(mtt_env_or_file_or_default "${project_root}" LIVE_ROBOT_DOMAIN_ID "2")"
+  rmw_implementation="$(mtt_env_or_file_or_default "${project_root}" RMW_IMPLEMENTATION "rmw_cyclonedds_cpp")"
+  local_foxglove_port="$(mtt_env_or_file_or_default "${project_root}" LOCAL_FOXGLOVE_PORT "8766")"
+
+  if [[ -n "${ZENOH_ROUTER_ENDPOINT-}" ]]; then
+    zenoh_router_endpoint="${ZENOH_ROUTER_ENDPOINT}"
+  elif [[ -n "${explicit_robot_target}" || -n "${robot_host_override}" || -n "${ROBOT_HOST-}" ]]; then
+    zenoh_router_endpoint="tcp/${robot_host}:7447"
+  else
+    zenoh_router_endpoint="$(mtt_env_or_file_or_default "${project_root}" ZENOH_ROUTER_ENDPOINT "tcp/${robot_host}:7447")"
+  fi
+
+  if [[ -n "${ROBOT_ZENOH_ENDPOINT-}" ]]; then
+    robot_zenoh_endpoint="${ROBOT_ZENOH_ENDPOINT}"
+  elif [[ -n "${explicit_robot_target}" || -n "${robot_host_override}" || -n "${ROBOT_HOST-}" ]]; then
+    robot_zenoh_endpoint="tcp/${robot_host}:7447"
+  else
+    robot_zenoh_endpoint="$(mtt_env_or_file_or_default "${project_root}" ROBOT_ZENOH_ENDPOINT "tcp/${robot_host}:7447")"
+  fi
+
+  if [[ -n "${FOXGLOVE_WS_URL-}" ]]; then
+    foxglove_ws_url="${FOXGLOVE_WS_URL}"
+  elif [[ -n "${explicit_robot_target}" || -n "${robot_host_override}" || -n "${ROBOT_HOST-}" ]]; then
+    foxglove_ws_url="ws://${robot_host}:8765"
+  else
+    foxglove_ws_url="$(mtt_env_or_file_or_default "${project_root}" FOXGLOVE_WS_URL "ws://${robot_host}:8765")"
+  fi
+
+  if [[ -n "${ROBOT_FOXGLOVE_URL-}" ]]; then
+    robot_foxglove_url="${ROBOT_FOXGLOVE_URL}"
+  elif [[ -n "${explicit_robot_target}" || -n "${robot_host_override}" || -n "${ROBOT_HOST-}" ]]; then
+    robot_foxglove_url="ws://${robot_host}:8765"
+  else
+    robot_foxglove_url="$(mtt_env_or_file_or_default "${project_root}" ROBOT_FOXGLOVE_URL "ws://${robot_host}:8765")"
+  fi
 
   echo 'Initialize ".env" file'
   set_variable_in_env_file UID "$(id -u)"
@@ -36,20 +187,20 @@ initialize_env_file() {
   set_variable_in_env_file MTT_IMAGE "mtt_tools:devel"
   set_variable_in_env_file MTT_FULL_IMAGE "mtt_tools:full"
   set_variable_in_env_file ROS_DISTRO "jazzy"
-  set_variable_in_env_file ROS_DOMAIN_ID "${ROS_DOMAIN_ID:-0}"
-  set_variable_in_env_file RMW_IMPLEMENTATION "${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}"
+  set_variable_in_env_file ROS_DOMAIN_ID "${robot_domain_id}"
+  set_variable_in_env_file RMW_IMPLEMENTATION "${rmw_implementation}"
   set_variable_in_env_file MTT_DATA_DIR "${project_root}/data"
-  set_variable_in_env_file LIVE_ROBOT_DOMAIN_ID "${LIVE_ROBOT_DOMAIN_ID:-2}"
+  set_variable_in_env_file LIVE_ROBOT_DOMAIN_ID "${live_robot_domain_id}"
   set_variable_in_env_file ROBOT_USER "${robot_user}"
   set_variable_in_env_file ROBOT_HOST "${robot_host}"
   set_variable_in_env_file ROBOT_SSH_TARGET "${robot_ssh_target}"
   set_variable_in_env_file ROBOT_WORKSPACE "${robot_workspace}"
   set_variable_in_env_file ZENOH_ROUTER_ENDPOINT "${zenoh_router_endpoint}"
-  set_variable_in_env_file ROBOT_ZENOH_ENDPOINT "${zenoh_router_endpoint}"
-  set_variable_in_env_file FOXGLOVE_WS_URL "${FOXGLOVE_WS_URL:-ws://${robot_host}:8765}"
-  set_variable_in_env_file ROBOT_FOXGLOVE_URL "${ROBOT_FOXGLOVE_URL:-ws://${robot_host}:8765}"
-  set_variable_in_env_file LIVE_DEMO_NAME "${LIVE_DEMO_NAME:-live_robot}"
-  set_variable_in_env_file ZENOH_ROUTER_CHECK_ATTEMPTS "${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}"
+  set_variable_in_env_file ROBOT_ZENOH_ENDPOINT "${robot_zenoh_endpoint}"
+  set_variable_in_env_file FOXGLOVE_WS_URL "${foxglove_ws_url}"
+  set_variable_in_env_file ROBOT_FOXGLOVE_URL "${robot_foxglove_url}"
+  set_variable_in_env_file LIVE_DEMO_NAME "$(mtt_env_or_file_or_default "${project_root}" LIVE_DEMO_NAME "live_robot")"
+  set_variable_in_env_file ZENOH_ROUTER_CHECK_ATTEMPTS "$(mtt_env_or_file_or_default "${project_root}" ZENOH_ROUTER_CHECK_ATTEMPTS "5")"
   set_variable_in_env_file LOCAL_FOXGLOVE_PORT "${local_foxglove_port}"
 }
 

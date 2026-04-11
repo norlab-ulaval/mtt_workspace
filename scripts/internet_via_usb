@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+. "$(pwd)/scripts/lib/mtt_env.sh"
+
 # Share this Linux laptop Internet connection with the MTT high-level computer.
 # This script is meant for the MTT network used in the lab.
 # It is flexible on interface names, but it still assumes:
@@ -8,7 +11,10 @@ set -euo pipefail
 # - iptables
 # - a robot reachable on the 192.168.2.x network
 
-ROBOT_NAME="${ROBOT_NAME:-mtt-high-level}"
+ROBOT_NAME="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_NAME "mtt-high-level")"
+ROBOT_SSH_TARGET="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET "")"
+ROBOT_USER="${ROBOT_USER:-$(mtt_env_or_file_or_default "$(pwd)" ROBOT_USER "$(mtt_target_user "${ROBOT_SSH_TARGET}" || true)")}"
+ROBOT_HOST="${ROBOT_HOST:-$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST "$(mtt_target_host "${ROBOT_SSH_TARGET}" || true)")}"
 ROBOT_USER="${ROBOT_USER:-robot}"
 ROBOT_HOST="${ROBOT_HOST:-192.168.2.2}"
 ROBOT_ROUTE_IFACE="${ROBOT_ROUTE_IFACE:-enp5s0}"
@@ -67,8 +73,9 @@ but it is not a macOS/Windows script.
 
 Optional overrides:
   ROBOT_NAME         SSH alias or label shown in logs                (default: mtt-high-level)
-  ROBOT_USER         remote user                                     (default: robot)
-  ROBOT_HOST         robot IP reachable from this laptop             (default: 192.168.2.2)
+  ROBOT_SSH_TARGET   remote target in user@host form
+  ROBOT_USER         remote user                                     (default: from .env or robot)
+  ROBOT_HOST         robot IP reachable from this laptop             (default: from .env or 192.168.2.2)
   ROBOT_SUBNET       robot subnet to NAT                             (default: 192.168.2.0/24)
   ROBOT_ROUTE_IFACE  robot interface to use for default route tip    (default: enp5s0)
   DOWN_IFACE         local interface connected to the robot
@@ -83,6 +90,10 @@ Examples:
 
   # If the robot is reached on another IP/interface:
   ROBOT_HOST=192.168.2.102 ROBOT_ROUTE_IFACE=enp4s0 bash internet_via_usb
+
+  # Reuse the same target as autosync/live demos:
+  ./scripts/create_env --robot-target mohamed@192.168.2.2
+  bash scripts/internet_via_usb
 
 Useful checks before running:
   ip route show default

@@ -2,6 +2,7 @@
 set -euo pipefail
 
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+. "$(pwd)/scripts/lib/mtt_env.sh"
 
 print_usage() {
   cat <<'EOF'
@@ -50,18 +51,20 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-read_env_value() {
-  local key="$1"
-  if [[ ! -f .env ]]; then
-    return 1
-  fi
-  awk -F= -v lookup="${key}" '$1 == lookup {print substr($0, index($0, "=") + 1)}' .env | tail -n 1
-}
+default_robot_user="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_USER "robot")"
+default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST "192.168.2.2")"
+default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET "${default_robot_user}@${default_robot_host}")"
 
-host="${positionals[0]:-${ROBOT_SSH_TARGET:-$(read_env_value ROBOT_SSH_TARGET || true)}}"
-remote_path="${positionals[1]:-${ROBOT_WORKSPACE:-$(read_env_value ROBOT_WORKSPACE || true)}}"
-host="${host:-${ROBOT_USER:-$USER}@${ROBOT_HOST:-192.168.2.2}}"
-remote_path="${remote_path:-/home/${ROBOT_USER:-$USER}/Project/mtt_ws}"
+host="${positionals[0]:-${default_robot_target}}"
+target_user="$(mtt_target_user "${host}" || true)"
+target_user="${target_user:-${default_robot_user}}"
+
+if [[ -n "${positionals[0]:-}" && -z "${positionals[1]:-}" ]]; then
+  remote_path="$(mtt_default_robot_workspace "${target_user}")"
+else
+  remote_path="${positionals[1]:-$(mtt_env_or_file_or_default "$(pwd)" ROBOT_WORKSPACE "$(mtt_default_robot_workspace "${target_user}")")}"
+fi
+
 remote_path_quoted="$(printf '%q' "${remote_path}")"
 
 rsync_args=(

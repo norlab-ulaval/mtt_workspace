@@ -26,18 +26,13 @@ From the repository root:
 docker compose run --rm compile
 ```
 
-If needed, update the robot target in `.env`:
+For the default lab login, this is enough. If your robot user is different, set it once:
 
 ```bash
-ROBOT_HOST=192.168.2.2
-ROBOT_USER=<robot_user>
-ROBOT_WORKSPACE=/home/<robot_user>/Project/mtt_ws
-ROBOT_SSH_TARGET=<robot_user>@192.168.2.2
-ROBOT_ZENOH_ENDPOINT=tcp/192.168.2.2:7447
-ROBOT_FOXGLOVE_URL=ws://192.168.2.2:8765
-LIVE_ROBOT_DOMAIN_ID=2
-LOCAL_FOXGLOVE_PORT=8766
+./scripts/create_env --robot-target <robot_user>@192.168.2.2
 ```
+
+The target is kept in your local `.env`, so you do not need to edit tracked files.
 
 ## Basic use
 
