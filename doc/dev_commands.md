@@ -8,6 +8,9 @@ Small commands that were previously sitting in `notes.txt` and are still worth k
 sudo ip link set can0 up type can bitrate 250000
 candump can0
 candump can0 -xct z -n 10
+python3 scripts/mtt_can_audit.py --interface can0 --duration 8
+python3 scripts/mtt_can_monitor.py --interface can0
+.venv-tools/bin/python scripts/mtt_can_export.py /path/to/candump.log
 ```
 
 Example frame payload:
@@ -49,4 +52,5 @@ sudo ip link set up vcan0
 
 python3 src/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
 ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0
+python3 scripts/mtt_can_monitor.py --interface vcan0
 ```

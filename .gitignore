@@ -74,6 +74,7 @@ __pycache__/
 # Local workspace noise
 .pytest_cache/
 .mypy_cache/
+.venv*/
 compile_commands.json
 *.swp
 *.swo
@@ -82,6 +83,8 @@ compile_commands.json
 # Data stays local by default
 data/raw/
 data/processed/
+data/live_robot/
+data/records/
 tmp/
 
 # Generated robot artifacts

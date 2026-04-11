@@ -1,0 +1,140 @@
+VERSION "MTT CAN v1.1 simple"
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: JOYSTICK EXT_CTRL MAIN_CTRL BMS CHARGER MODULE300 MODULE301 LOGGER
+
+BO_ 1 MTT_Control_Joystick_001: 8 JOYSTICK
+ SG_ VehicleType : 0|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ SecurityUnlocked : 15|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ LightOff_EStopPatch : 14|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ DirectionReverse : 13|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ Throttle : 16|8@1+ (1,0) [0|230] "" LOGGER
+ SG_ Winch : 24|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ Brake : 32|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ Steering : 40|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ SteeringModeClosedLoop : 48|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ ReservedByte7 : 56|8@1+ (1,0) [0|255] "" LOGGER
+
+BO_ 256 MTT_Control_External_100: 8 EXT_CTRL
+ SG_ VehicleType : 0|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ SecurityUnlocked : 15|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ LightOff_EStopPatch : 14|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ DirectionReverse : 13|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ Throttle : 16|8@1+ (1,0) [0|230] "" LOGGER
+ SG_ Winch : 24|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ Brake : 32|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ Steering : 40|8@1+ (1,0) [0|255] "" LOGGER
+ SG_ SteeringModeClosedLoop : 48|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ ReservedByte7 : 56|8@1+ (1,0) [0|255] "" LOGGER
+
+BO_ 767 MTT_Main_Status_2FF: 8 MAIN_CTRL
+ SG_ MainSensorTempA : 0|8@1- (1,0) [-128|127] "degC" LOGGER
+ SG_ MainSensorTempB : 8|8@1- (1,0) [-128|127] "degC" LOGGER
+ SG_ TachometerInstant_ticks_per_s : 23|16@0+ (1,0) [0|65535] "ticks_s" LOGGER
+ SG_ TachometerCumulative_ticks : 39|32@0+ (1,0) [0|4294967295] "ticks" LOGGER
+
+BO_ 768 MTT_Main_Controller_Version_300: 8 MODULE300
+ SG_ MainHardwareRevision : 7|32@0+ (1,0) [0|0] "" LOGGER
+ SG_ MainSoftwareRevision : 39|32@0+ (1,0) [0|0] "" LOGGER
+
+BO_ 769 MTT_Battery_Controller_Version_301: 8 MODULE301
+ SG_ BatteryHardwareRevision : 7|32@0+ (1,0) [0|0] "" LOGGER
+ SG_ BatterySoftwareRevision : 39|32@0+ (1,0) [0|0] "" LOGGER
+
+BO_ 1536 MTT_BMS_Cell_Temperatures_600: 8 BMS
+ SG_ CellTemp1 : 7|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ CellTemp2 : 23|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ CellTemp3 : 39|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ CellTemp4 : 55|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+
+BO_ 1537 MTT_BMS_System_Temperatures_601: 8 BMS
+ SG_ AmbientTemp : 7|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ MosfetTemp : 23|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ HeatpadATemp : 39|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+ SG_ HeatpadBTemp : 55|16@0- (1,0) [-32768|32767] "degC_raw" LOGGER
+
+BO_ 1538 MTT_BMS_Core_Status_602: 8 BMS
+ SG_ StateOfCharge : 0|8@1+ (1,0) [0|100] "%" LOGGER
+ SG_ BatteryCurrent_raw : 15|16@0- (1,0) [-32768|32767] "raw" LOGGER
+ SG_ BatteryVoltage_raw : 31|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ HeatpadB_On : 40|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ HeatpadA_On : 41|1@1+ (1,0) [0|1] "" LOGGER
+ SG_ HeatpadsReserved : 42|6@1+ (1,0) [0|63] "" LOGGER
+ SG_ ChargeTimeRemaining : 55|16@0+ (1,0) [0|65535] "min" LOGGER
+
+BO_ 1539 MTT_BMS_Date_Time_Remaining_603: 8 BMS
+ SG_ ChargeTimeRemaining603_raw : 7|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ YearMonth_raw : 23|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ DayHour_raw : 39|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ MinuteSecond_raw : 55|16@0+ (1,0) [0|65535] "raw" LOGGER
+
+BO_ 2550588916 MTT_Charger_Command_1806E5F4: 8 MAIN_CTRL
+ SG_ MaxVoltage_raw : 7|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ MaxCurrent_raw : 23|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ ChargerCmdReserved : 32|32@1+ (1,0) [0|4294967295] "" LOGGER
+
+BO_ 2566869221 MTT_Charger_Status_18FF50E5: 8 CHARGER
+ SG_ ConfiguredVoltage_raw : 7|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ ConfiguredCurrent_raw : 23|16@0+ (1,0) [0|65535] "raw" LOGGER
+ SG_ ChargerStatusReserved : 32|32@1+ (1,0) [0|4294967295] "" LOGGER
+
+CM_ "Simple MTT DBC built from CANBus_Specification.md v1.1 and internal C-code notes. Fields marked raw keep byte order and signedness, but no extra physical scaling is assumed unless explicitly documented.";
+CM_ BO_ 1 "Primary joystick control frame.";
+CM_ BO_ 256 "External control frame. Spec says the main display prioritizes this frame over 0x001 when present.";
+CM_ BO_ 767 "Main module telemetry: temperatures, tachometer instant and cumulative counts.";
+CM_ BO_ 1538 "Primary BMS status frame used to expose SOC, battery current, battery voltage, heatpads, and remaining charge time.";
+CM_ SG_ 1 LightOff_EStopPatch "Temporary firmware behavior: the light bit currently participates in motion enable/emergency-stop gating.";
+CM_ SG_ 1538 BatteryCurrent_raw "Battery current from BMS frame 0x602. MSB first. Scaling beyond raw integer is not yet confirmed in the available documents.";
+CM_ SG_ 1538 BatteryVoltage_raw "Battery voltage from BMS frame 0x602. MSB first. Scaling beyond raw integer is not yet confirmed in the available documents.";
+CM_ SG_ 1539 ChargeTimeRemaining603_raw "0x603 is documented in the internal C-code notes, not fully described in the public markdown spec.";
+
+VAL_ 1 VehicleType 0 "SingleTrack" 1 "SideBySideLeft" 2 "SideBySideRight";
+VAL_ 1 SecurityUnlocked 0 "Locked" 1 "Unlocked";
+VAL_ 1 LightOff_EStopPatch 0 "On" 1 "Off";
+VAL_ 1 DirectionReverse 0 "Forward" 1 "Reverse";
+VAL_ 1 Winch 24 "Out" 127 "Neutral" 229 "In";
+VAL_ 1 SteeringModeClosedLoop 0 "OpenLoop" 1 "ClosedLoop";
+VAL_ 256 VehicleType 0 "SingleTrack" 1 "SideBySideLeft" 2 "SideBySideRight";
+VAL_ 256 SecurityUnlocked 0 "Locked" 1 "Unlocked";
+VAL_ 256 LightOff_EStopPatch 0 "On" 1 "Off";
+VAL_ 256 DirectionReverse 0 "Forward" 1 "Reverse";
+VAL_ 256 Winch 24 "Out" 127 "Neutral" 229 "In";
+VAL_ 256 SteeringModeClosedLoop 0 "OpenLoop" 1 "ClosedLoop";
+VAL_ 1538 HeatpadB_On 0 "Off" 1 "On";
+VAL_ 1538 HeatpadA_On 0 "Off" 1 "On";
+
+SIG_VALTYPE_ 768 MainHardwareRevision : 1;
+SIG_VALTYPE_ 768 MainSoftwareRevision : 1;
+SIG_VALTYPE_ 769 BatteryHardwareRevision : 1;
+SIG_VALTYPE_ 769 BatterySoftwareRevision : 1;

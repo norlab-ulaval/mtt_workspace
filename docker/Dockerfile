@@ -22,12 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     iproute2 \
     iputils-ping \
+    inotify-tools \
     python3-can \
     python3-colcon-common-extensions \
     python3-pip \
     python3-pyinotify \
     python3-rosdep \
     python3-vcstool \
+    python3-yaml \
     rsync \
     screen \
     ssh \
@@ -41,7 +43,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-joy-linux \
     ros-${ROS_DISTRO}-nav2-bringup \
     ros-${ROS_DISTRO}-rmw-cyclonedds-cpp \
+    ros-${ROS_DISTRO}-rmw-zenoh-cpp \
     ros-${ROS_DISTRO}-robot-state-publisher \
+    ros-${ROS_DISTRO}-rosbag2-storage-mcap \
     ros-${ROS_DISTRO}-ros-gz-bridge \
     ros-${ROS_DISTRO}-ros-gz-sim \
     ros-${ROS_DISTRO}-ros2-controllers \
@@ -50,6 +54,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-twist-mux \
     ros-${ROS_DISTRO}-xacro && \
     rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed cantools
 
 RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
     existing_group="$(getent group "${USER_GID}" | cut -d: -f1 || true)" && \

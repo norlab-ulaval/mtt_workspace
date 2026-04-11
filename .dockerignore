@@ -11,6 +11,10 @@ __pycache__
 *.pyo
 .pytest_cache
 .mypy_cache
+.venv-tools
 data/raw
 data/processed
+data/live_robot
+data/records
+data/cache
 tmp
