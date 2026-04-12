@@ -18,6 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     can-utils \
+    ccache \
     curl \
     git \
     iproute2 \
@@ -57,6 +58,33 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed cantools
 
+RUN git clone https://github.com/norlab-ulaval/libnabo.git /tmp/libnabo && \
+    cd /tmp/libnabo && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libnabo
+
+RUN git clone https://github.com/norlab-ulaval/libpointmatcher.git /tmp/libpointmatcher && \
+    cd /tmp/libpointmatcher && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/libpointmatcher && \
+    ldconfig
+
+RUN git clone --branch 2.1.1 https://github.com/norlab-ulaval/norlab_icp_mapper.git /tmp/norlab_icp_mapper && \
+    cd /tmp/norlab_icp_mapper && \
+    mkdir build && cd build && \
+    cmake -DCMAKE_BUILD_TYPE=Release .. && \
+    make -j$(nproc) && \
+    make install && \
+    rm -rf /tmp/norlab_icp_mapper && \
+    ldconfig
+
+
 RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
     existing_group="$(getent group "${USER_GID}" | cut -d: -f1 || true)" && \
     if [ -n "${existing_group}" ] && [ "${existing_group}" != "${USERNAME}" ]; then \
@@ -92,6 +120,7 @@ RUN bash -lc ' \
     source /opt/ros/${ROS_DISTRO}/setup.bash && \
     rosdep update && \
     mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths) && \
+    apt-get update && \
     rosdep install -iyr --from-paths "${workspace_paths[@]}" --ignore-src \
 '
 

@@ -40,6 +40,17 @@ services:
       - -p
       - port:=${LOCAL_FOXGLOVE_PORT:-8766}
 
+  rviz:
+    <<: [*live_robot_base]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - ros2
+      - launch
+      - mtt_bringup
+      - mtt_rviz.launch.py
+      - rviz_config:=/workspaces/mtt_tools/src/mtt/mtt_description/rviz/urdf_config.rviz
+
+
   teleop_pc:
     <<: [*live_robot_base]
     command:

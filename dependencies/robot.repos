@@ -11,11 +11,16 @@
 #   repos that were not part of the default MTT sensor / mapping path we audited.
 
 repositories:
+  src/mtt_core:
+    type: git
+    url: git@github.com:norlab-ulaval/mtt_core.git
+    version: main
+
   # Runtime integration layer
   src/external/norlab_robot:
     type: git
     url: git@github.com:norlab-ulaval/norlab_robot.git
-    version: main
+    version: mtt-hl-devel
 
   # Sensor and estimation stack observed in the robot snapshots
   src/external/norlab_xsens_driver:
@@ -92,7 +97,12 @@ repositories:
   src/external/wiln:
     type: git
     url: git@github.com:norlab-ulaval/wiln.git
-    version: humble
+    version: jazzy
+
+  src/external/drive_custom_srv:
+    type: git
+    url: git@github.com:norlab-ulaval/drive_custom_srv.git
+    version: main
 
   src/external/DRIVE:
     type: git
@@ -103,4 +113,14 @@ repositories:
     type: git
     url: git@github.com:norlab-ulaval/sinkage_cmd_sender.git
     version: dev_mtt_mode
+
+  src/external/norlab_controllers_msgs:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_controllers_msgs.git
+    version: humble
+
+  src/external/service_caller:
+    type: git
+    url: git@github.com:norlab-ulaval/service_caller.git
+    version: master
 

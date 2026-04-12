@@ -216,5 +216,15 @@ create_binded_files() {
   touch -a "${HOME}/.Xauthority"
 }
 
+create_demo_env_symlinks() {
+  echo 'Linking ".env" file to demos'
+  for dir in demos/*/; do
+    if [[ -f "${dir}compose.yaml" ]]; then
+      ln -sf "../../.env" "${dir}.env"
+    fi
+  done
+}
+
 initialize_env_file
 create_binded_files
+create_demo_env_symlinks

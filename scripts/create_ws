@@ -52,13 +52,15 @@ mkdir -p "${external_root}"
 echo "[create_ws] validating ${repos_file}"
 vcs validate < "${repos_file}"
 
-echo "[create_ws] importing external repositories into ${external_root}"
-vcs import --recursive --skip-existing "${external_root}" < "${repos_file}"
+echo "[create_ws] importing external repositories (rooted at ${repo_root})"
+# robot.repos paths are relative to the workspace root (e.g. src/external/pkg)
+# so vcs import must run from the workspace root, not from src/external/.
+vcs import --recursive --skip-existing "${repo_root}" < "${repos_file}"
 
 cat <<EOF
 [create_ws] workspace bootstrap complete
 
 Next steps:
   source /opt/ros/jazzy/setup.bash
-  colcon build --base-paths src src/external --symlink-install
+  colcon build --base-paths src/mtt src/external --symlink-install
 EOF

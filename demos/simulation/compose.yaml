@@ -8,4 +8,17 @@ services:
     extends:
       file: ../../compose.yaml
       service: bash
-    command: ros2 launch mtt_bringup mtt_simulation.launch.py
+    command: ros2 launch mtt_bringup mtt_simulation.launch.py use_rviz:=False
+
+  rviz:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+    command: ros2 launch mtt_bringup mtt_rviz.launch.py rviz_config:=/workspaces/mtt_tools/src/mtt/mtt_description/rviz/urdf_config.rviz
+
+  monitor:
+    extends:
+      file: ../../compose.yaml
+      service: bash
+    command: ros2 run foxglove_bridge foxglove_bridge --ros-args -p port:=${LOCAL_FOXGLOVE_PORT:-8766}
+
