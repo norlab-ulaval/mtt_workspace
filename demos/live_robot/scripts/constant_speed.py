@@ -55,7 +55,7 @@ class ConstantSpeedPublisher(Node):
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--topic", default="/controller/cmd_vel")
+    parser.add_argument("--topic", default="controller/cmd_vel")
     parser.add_argument("--linear", type=float, default=0.2)
     parser.add_argument("--angular", type=float, default=0.0)
     parser.add_argument("--rate", type=float, default=10.0)

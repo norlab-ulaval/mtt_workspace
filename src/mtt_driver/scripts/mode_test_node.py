@@ -15,8 +15,11 @@ class ModeTestNode(Node):
     
     def __init__(self):
         super().__init__("mode_test_node")
-        
-        self.mode_publisher = self.create_publisher(MttDrivingMode, "/mtt_driving_mode", 10)
+
+        self.declare_parameter("mode_topic", "mtt_driving_mode")
+        mode_topic = self.get_parameter("mode_topic").value
+
+        self.mode_publisher = self.create_publisher(MttDrivingMode, mode_topic, 10)
         
         # Timer to cycle through modes every 10 seconds
         self.timer = self.create_timer(10.0, self.cycle_modes)

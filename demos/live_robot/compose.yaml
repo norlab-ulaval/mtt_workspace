@@ -57,7 +57,7 @@ services:
       - python3
       - demos/live_robot/scripts/constant_speed.py
       - --topic
-      - /controller/cmd_vel
+      - controller/cmd_vel
       - --linear
       - ${MTT_LINEAR_SPEED:-0.20}
       - --angular

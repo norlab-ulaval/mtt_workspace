@@ -9,10 +9,17 @@ class MttControllerInterface(Node):
 
     def __init__(self):
         super().__init__('mtt_controller_interface')
-        self.wheel_publisher = self.create_publisher(Float64MultiArray, '/wheel_group_controller/commands', 10)
-        self.yaw_publisher = self.create_publisher(Float64MultiArray, '/yaw_controller/commands', 10)
+        self.declare_parameter("cmd_vel_topic", "cmd_vel")
+        self.declare_parameter("wheel_command_topic", "wheel_group_controller/commands")
+        self.declare_parameter("yaw_command_topic", "yaw_controller/commands")
 
-        self.subscription = self.create_subscription(TwistStamped, '/cmd_vel', self.cmd_vel_callback, 10)
+        cmd_vel_topic = self.get_parameter("cmd_vel_topic").value
+        wheel_command_topic = self.get_parameter("wheel_command_topic").value
+        yaw_command_topic = self.get_parameter("yaw_command_topic").value
+
+        self.wheel_publisher = self.create_publisher(Float64MultiArray, wheel_command_topic, 10)
+        self.yaw_publisher = self.create_publisher(Float64MultiArray, yaw_command_topic, 10)
+        self.subscription = self.create_subscription(TwistStamped, cmd_vel_topic, self.cmd_vel_callback, 10)
 
         self.mtt_params = get_mtt_params()
         self.gear_ratio = self.mtt_params.mechanical_gear_ratio

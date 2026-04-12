@@ -3,7 +3,7 @@ twist_mux:
     # use_stamped: true
     topics:
       controller:
-        topic: /controller/cmd_vel
+        topic: controller/cmd_vel
         timeout: 0.5
         priority: 15
       teleop:

@@ -13,7 +13,7 @@ Key behavior for articulated frame-steer:
 
 import rclpy
 from rclpy.node import Node
-from geometry_msgs.msg import Twist
+from geometry_msgs.msg import TwistStamped
 from sensor_msgs.msg import JointState
 from nav_msgs.msg import Odometry
 from std_msgs.msg import Float64
@@ -92,6 +92,12 @@ class MttJointController(Node):
             "articulation_max_rate_rad_s", mtt_params.max_yaw_rate_rad_s, 
             ParameterDescriptor(description="Max articulation yaw rate (rad/s) - from measured steering limits")
         )
+        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("joint_states_topic", "joint_states")
+        self.declare_parameter("cmd_vel_input_topic", "cmd_vel")
+        self.declare_parameter("cmd_vel_pid_topic", "cmd_vel/pid")
+        self.declare_parameter("odometry_topic", "mtt_odometry")
+        self.declare_parameter("articulation_topic", "mtt_articulation_angle")
 
         # Initialize articulation PID controller
         a_kp = self.get_parameter("articulation_pid.kp").get_parameter_value().double_value
@@ -107,15 +113,21 @@ class MttJointController(Node):
         self.articulation_max_rate = abs(
             self.get_parameter("articulation_max_rate_rad_s").get_parameter_value().double_value
         )
+        self.base_frame = self.get_parameter("base_frame").value
+        joint_states_topic = self.get_parameter("joint_states_topic").value
+        cmd_vel_input_topic = self.get_parameter("cmd_vel_input_topic").value
+        cmd_vel_pid_topic = self.get_parameter("cmd_vel_pid_topic").value
+        odometry_topic = self.get_parameter("odometry_topic").value
+        articulation_topic = self.get_parameter("articulation_topic").value
 
         # Publishers
-        self.joint_state_pub = self.create_publisher(JointState, "/joint_states", 10)
-        self.cmd_vel_pid_pub = self.create_publisher(TwistStamped, "/cmd_vel/pid", 10)
+        self.joint_state_pub = self.create_publisher(JointState, joint_states_topic, 10)
+        self.cmd_vel_pid_pub = self.create_publisher(TwistStamped, cmd_vel_pid_topic, 10)
 
         # Subscribers
-        self.cmd_vel_sub = self.create_subscription(TwistStamped, "/cmd_vel", self.cmd_vel_callback, 10)
-        self.odom_sub = self.create_subscription(Odometry, "/mtt_odometry", self.odometry_callback, 10)
-        self.articulation_sub = self.create_subscription(Float64, "/mtt_articulation_angle", self.articulation_callback, 10)
+        self.cmd_vel_sub = self.create_subscription(TwistStamped, cmd_vel_input_topic, self.cmd_vel_callback, 10)
+        self.odom_sub = self.create_subscription(Odometry, odometry_topic, self.odometry_callback, 10)
+        self.articulation_sub = self.create_subscription(Float64, articulation_topic, self.articulation_callback, 10)
 
         # Joint states
         self.joint_names = [
@@ -277,10 +289,12 @@ class MttJointController(Node):
         self.joint_positions[28] = 0.0  # pitch
 
         # Publish smoothed command for odometry consumers
-        pid_cmd = Twist()
-        pid_cmd.linear.x = self.linear_vel
+        pid_cmd = TwistStamped()
+        pid_cmd.header.stamp = self.get_clock().now().to_msg()
+        pid_cmd.header.frame_id = self.base_frame
+        pid_cmd.twist.linear.x = self.linear_vel
         # angular.z carries normalized steering command [-1, 1] expected by wrapper/odometry
-        pid_cmd.angular.z = float(self.steer_input_norm)
+        pid_cmd.twist.angular.z = float(self.steer_input_norm)
         self.cmd_vel_pid_pub.publish(pid_cmd)
 
         # Publish joint states

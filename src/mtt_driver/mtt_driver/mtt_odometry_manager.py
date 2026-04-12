@@ -653,10 +653,10 @@ class MttOdometryManager(Node):
 
         # Parameters - using centralized MTT vehicle parameters as defaults
         self.declare_parameter("odom_frame", "odom")
-        self.declare_parameter("base_frame", "mtt_base_link")
-        self.declare_parameter("tachometer_topic", "/mtt_tachometer")
-        self.declare_parameter("odometry_topic", "/mtt_odometry")
-        self.declare_parameter("mode_topic", "/mtt_driving_mode")
+        self.declare_parameter("base_frame", "base_link")
+        self.declare_parameter("tachometer_topic", "mtt_tachometer")
+        self.declare_parameter("odometry_topic", "mtt_odometry")
+        self.declare_parameter("mode_topic", "mtt_driving_mode")
         self.declare_parameter("wrap_reset_threshold_m", 1000.0)
         self.declare_parameter("track_width_m", mtt_params.track_width)  # From centralized params
         self.declare_parameter("wheelbase_m", mtt_params.total_wheelbase)  # From centralized params
@@ -664,7 +664,8 @@ class MttOdometryManager(Node):
         self.declare_parameter("distance_unit", "km")  # 'km' or 'm'
         self.declare_parameter("distance_scale", 1.0)  # additional multiplicative scaling
         # New: angular velocity source topic and TF broadcast control
-        self.declare_parameter("cmd_vel_topic", "/cmd_vel/pid")
+        self.declare_parameter("cmd_vel_topic", "cmd_vel/pid")
+        self.declare_parameter("articulation_topic", "mtt_articulation_angle")
         self.declare_parameter("broadcast_tf", True)
         # Steering control mode parameters - using centralized vehicle parameters
         self.declare_parameter("steer_control_mode", "open_loop")  # "open_loop" or "closed_loop"
@@ -680,6 +681,7 @@ class MttOdometryManager(Node):
         self.odometry_topic = self.get_parameter("odometry_topic").get_parameter_value().string_value
         self.mode_topic = self.get_parameter("mode_topic").get_parameter_value().string_value
         self.cmd_vel_topic = self.get_parameter("cmd_vel_topic").get_parameter_value().string_value
+        self.articulation_topic = self.get_parameter("articulation_topic").get_parameter_value().string_value
         self.broadcast_tf = self.get_parameter("broadcast_tf").get_parameter_value().bool_value
         self.wrap_reset_threshold_m = self.get_parameter("wrap_reset_threshold_m").get_parameter_value().double_value
         self.track_width_m = self.get_parameter("track_width_m").get_parameter_value().double_value
@@ -712,7 +714,7 @@ class MttOdometryManager(Node):
         # Publisher
         self.odom_pub = self.create_publisher(Odometry, self.odometry_topic, 10)
         # Publisher for articulation state (for joint controller)
-        self.articulation_pub = self.create_publisher(Float64, "/mtt_articulation_angle", 10)
+        self.articulation_pub = self.create_publisher(Float64, self.articulation_topic, 10)
 
         # Subscriber with sensor-like QoS
         sensor_qos = QoSProfile(depth=1)
@@ -741,12 +743,12 @@ class MttOdometryManager(Node):
         )
 
         # Services
-        self.reset_srv = self.create_service(Trigger, "/mtt/reset_odometry", self.reset_odometry_cb)
+        self.reset_srv = self.create_service(Trigger, "mtt/reset_odometry", self.reset_odometry_cb)
         
         # Steering control mode service
         self.steer_control_srv = self.create_service(
-            SetSteerControlMode, 
-            "/mtt/set_steer_control_mode", 
+            SetSteerControlMode,
+            "mtt/set_steer_control_mode",
             self.set_steer_control_mode_cb
         )
 
@@ -902,7 +904,7 @@ class MttOdometryManager(Node):
             
         return response
 
-    def cmd_vel_callback(self, msg: Twist) -> None:
+    def cmd_vel_callback(self, msg: TwistStamped) -> None:
         """Store current angular velocity for steering odometry calculations"""
         self.current_angular_vel = msg.twist.angular.z
 

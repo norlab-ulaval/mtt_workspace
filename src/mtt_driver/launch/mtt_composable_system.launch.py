@@ -11,11 +11,11 @@ This launch file starts the complete MTT composable architecture including:
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, IncludeLaunchDescription, GroupAction
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch.conditions import IfCondition
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushROSNamespace
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
@@ -23,6 +23,8 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     description_share = FindPackageShare(package='mtt_description').find('mtt_description')
     driver_share = FindPackageShare(package='mtt_driver').find('mtt_driver')
+    robot_namespace = LaunchConfiguration('robot_namespace')
+    use_namespace = LaunchConfiguration('use_namespace')
 
     # --- optional host-side CAN bring-up ---
     setup_vcan_process = ExecuteProcess(
@@ -74,6 +76,16 @@ def generate_launch_description():
             'setup_vcan',
             default_value='false',
             description='Bring up vcan0 (Docker/testing - uses sudo).'
+        ),
+        DeclareLaunchArgument(
+            'robot_namespace',
+            default_value='',
+            description='Top-level namespace for the MTT runtime'
+        ),
+        DeclareLaunchArgument(
+            'use_namespace',
+            default_value='false',
+            description='Whether to apply robot_namespace to the MTT runtime'
         ),
         DeclareLaunchArgument(
             'setup_real_can',
@@ -193,25 +205,27 @@ def generate_launch_description():
         #     condition=IfCondition(LaunchConfiguration('enable_map_frame'))
         # ),
 
-        Node(
-            package='mtt_driver',
-            executable='mtt_ros_wrapper',
-            name='mtt_ros_wrapper',
-            parameters=[{
-                'can_interface': LaunchConfiguration('can_interface'),
-                'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
-                'driver_log_level': LaunchConfiguration('driver_log_level'),
-                'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
-                'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
-                'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
-                'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
-                'base_frame': LaunchConfiguration('base_frame'),
-            }],
-            output='screen',
-            emulate_tty=True,
-            respawn=True,
-            respawn_delay=2.0
-        ),
+        GroupAction(actions=[
+            PushROSNamespace(condition=IfCondition(use_namespace), namespace=robot_namespace),
+            Node(
+                package='mtt_driver',
+                executable='mtt_ros_wrapper',
+                name='mtt_ros_wrapper',
+                parameters=[{
+                    'can_interface': LaunchConfiguration('can_interface'),
+                    'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
+                    'driver_log_level': LaunchConfiguration('driver_log_level'),
+                    'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
+                    'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
+                    'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
+                    'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
+                    'base_frame': LaunchConfiguration('base_frame'),
+                }],
+                output='screen',
+                emulate_tty=True,
+                respawn=True,
+                respawn_delay=2.0
+            ),
 
 
         # Node(
@@ -240,30 +254,30 @@ def generate_launch_description():
         # ),
 
         # 4.5) Twist Mux - Command multiplexer (replaces internal muxing)
-        Node(
-            package='twist_mux',
-            executable='twist_mux',
-            name='twist_mux',
-            parameters=[os.path.join(driver_share, 'config', 'twist_mux.yaml')],
-            remappings=[('cmd_vel_out', 'cmd_vel')],
-            output='screen',
-            respawn=True,
-            respawn_delay=2.0
-        ),
+            Node(
+                package='twist_mux',
+                executable='twist_mux',
+                name='twist_mux',
+                parameters=[os.path.join(driver_share, 'config', 'twist_mux.yaml')],
+                remappings=[('cmd_vel_out', 'cmd_vel')],
+                output='screen',
+                respawn=True,
+                respawn_delay=2.0
+            ),
 
         # 6) Joystick (joy_linux)
-        Node(
-            package='joy_linux',
-            executable='joy_linux_node',
-            name='joy_node',
-            parameters=[{
-                'deadzone': 0.15,
-                'device_name': '/dev/input/js0'
-            }],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('enable_joystick')),
-            respawn=True
-        ),
+            Node(
+                package='joy_linux',
+                executable='joy_linux_node',
+                name='joy_node',
+                parameters=[{
+                    'deadzone': 0.15,
+                    'device_name': '/dev/input/js0'
+                }],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('enable_joystick')),
+                respawn=True
+            ),
 
         # # 6.5) Teleop command smoother (decays to zero on input inactivity)
         # Node(
@@ -282,15 +296,16 @@ def generate_launch_description():
         # ),
 
         # 7) Teleop
-        Node(
-            package='mtt_driver',
-            executable='mtt_teleop_joy',
-            name='mtt_teleop_joy_node',
-            remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('enable_teleop')),
-            respawn=True
-        ),
+            Node(
+                package='mtt_driver',
+                executable='mtt_teleop_joy',
+                name='mtt_teleop_joy_node',
+                remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('enable_teleop')),
+                respawn=True
+            ),
+        ]),
 
     
     ])

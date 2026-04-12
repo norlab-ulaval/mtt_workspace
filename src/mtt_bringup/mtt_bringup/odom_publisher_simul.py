@@ -10,14 +10,21 @@ class OdomPublisher(Node):
     def __init__(self):
         super().__init__('odom_publisher_simul')
 
+        self.declare_parameter('base_frame', '')
         self.declare_parameter('robot_frame', 'base_link')
         self.declare_parameter('odom_frame', 'odom')
+        self.declare_parameter('odom_topic', 'odom')
+        self.declare_parameter('pose_topic', 'gz_pose')
 
-        self.robot_frame = self.get_parameter('robot_frame').get_parameter_value().string_value
+        base_frame = self.get_parameter('base_frame').get_parameter_value().string_value
+        robot_frame = self.get_parameter('robot_frame').get_parameter_value().string_value
+        self.robot_frame = base_frame or robot_frame
         self.odom_frame = self.get_parameter('odom_frame').get_parameter_value().string_value
+        self.odom_topic = self.get_parameter('odom_topic').get_parameter_value().string_value
+        self.pose_topic = self.get_parameter('pose_topic').get_parameter_value().string_value
 
-        self.odom_pub = self.create_publisher(Odometry, '/odom', 10)
-        self.sub = self.create_subscription(Pose, '/gz_pose', self.callback, 10)
+        self.odom_pub = self.create_publisher(Odometry, self.odom_topic, 10)
+        self.sub = self.create_subscription(Pose, self.pose_topic, self.callback, 10)
 
         self.tf_broadcaster = TransformBroadcaster(self)
 

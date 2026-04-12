@@ -54,16 +54,19 @@ ros2 run mtt_driver mtt_teleop_joy
 
 ## Topics
 
+The nodes in this package use relative topic and service names by default.
+The names below are shown as resolved names in the root namespace.
+
 ### Subscribed Topics
 
-- `/cmd_vel` (geometry_msgs/Twist): Standard ROS velocity commands
+- `/cmd_vel` (geometry_msgs/TwistStamped): Standard ROS velocity commands
 - `/mtt_aux_cmd` (mtt_driver/MttAuxCommand): Auxiliary commands (brake, winch, dead man's switch)
 - `/joy` (sensor_msgs/Joy): Raw joystick input (teleop node only)
 
 ### Published Topics
 
 #### Control Topics (Teleop only)
-- `/cmd_vel` (geometry_msgs/Twist): Velocity commands from joystick (teleop node only)
+- `/cmd_vel/teleop` (geometry_msgs/TwistStamped): Velocity commands from joystick (teleop path)
 - `/mtt_aux_cmd` (mtt_driver/MttAuxCommand): Auxiliary commands from joystick (teleop node only)
 
 #### Telemetry Topics (CANBus_Specification.md v1.1)
@@ -140,7 +143,7 @@ The driver provides comprehensive odometry data compatible with ROS2 navigation:
 
 #### Frame IDs
 - **odom**: Fixed odometry frame for navigation
-- **mtt_base_link**: Vehicle base frame for transforms
+- **base_link**: Default vehicle base frame for transforms
 
 #### Integration with Navigation
 The odometry data is published in standard format for integration with:

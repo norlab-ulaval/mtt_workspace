@@ -15,19 +15,26 @@ import time
 class DrivingModeIntegrationTest(Node):
     def __init__(self):
         super().__init__('driving_mode_test')
-        
-        # Service clients
-        self.set_mode_cli = self.create_client(SetVehiculeTypeSrv, '/mtt/set_driving_mode')
-        self.get_mode_cli = self.create_client(GetVehiculeTypeSrv, '/mtt/get_driving_mode')
-        self.reset_odom_cli = self.create_client(Trigger, '/mtt/reset_odometry')
+
+        self.declare_parameter('set_mode_service', 'mtt/set_driving_mode')
+        self.declare_parameter('get_mode_service', 'mtt/get_driving_mode')
+        self.declare_parameter('reset_odometry_service', 'mtt/reset_odometry')
+
+        set_mode_service = self.get_parameter('set_mode_service').value
+        get_mode_service = self.get_parameter('get_mode_service').value
+        reset_odometry_service = self.get_parameter('reset_odometry_service').value
+
+        self.set_mode_cli = self.create_client(SetVehiculeTypeSrv, set_mode_service)
+        self.get_mode_cli = self.create_client(GetVehiculeTypeSrv, get_mode_service)
+        self.reset_odom_cli = self.create_client(Trigger, reset_odometry_service)
         
         # Wait for services
         self.get_logger().info("Waiting for services to be available...")
         
         services = [
-            (self.set_mode_cli, '/mtt/set_driving_mode'),
-            (self.get_mode_cli, '/mtt/get_driving_mode'),
-            (self.reset_odom_cli, '/mtt/reset_odometry')
+            (self.set_mode_cli, set_mode_service),
+            (self.get_mode_cli, get_mode_service),
+            (self.reset_odom_cli, reset_odometry_service)
         ]
         
         for client, name in services:

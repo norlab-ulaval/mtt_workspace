@@ -11,10 +11,10 @@ This launch file starts the complete MTT composable architecture including:
 
 import os
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, ExecuteProcess, GroupAction
 from launch.substitutions import LaunchConfiguration, Command, PythonExpression
 from launch.conditions import IfCondition
-from launch_ros.actions import Node
+from launch_ros.actions import Node, PushROSNamespace
 from launch_ros.parameter_descriptions import ParameterValue
 from launch_ros.substitutions import FindPackageShare
 
@@ -22,6 +22,8 @@ from launch_ros.substitutions import FindPackageShare
 def generate_launch_description():
     description_share = FindPackageShare(package='mtt_description').find('mtt_description')
     urdf_path = os.path.join(description_share, 'urdf', 'robot.urdf.xacro')
+    robot_namespace = LaunchConfiguration('robot_namespace')
+    use_namespace = LaunchConfiguration('use_namespace')
 
     # --- real CAN bring-up (with bitrate) ---
     setup_real_can_process = ExecuteProcess(
@@ -48,6 +50,16 @@ def generate_launch_description():
             'setup_vcan',
             default_value='false',
             description='Bring up vcan0 (Docker/testing - uses sudo).'
+        ),
+        DeclareLaunchArgument(
+            'robot_namespace',
+            default_value='',
+            description='Top-level namespace for the MTT runtime'
+        ),
+        DeclareLaunchArgument(
+            'use_namespace',
+            default_value='false',
+            description='Whether to apply robot_namespace to the MTT runtime'
         ),
         DeclareLaunchArgument(
             'setup_real_can',
@@ -166,63 +178,60 @@ def generate_launch_description():
         #     condition=IfCondition(LaunchConfiguration('enable_map_frame'))
         # ),
 
-        Node(
-            package='mtt_driver',
-            executable='mtt_ros_wrapper',
-            name='mtt_ros_wrapper',
-            parameters=[{
-                'can_interface': LaunchConfiguration('can_interface'),
-                'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
-                'driver_log_level': LaunchConfiguration('driver_log_level'),
-                'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
-                'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
-                'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
-                'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
-                'base_frame': LaunchConfiguration('base_frame'),
-            }],
-            output='screen',
-            emulate_tty=True,
-            respawn=True,
-            respawn_delay=2.0
-        ),
+        GroupAction(actions=[
+            PushROSNamespace(condition=IfCondition(use_namespace), namespace=robot_namespace),
+            Node(
+                package='mtt_driver',
+                executable='mtt_ros_wrapper',
+                name='mtt_ros_wrapper',
+                parameters=[{
+                    'can_interface': LaunchConfiguration('can_interface'),
+                    'can_id': ParameterValue(LaunchConfiguration('can_id'), value_type=int),
+                    'driver_log_level': LaunchConfiguration('driver_log_level'),
+                    'control_frequency_hz': LaunchConfiguration('control_frequency_hz'),
+                    'can_frame_frequency_hz': LaunchConfiguration('can_frame_frequency_hz'),
+                    'telemetry_timeout_seconds': LaunchConfiguration('telemetry_timeout_seconds'),
+                    'command_timeout_seconds': LaunchConfiguration('command_timeout_seconds'),
+                    'base_frame': LaunchConfiguration('base_frame'),
+                }],
+                output='screen',
+                emulate_tty=True,
+                respawn=True,
+                respawn_delay=2.0
+            ),
 
 
-        Node(
-            package='mtt_driver',
-            executable='mtt_odometry_manager',
-            name='mtt_odometry_manager',
-            arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
-            parameters=[{
-                'base_frame': LaunchConfiguration('base_frame'),
-                'odom_frame': LaunchConfiguration('odom_frame'),
-                # Odometry now listens to the final muxed cmd_vel topic
-                'cmd_vel_topic': 'cmd_vel',
-                # Toggle TF broadcasting via launch arg
-                'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
-                # Steering control and anti-drift tuning - using centralized vehicle parameters
-                'steer_control_mode': 'closed_loop',
-                # max_articulation_angle and max_yaw_rate now come from centralized vehicle parameters
-                'pivot_turn_enabled': False,
-                'min_turn_speed_ms': 0.05,
-                'yaw_slip_factor': 0.6,
-            }],
-            output='screen',
-            emulate_tty=True,
-            respawn=True,
-            respawn_delay=2.0
-        ),
+            Node(
+                package='mtt_driver',
+                executable='mtt_odometry_manager',
+                name='mtt_odometry_manager',
+                arguments=['--ros-args', '--log-level', LaunchConfiguration('driver_log_level')],
+                parameters=[{
+                    'base_frame': LaunchConfiguration('base_frame'),
+                    'odom_frame': LaunchConfiguration('odom_frame'),
+                    'cmd_vel_topic': 'cmd_vel',
+                    'broadcast_tf': LaunchConfiguration('odometry_broadcast_tf'),
+                    'steer_control_mode': 'closed_loop',
+                    'pivot_turn_enabled': False,
+                    'min_turn_speed_ms': 0.05,
+                    'yaw_slip_factor': 0.6,
+                }],
+                output='screen',
+                emulate_tty=True,
+                respawn=True,
+                respawn_delay=2.0
+            ),
 
-        # 4.5) Twist Mux - Command multiplexer (replaces internal muxing)
-        Node(
-            package='twist_mux',
-            executable='twist_mux',
-            name='twist_mux',
-            parameters=[os.path.join(FindPackageShare(package='mtt_driver').find('mtt_driver'), 'config', 'twist_mux.yaml')],
-            remappings=[('cmd_vel_out', 'cmd_vel')],
-            output='screen',
-            respawn=True,
-            respawn_delay=2.0
-        ),
+            Node(
+                package='twist_mux',
+                executable='twist_mux',
+                name='twist_mux',
+                parameters=[os.path.join(FindPackageShare(package='mtt_driver').find('mtt_driver'), 'config', 'twist_mux.yaml')],
+                remappings=[('cmd_vel_out', 'cmd_vel')],
+                output='screen',
+                respawn=True,
+                respawn_delay=2.0
+            ),
         # Node(
         #     package='twist_stamper',
         #     executable='twist_stamper',
@@ -251,18 +260,18 @@ def generate_launch_description():
         #     condition=IfCondition(LaunchConfiguration('enable_joystick')),
         #     respawn=True
         # ),
-        Node(
-            package='joy',
-            executable='joy_node',
-            name='joy_node',
-            parameters=[{
-                'deadzone': 0.15,
+            Node(
+                package='joy',
+                executable='joy_node',
+                name='joy_node',
+                parameters=[{
+                    'deadzone': 0.15,
 
-            }],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('enable_joystick')),
-            respawn=True
-        ),
+                }],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('enable_joystick')),
+                respawn=True
+            ),
 
         # # 6.5) Teleop command smoother (decays to zero on input inactivity)
         # Node(
@@ -281,15 +290,16 @@ def generate_launch_description():
         # ),
 
         # 7) Teleop
-        Node(
-            package='mtt_driver',
-            executable='mtt_teleop_joy',
-            name='mtt_teleop_joy_node',
-            remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
-            output='screen',
-            condition=IfCondition(LaunchConfiguration('enable_teleop')),
-            respawn=True
-        ),
+            Node(
+                package='mtt_driver',
+                executable='mtt_teleop_joy',
+                name='mtt_teleop_joy_node',
+                remappings=[('cmd_vel_raw', 'cmd_vel/teleop')],
+                output='screen',
+                condition=IfCondition(LaunchConfiguration('enable_teleop')),
+                respawn=True
+            ),
+        ]),
 
     
     ])

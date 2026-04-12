@@ -91,8 +91,8 @@ class MTTRosWrapper(Node):
         self.vehicle_status_pub = self.create_publisher(MttVehicleStatus, "mtt_status", 10)   # High-level monitoring
         
         self.driving_mode_pub = self.create_publisher(MttDrivingMode, "mtt_driving_mode", 10)
-        self.set_mode_srv = self.create_service(SetVehiculeTypeSrv, "/mtt/set_driving_mode", self._srv_set_mode)
-        self.get_mode_srv = self.create_service(GetVehiculeTypeSrv, "/mtt/get_driving_mode", self._srv_get_mode)
+        self.set_mode_srv = self.create_service(SetVehiculeTypeSrv, "mtt/set_driving_mode", self._srv_set_mode)
+        self.get_mode_srv = self.create_service(GetVehiculeTypeSrv, "mtt/get_driving_mode", self._srv_get_mode)
         
         # Current driving mode (default: single trailer)
         self.current_driving_mode = 0  # SINGLE_TRAILER
