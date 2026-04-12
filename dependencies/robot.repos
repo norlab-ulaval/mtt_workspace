@@ -1,0 +1,106 @@
+# Curated external repositories for the observed MTT robot workspace.
+#
+# This file is intentionally smaller than the full norlab_robot dependency tree.
+# It focuses on the repos that were observed in the robot snapshots and that matter
+# for rebuilding the MTT runtime around this repository.
+#
+# Notably absent on purpose:
+# - depthai_ros_driver / OAK upstream: the exact dependency still needs to be
+#   confirmed on the real robot before we add it here.
+# - project-specific extras such as theodolite, ixblue, vectornav, and other
+#   repos that were not part of the default MTT sensor / mapping path we audited.
+
+repositories:
+  # Runtime integration layer
+  src/external/norlab_robot:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_robot.git
+    version: main
+
+  # Sensor and estimation stack observed in the robot snapshots
+  src/external/norlab_xsens_driver:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_xsens_driver.git
+    version: jazzy
+
+  src/external/norlab_imu_tools:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_imu_tools.git
+    version: humble
+
+  src/external/imu_tools:
+    type: git
+    url: git@github.com:norlab-ulaval/imu_tools.git
+    version: humble
+
+  src/external/imu_odom:
+    type: git
+    url: git@github.com:norlab-ulaval/imu_odom.git
+    version: humble
+
+  src/external/norlab_icp_mapper_ros:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_icp_mapper_ros.git
+    version: 2.1.1
+
+  src/external/libpointmatcher_ros:
+    type: git
+    url: git@github.com:norlab-ulaval/libpointmatcher_ros.git
+    version: 2.0.1
+
+  src/external/HesaiLidar_ROS_2.0:
+    type: git
+    url: git@github.com:norlab-ulaval/HesaiLidar_ROS_2.0.git
+    version: jazzy
+
+  src/external/rslidar_msg:
+    type: git
+    url: https://github.com/RoboSense-LiDAR/rslidar_msg.git
+    version: master
+
+  src/external/rslidar_sdk:
+    type: git
+    url: git@github.com:norlab-ulaval/rslidar_sdk.git
+    version: main
+
+  src/external/zed-ros2-wrapper:
+    type: git
+    url: https://github.com/stereolabs/zed-ros2-wrapper.git
+    version: master
+
+  src/external/twist_mux:
+    type: git
+    url: https://github.com/ros-teleop/twist_mux.git
+    version: rolling
+
+  # Control and experimentation hooks already present in the robot snapshots
+  src/external/norlab_controllers_ros:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_controllers_ros.git
+    version: mtt
+
+  src/external/norlab_custom_interfaces:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_custom_interfaces.git
+    version: main
+
+  src/external/norlab_trajectory_generator:
+    type: git
+    url: git@github.com:norlab-ulaval/norlab_trajectory_generator.git
+    version: main
+
+  src/external/wiln:
+    type: git
+    url: git@github.com:norlab-ulaval/wiln.git
+    version: humble
+
+  src/external/DRIVE:
+    type: git
+    url: git@github.com:norlab-ulaval/drive.git
+    version: humble
+
+  src/external/sinkage_cmd_sender:
+    type: git
+    url: git@github.com:norlab-ulaval/sinkage_cmd_sender.git
+    version: dev_mtt_mode
+

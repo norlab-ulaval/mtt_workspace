@@ -82,6 +82,9 @@ compile_commands.json
 *.swo
 .DS_Store
 
+# Bootstrapped external workspace
+src/external/
+
 # Data stays local by default
 data/raw/
 data/processed/

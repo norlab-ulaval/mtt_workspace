@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+repo_root="$(pwd)"
+repos_file="${repo_root}/dependencies/robot.repos"
+external_root="${repo_root}/src/external"
+
+print_usage() {
+  cat <<'EOF'
+Usage: ./scripts/create_ws
+
+Bootstrap the broader MTT workspace around the local mtt_tools repository.
+
+What it does:
+  1. prepares the local .env via ./scripts/create_env
+  2. creates src/external/
+  3. imports the repositories listed in dependencies/robot.repos
+
+Requirements:
+  - vcs available in PATH
+  - access to the private GitHub repositories referenced by the manifest
+EOF
+}
+
+if [[ "${1-}" == "-h" || "${1-}" == "--help" ]]; then
+  print_usage
+  exit 0
+fi
+
+if ! command -v vcs >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+[create_ws] vcstool is required but 'vcs' was not found.
+
+Install it first, for example:
+  sudo apt install vcstool
+EOF
+  exit 1
+fi
+
+if [[ ! -f "${repos_file}" ]]; then
+  echo "[create_ws] missing manifest: ${repos_file}" >&2
+  exit 1
+fi
+
+echo "[create_ws] preparing local environment"
+./scripts/create_env
+
+mkdir -p "${external_root}"
+
+echo "[create_ws] validating ${repos_file}"
+vcs validate < "${repos_file}"
+
+echo "[create_ws] importing external repositories into ${external_root}"
+vcs import --recursive --skip-existing "${external_root}" < "${repos_file}"
+
+cat <<EOF
+[create_ws] workspace bootstrap complete
+
+Next steps:
+  source /opt/ros/jazzy/setup.bash
+  colcon build --base-paths src src/external --symlink-install
+EOF
