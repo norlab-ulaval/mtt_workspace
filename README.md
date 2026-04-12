@@ -98,7 +98,16 @@ docker compose run --rm compile
 docker compose run --rm bash
 ```
 
-This is useful for the MTT core and the local demos. Extending the Docker shortcuts to the imported robot workspace is a follow-up step; for now, the host-side bootstrap above is the honest path for the full external stack.
+The Docker and devcontainer build logic now detects `src/external/` automatically when it contains imported repositories.
+
+- If `src/external/` is absent or empty, the container stays in core-only mode.
+- If `src/external/` is populated, the build includes both `src` and `src/external`.
+
+After `./scripts/create_ws`, rebuild the development image once so the container picks up the external rosdeps:
+
+```bash
+docker compose -f docker/build.yaml build devel
+```
 
 ## Real robot notes
 
@@ -131,3 +140,4 @@ docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
 - OAK support is still incomplete at the workspace level. `norlab_robot` has an OAK launch file, but the exact `depthai_ros_driver` dependency still needs to be confirmed on the robot before adding it to the manifest.
 - CAN truth, steering truth, and startup truth still require robot-side verification. This repository does not pretend those points are fully settled.
 - Some older launch files still reflect pre-existing namespace conventions and will need a focused cleanup pass before the runtime becomes properly multi-robot friendly.
+- The runtime sensor overlay still lives in `norlab_robot`. The current observed gaps are tracked in `doc/runtime_sensor_audit.md`.

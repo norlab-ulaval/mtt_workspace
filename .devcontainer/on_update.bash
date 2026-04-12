@@ -1,12 +1,13 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
 cd /workspaces/mtt_tools
 DEVCONTAINER_HOME="${HOME:-/home/mtt}"
 DEVCONTAINER_COLCON_ROOT="${DEVCONTAINER_HOME}/.cache/mtt_tools_devcontainer"
 mkdir -p "${DEVCONTAINER_COLCON_ROOT}/build" "${DEVCONTAINER_COLCON_ROOT}/install" "${DEVCONTAINER_COLCON_ROOT}/log"
+mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
 colcon --log-base "${DEVCONTAINER_COLCON_ROOT}/log" build \
-  --base-paths src \
+  --base-paths "${workspace_paths[@]}" \
   --build-base "${DEVCONTAINER_COLCON_ROOT}/build" \
   --install-base "${DEVCONTAINER_COLCON_ROOT}/install" \
   --symlink-install \

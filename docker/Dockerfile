@@ -85,16 +85,23 @@ CMD ["bash"]
 
 FROM base AS devel
 
-ARG USERNAME=mtt
-WORKDIR /workspaces/mtt_tools
-USER ${USERNAME}
-
-FROM base AS builder
-
 WORKDIR /workspaces/mtt_tools
 COPY . /workspaces/mtt_tools
 
-RUN . /opt/ros/${ROS_DISTRO}/setup.sh && \
+RUN bash -lc ' \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
     rosdep update && \
-    rosdep install -iyr --from-paths src --ignore-src && \
-    colcon build --base-paths src --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo
+    mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths) && \
+    rosdep install -iyr --from-paths "${workspace_paths[@]}" --ignore-src \
+'
+
+ARG USERNAME=mtt
+USER ${USERNAME}
+
+FROM devel AS builder
+
+RUN bash -lc ' \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths) && \
+    colcon build --base-paths "${workspace_paths[@]}" --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+'

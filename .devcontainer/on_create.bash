@@ -1,12 +1,13 @@
 #!/bin/bash
 
-set -e
+set -euo pipefail
 
 sudo chown -R "$(whoami)" /workspaces/mtt_tools
 sudo apt-get update -y
 cd /workspaces/mtt_tools
-sudo rosdep update
-sudo rosdep install --from-paths src --ignore-src -y
+rosdep update
+mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
+sudo rosdep install --from-paths "${workspace_paths[@]}" --ignore-src -y
 
 # Need to find a way to install specifically version 3.1 of joy to see if it works in docker
 # sudo rosdep install --from-paths mtt_ws/src --ignore-src --skip-keys="joy" -y

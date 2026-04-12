@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+paths=("src")
+
+# Keep src/external optional so the same tooling works for the core-only repo
+# and for a bootstrapped full robot workspace.
+if [[ -d src/external ]] && [[ -n "$(find src/external -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head -n 1)" ]]; then
+  paths+=("src/external")
+fi
+
+printf '%s\n' "${paths[@]}"

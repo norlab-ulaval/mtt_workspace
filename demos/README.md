@@ -20,6 +20,10 @@ docker compose run --rm compile
 docker compose up monitor
 ```
 
+`compile` uses the same workspace detection as the host scripts:
+- core-only if `src/external/` is empty,
+- full workspace if external repositories were bootstrapped first.
+
 The `live_robot/` demo is the laptop-side workflow for the real MTT:
 - `monitor` runs a local Foxglove bridge and subscribes to the robot through Zenoh,
 - `teleop_pc` publishes joystick commands from your laptop into `cmd_vel/teleop`,

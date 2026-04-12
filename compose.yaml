@@ -36,7 +36,9 @@ services:
     command:
       - bash
       - -lc
-      - colcon build --base-paths src --symlink-install
+      - |
+        mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
+        colcon build --base-paths "$${workspace_paths[@]}" --symlink-install
     volumes:
       - ${HOME}/.ssh:/home/mtt/.ssh:ro
 
