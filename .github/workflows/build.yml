@@ -1,0 +1,57 @@
+name: MTT Workspace CI
+on:
+  push:
+    branches: [ "main", "dev" ]
+  pull_request:
+    branches: [ "main", "dev" ]
+
+jobs:
+  build_workspace:
+    name: Build & Lint ROS 2 Workspace
+    runs-on: ubuntu-24.04
+    container:
+      image: rosofficial/ros:jazzy-ros-base-noble
+      
+    steps:
+      - name: System Setup
+        run: |
+          apt-get update
+          apt-get install -y python3-vcstool git ssh-client lsb-release wget gnupg
+
+      - name: Checkout MTT Workspace
+        uses: actions/checkout@v4
+        with:
+          path: workspace
+
+      - name: Setup SSH Keys for Private Repositories
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Import Dependencies via vcs
+        run: |
+          mkdir -p workspace/src/external
+          # Temporarily accepting incoming github ssh fingerprint
+          mkdir -p ~/.ssh
+          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          # Fetch all repos
+          vcs import workspace/src < workspace/dependencies/robot.repos
+
+      - name: Install rosdep components
+        run: |
+          rosdep init || true
+          rosdep update
+          rosdep install --from-paths workspace/src --ignore-src -y --rosdistro jazzy
+
+      - name: Colcon Build
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cd workspace
+          colcon build --symlink-install --event-handlers console_direct+
+
+      - name: Colcon Test
+        run: |
+          . /opt/ros/jazzy/setup.sh
+          cd workspace
+          colcon test
+          colcon test-result --all
