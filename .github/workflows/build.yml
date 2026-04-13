@@ -23,18 +23,17 @@ jobs:
         with:
           path: workspace
 
-      - name: Setup SSH Keys for Private Repositories
-        uses: webfactory/ssh-agent@v0.9.0
-        with:
-          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
-
       - name: Import Dependencies via vcs
         run: |
-          mkdir -p workspace/src/external
-          # Force SSH to accept Github fingerprint automatically
+          # The container isolation breaks webfactory/ssh-agent, so we inject the key directly
           mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
           echo -e "Host github.com\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
-          # Fetch all repos
+          eval $(ssh-agent -s)
+          ssh-add ~/.ssh/id_ed25519
+          
+          mkdir -p workspace/src/external
           vcs import workspace/src < workspace/dependencies/robot.repos
 
       - name: Install rosdep components
