@@ -32,6 +32,8 @@ jobs:
           echo -e "Host github.com\n\tStrictHostKeyChecking no\n" > ~/.ssh/config
           eval $(ssh-agent -s)
           ssh-add ~/.ssh/id_ed25519
+          # Explicitly bypass SSH Host Verification strictly for Git operations
+          export GIT_SSH_COMMAND="ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no"
           
           mkdir -p workspace/src/external
           vcs import workspace/src < workspace/dependencies/robot.repos
