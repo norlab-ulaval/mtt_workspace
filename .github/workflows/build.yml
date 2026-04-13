@@ -10,7 +10,7 @@ jobs:
     name: Build & Lint ROS 2 Workspace
     runs-on: ubuntu-24.04
     container:
-      image: rosofficial/ros:jazzy-ros-base-noble
+      image: ros:jazzy-ros-base-noble
       
     steps:
       - name: System Setup
