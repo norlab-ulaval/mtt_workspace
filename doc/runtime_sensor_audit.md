@@ -3,7 +3,7 @@
 This note tracks what belongs to the runtime integration layer around MTT.
 
 It is based on the robot snapshot under `Workspace/tmp/robot_src/norlab_robot`.
-It is not a claim that `mtt_tools` alone owns or should own that logic.
+It is not a claim that `mtt_workspace` or `src/mtt_core` alone own that logic.
 
 ## Scope
 
@@ -14,7 +14,7 @@ It is not a claim that `mtt_tools` alone owns or should own that logic.
 - startup scripts,
 - robot-side runtime utilities.
 
-[RECOMMANDATION] Fix runtime sensor inconsistencies in `norlab_robot`, not in `mtt_tools`.
+[RECOMMANDATION] Fix runtime sensor inconsistencies in `norlab_robot`, not in `mtt_workspace`.
 
 ## Sensor launch truth
 
@@ -97,7 +97,7 @@ It is not a claim that `mtt_tools` alone owns or should own that logic.
 
 ## What should change where
 
-[RECOMMANDATION] `mtt_tools`
+[RECOMMANDATION] `mtt_workspace`
 - keep documenting the boundary,
 - keep the curated dependency manifest honest,
 - do not absorb runtime sensor launch logic.

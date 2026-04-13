@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
-paths=("src/mtt")
+paths=("src/mtt_core")
 
 # Keep src/external optional so the same tooling works for the core-only repo
 # and for a bootstrapped full robot workspace.

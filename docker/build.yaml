@@ -1,11 +1,12 @@
 services:
   devel:
-    image: ${MTT_IMAGE:-mtt_tools:devel}
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
     build:
       context: ..
       dockerfile: docker/Dockerfile
       target: devel
       args:
+        BASE_IMAGE: ${MTT_BASE_IMAGE:-mtt_workspace:base}
         ROS_DISTRO: ${ROS_DISTRO:-jazzy}
         RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
         USERNAME: mtt
@@ -13,12 +14,15 @@ services:
         USER_GID: ${GID:-1000}
 
   full:
-    image: ${MTT_FULL_IMAGE:-mtt_tools:full}
+    image: ${MTT_FULL_IMAGE:-mtt_workspace:full}
     build:
       context: ..
       dockerfile: docker/Dockerfile
-      target: builder
+      # There is no separate runtime stage at the moment.
+      # Keep "full" usable by building the devel stage under a distinct tag.
+      target: devel
       args:
+        BASE_IMAGE: ${MTT_BASE_IMAGE:-mtt_workspace:base}
         ROS_DISTRO: ${ROS_DISTRO:-jazzy}
         RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
         USERNAME: mtt

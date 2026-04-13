@@ -3,6 +3,7 @@ x-build: &mtt_devel_build
   dockerfile: docker/Dockerfile
   target: devel
   args:
+    BASE_IMAGE: ${MTT_BASE_IMAGE:-mtt_workspace:base}
     ROS_DISTRO: ${ROS_DISTRO:-jazzy}
     RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
     USERNAME: mtt
@@ -14,7 +15,7 @@ services:
     extends:
       file: docker/common.yaml
       service: x11_base
-    image: ${MTT_IMAGE:-mtt_tools:devel}
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
     tty: true
     stdin_open: true
@@ -31,14 +32,23 @@ services:
     extends:
       file: docker/common.yaml
       service: base
-    image: ${MTT_IMAGE:-mtt_tools:devel}
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
     command:
       - bash
       - -lc
       - |
         mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
-        colcon build --base-paths "$${workspace_paths[@]}" --symlink-install
+        colcon build \
+          --base-paths "$${workspace_paths[@]}" \
+          --symlink-install \
+          --cmake-args \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          --parallel-workers $$(nproc)
+    environment:
+      - CCACHE_DIR=${WORKSPACE:-/workspaces/mtt_workspace}/.ccache
     volumes:
       - ${HOME}/.ssh:/home/mtt/.ssh:ro
 
@@ -50,7 +60,7 @@ services:
     extends:
       file: docker/common.yaml
       service: ros_runtime_base
-    image: ${MTT_IMAGE:-mtt_tools:devel}
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
     command:
       - ros2

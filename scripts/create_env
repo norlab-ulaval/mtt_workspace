@@ -184,8 +184,8 @@ initialize_env_file() {
   set_variable_in_env_file GID "$(id -g)"
   set_variable_in_env_file USER "$(whoami)"
   set_variable_in_env_file WORKSPACE "${project_root}"
-  set_variable_in_env_file MTT_IMAGE "mtt_tools:devel"
-  set_variable_in_env_file MTT_FULL_IMAGE "mtt_tools:full"
+  set_variable_in_env_file MTT_IMAGE "mtt_workspace:devel"
+  set_variable_in_env_file MTT_FULL_IMAGE "mtt_workspace:full"
   set_variable_in_env_file ROS_DISTRO "jazzy"
   set_variable_in_env_file ROS_DOMAIN_ID "${robot_domain_id}"
   set_variable_in_env_file RMW_IMPLEMENTATION "${rmw_implementation}"
@@ -202,6 +202,8 @@ initialize_env_file() {
   set_variable_in_env_file LIVE_DEMO_NAME "$(mtt_env_or_file_or_default "${project_root}" LIVE_DEMO_NAME "live_robot")"
   set_variable_in_env_file ZENOH_ROUTER_CHECK_ATTEMPTS "$(mtt_env_or_file_or_default "${project_root}" ZENOH_ROUTER_CHECK_ATTEMPTS "5")"
   set_variable_in_env_file LOCAL_FOXGLOVE_PORT "${local_foxglove_port}"
+  set_variable_in_env_file ROBOT_NAME "$(mtt_env_or_file_or_default "${project_root}" ROBOT_NAME "mtt")"
+
 }
 
 create_binded_files() {

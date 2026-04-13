@@ -12,8 +12,8 @@
       "RMW_IMPLEMENTATION": "rmw_fastrtps_cpp"
     }
   },
-  "workspaceFolder": "/workspaces/mtt_tools",
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/mtt_tools,type=bind",
+  "workspaceFolder": "/workspaces/mtt_workspace",
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/mtt_workspace,type=bind",
   "customizations": {
     "vscode": {
       "extensions": [
@@ -87,12 +87,12 @@
         // ROS
         "ros.distro": "jazzy",
         "python.autoComplete.extraPaths": [
-          "/opt/ros/jazzy/lib/python3.10/site-packages",
-          "/opt/ros/jazzy/local/lib/python3.10/dist-packages"
+          "/opt/ros/jazzy/lib/python3.12/site-packages",
+          "/opt/ros/jazzy/local/lib/python3.12/dist-packages"
         ],
         "python.analysis.extraPaths": [
-          "/opt/ros/jazzy/lib/python3.10/site-packages",
-          "/opt/ros/jazzy/local/lib/python3.10/dist-packages"
+          "/opt/ros/jazzy/lib/python3.12/site-packages",
+          "/opt/ros/jazzy/local/lib/python3.12/dist-packages"
         ]
       }
     }

@@ -2,160 +2,121 @@
 
 ## Goal
 
-`mtt_tools` is the MTT core, not the whole robot image.
+Keep the workspace honest and easy to rebuild.
 
-The workspace is meant to stay small and honest:
-- MTT-specific code lives here,
-- robot integration stays in an external overlay,
-- external drivers and reusable algorithms are imported instead of copied,
-- local demos stay separate from the core packages.
+The current model is:
+- `mtt_workspace`
+  parent repo for infra, docs, scripts, and manifests
+- `src/mtt_core`
+  imported MTT-owned ROS packages
+- `src/external`
+  imported dependencies
+- `src/external/norlab_robot`
+  runtime integration overlay for the real robot
 
-That keeps the repository maintainable while still allowing a full robot workspace to be rebuilt from GitHub.
-
-## Target layout
+## Layout
 
 ```text
-mtt_tools/
+mtt_workspace/
   src/
-    mtt_*/
+    mtt_core/
     external/
       norlab_robot/
       ...
   dependencies/
     robot.repos
+  docker/
   demos/
   doc/
   documentations/
   scripts/
+  data/
 ```
 
-## Layers and responsibilities
+## Responsibilities
 
-### `src/mtt_*`
+### Parent repo: `mtt_workspace`
 
-This is the MTT core.
+Owns:
+- Docker and devcontainer files
+- dependency manifests
+- local demos
+- helper scripts
+- project docs
 
-It should contain:
-- the MTT CAN driver and ROS wrapper,
-- MTT-specific messages and services,
-- the MTT base description,
-- MTT-specific bringup and simulation helpers that genuinely belong to the vehicle.
+Does not own:
+- all robot ROS code
+- the runtime overlay
+- copied external dependencies
 
-It should not absorb:
-- generic sensor drivers,
-- generic mapping or controller packages,
-- robot-side startup logic for every deployment,
-- project-specific operator glue that is not MTT-specific.
+### Core repo: `src/mtt_core`
 
-### `src/external/norlab_robot`
+Owns:
+- MTT-specific driver code
+- MTT description
+- MTT bringup
+- MTT interfaces and messages
 
-This is the runtime integration layer for the real robot.
+This is the right place for MTT-owned ROS packages.
 
-In the current observed stack, this is where the robot-wide assembly happens:
-- startup,
-- sensors,
-- mapping,
-- recording,
-- Foxglove,
-- Zenoh,
-- operator workflows.
+### Imported dependencies: `src/external`
 
-Keeping it external is intentional. It lets `mtt_tools` remain a vehicle repository instead of turning into a monolithic lab workspace.
+Owns:
+- external drivers
+- mapping and estimation packages
+- shared Norlab repos
+- runtime integration repos
 
-### Other `src/external/*`
+These repos should stay imported, not copied.
 
-These are imported dependencies:
-- drivers,
-- estimation packages,
-- controller hooks,
-- shared Norlab interfaces.
+### Runtime overlay: `src/external/norlab_robot`
 
-They should be pulled in through `vcstool` and versioned by manifest, not copied into the MTT repository.
+Owns:
+- sensor composition
+- startup glue
+- mapping launch composition
+- Foxglove and Zenoh runtime wiring
+- robot-side recording and utilities
 
-### `dependencies/*.repos`
-
-This is the source of truth for the external workspace composition.
-
-For MTT, the default file is `dependencies/robot.repos`.
-It should stay curated:
-- include what is needed for the observed MTT runtime,
-- keep uncertain or unverified dependencies out until they are confirmed,
-- avoid turning the manifest into a dump of every historical Norlab repo.
-
-### `demos/`
-
-`demos/` contains runnable entry points and operator-side workflows.
-
-In the current repository, it is the right place for:
-- local monitoring,
-- laptop-side teleoperation,
-- simulation wrappers,
-- recording helpers used around the core packages.
-
-If a future runtime overlay grows beyond demo scope, add a dedicated `deployments/` directory later rather than pushing more deployment logic into `src/mtt_*`.
-
-### `doc/` and `documentations/`
-
-- `doc/` is for repository documentation, conventions, and workflow notes.
-- `documentations/` is for reference material: manuals, specifications, DBC files, and static notes that do not drive the build.
+If runtime truth is wrong there, fix it there.
 
 ## Bootstrap flow
 
-The bootstrap stays intentionally small:
+The intended flow is small and explicit:
 
 1. `./scripts/create_env`
-   prepares the local `.env` and bind-mounted host paths used by the development tools.
+   creates `.env` and local bind-mount directories
 2. `./scripts/create_ws`
-   imports the external repositories listed in `dependencies/robot.repos` into `src/external/`.
-3. `colcon build --base-paths src src/external --symlink-install`
-   builds the full workspace.
+   imports `src/mtt_core` and the repos listed in `dependencies/robot.repos`
+3. `colcon build --base-paths src/mtt_core src/external --symlink-install`
+   builds the current workspace composition
 
-This follows the useful part of the T-Rex pattern:
-- explicit manifest,
-- explicit bootstrap,
-- stateless workspace assembly,
-- no git submodule sprawl.
+## Nested repos
 
-## Namespace conventions
+The parent repo does not track the contents of `src/mtt_core` or `src/external`.
 
-The repository is not fully there yet, but the target convention is straightforward.
+That means:
+- root-level `git status` is not enough
+- root-level `git pull` is not enough
 
-### Launch API
+Use:
+- `./scripts/status`
+- `./scripts/pull`
 
-- top-level launch files should expose `robot_namespace`,
-- `use_namespace` can stay as the on/off switch when needed,
-- when including third-party launch files that expect `namespace`, adapt at the boundary instead of spreading both names everywhere.
+## Namespace direction
 
-### Topics and services
+The target model is simple:
+- top-level launch files expose `robot_namespace` and `use_namespace`
+- topics and services are relative by default
+- frames are parameterized
+- namespace adaptation happens at the launch boundary
 
-- use relative names in code and YAML by default,
-- avoid leading `/` in package defaults,
-- keep absolute remaps only for ROS exceptions and third-party interoperability such as `/tf` and `/tf_static`.
+The cleanup is not finished yet, but this is the contract to keep extending.
 
-### TF and frames
+## What this structure buys us
 
-- do not hardcode world or robot frames in code,
-- use parameters such as `base_frame`, `odom_frame`, and `map_frame`,
-- let the runtime integration layer decide the final names and prefixes.
-
-### Config split
-
-- vehicle defaults belong with the MTT packages,
-- robot-instance and deployment-specific config belongs in the runtime overlay or the demo/deployment directory,
-- site or mission overrides should stay outside the vehicle core.
-
-## Path to broader reuse
-
-This structure already prepares the project for future variants:
-- another MTT configuration can reuse the same `mtt_*` packages with a different integration overlay,
-- another robot can reuse the external drivers and algorithms without inheriting the MTT CAN layer,
-- future controller or mapping work can move toward generic packages without forcing a rewrite of the MTT core.
-
-The next meaningful refactor is not to merge everything into `mtt_tools`.
-It is to make the runtime boundary cleaner and the namespace handling consistent.
-
-## Known gaps
-
-- OAK support is still incomplete at the workspace level. The launch file exists in `norlab_robot`, but the exact `depthai_ros_driver` dependency still needs to be confirmed.
-- The full startup truth still lives on the robot side and needs a focused runtime validation pass.
-- Several older launch files still carry pre-existing namespace and absolute-topic habits that should be cleaned up in a dedicated follow-up pass.
+- the parent repo stays small enough to understand
+- `mtt_core` can evolve as the owned vehicle stack
+- `norlab_robot` stays where runtime assembly actually happens
+- imported dependencies remain explicit and reproducible
+- future robot variants can reuse the same pattern without turning this repo into a dump of everything

@@ -50,7 +50,7 @@ ros2 launch mtt_bringup mtt_teleop_controller.launch.py
 sudo ip link add dev vcan0 type vcan
 sudo ip link set up vcan0
 
-python3 src/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
+python3 src/mtt_core/mtt_driver/scripts/mtt_cmd_tachometer_sim.py --can-interface vcan0
 ros2 launch mtt_driver mtt_composable_system.launch.py can_interface:=vcan0
 python3 scripts/mtt_can_monitor.py --interface vcan0
 ```

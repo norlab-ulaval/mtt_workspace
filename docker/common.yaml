@@ -1,6 +1,6 @@
 services:
   base:
-    image: ${MTT_IMAGE:-mtt_tools:devel}
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
     working_dir: ${WORKSPACE}
     environment:
       - WORKSPACE
@@ -21,15 +21,30 @@ services:
       - ${HOME}/.gitconfig:/home/mtt/.gitconfig:ro
       - /etc/timezone:/etc/timezone:ro
       - /etc/localtime:/etc/localtime:ro
+      - /dev:/dev
+
+  # Extends base with NVIDIA GPU access.
+  # Uses NVIDIA_VISIBLE_DEVICES (modern approach) instead of deploy.resources so the
+  # container starts normally on hosts without nvidia-container-toolkit installed.
+  # When nvidia-ctk is configured as the default Docker runtime, the GPU is passed
+  # through automatically; without it the var is simply ignored.
+  gpu_base:
+    extends:
+      service: base
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=all
 
   ros_runtime_base:
     extends:
-      service: base
+      service: gpu_base
     network_mode: host
     pid: host
     ipc: host
+    shm_size: '256m'
     cap_add:
       - NET_ADMIN
+      - NET_RAW
 
   x11_base:
     extends:

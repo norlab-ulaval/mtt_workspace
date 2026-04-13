@@ -76,10 +76,12 @@ __pycache__/
 # Local workspace noise
 .pytest_cache/
 .mypy_cache/
+.cache/
 .venv*/
 compile_commands.json
 *.swp
 *.swo
+*.log
 .DS_Store
 
 # Bootstrapped external workspace
@@ -91,9 +93,11 @@ data/raw/
 data/processed/
 data/live_robot/
 data/records/
+data/mtt_*/
 tmp/
 
 
 # Generated robot artifacts
-src/mtt_description/urdf/*.urdf
-src/mtt_description/urdf/*.sdf
+src/mtt_core/mtt_description/urdf/*.urdf
+src/mtt_core/mtt_description/urdf/*.sdf
+.ccache/

@@ -1,77 +1,73 @@
-# MTT_workspace
-
-![MTT Robot](./mtt.jpg)
+# mtt_workspace
 
 ROS 2 Jazzy workspace for the MTT platform.
 
-This repository is the overarching workspace foundation. Once cloned and bootstrapped, it automatically imports the core MTT packages (`mtt_core`) along with all external sensor drivers and hardware dependencies necessary to run the robot.
+This repository is the workspace shell around the robot software. It owns the Docker files, the dependency manifests, the helper scripts, the demos, and the project documentation.
 
-It contains:
-- the local workspace infrastructure used for development,
-- the dependency manifests needed to reconstruct the full software stack,
-- operator-side demos and reference documentation for the MTT.
+It does not contain the whole robot source tree by itself.
 
-The real robot stack is modular. The current runtime observed on the robot depends on:
-- `mtt_core` for the fundamental TF trees, custom drivers, and descriptions.
-- `norlab_robot` as the runtime integration layer,
-- external drivers and estimation/control packages.
-
-The goal of this repository is to decouple the workspace environment (Docker, scripts, network bridges) from the actual ROS 2 source code logic.
+The actual ROS code is split into nested repositories:
+- `src/mtt_core`
+  MTT-owned packages such as the driver, description, bringup, interfaces, and messages.
+- `src/external/*`
+  External dependencies imported with `vcstool`.
+- `src/external/norlab_robot`
+  Runtime integration layer for the real robot.
 
 ## Repository layout
 
 ```text
 mtt_workspace/
   src/
-    mtt_core/            # imported with vcs (contains Bringup, Description, Driver, Msgs)
-    external/            # imported with vcs (contains hardware drivers, norlab_robot)
+    mtt_core/
+    external/
   dependencies/
-    robot.repos          # external repos needed for the complete robot stack
+    robot.repos
   docker/
   demos/
   doc/
   documentations/
   scripts/
+  data/
 ```
 
-## Workspace layers
+## What lives where
 
+- `mtt_workspace`
+  Workspace infrastructure, manifests, docs, and local workflows.
 - `src/mtt_core`
-  The MTT-specific ROS 2 packages dynamically cloned into the workspace. It contains the primary algorithms and implementations.
-- `src/external/*`
-  External repositories imported with `vcstool`. They stay outside the parent git history.
+  MTT-specific ROS packages.
+- `src/external`
+  Imported dependencies that stay outside the parent git history.
 - `src/external/norlab_robot`
-  Runtime integration layer for the real robot. This is where the observed sensor, mapping, startup, and recording orchestration currently lives.
+  Robot runtime overlay: sensors, startup, mapping, recording, Foxglove, and related runtime glue.
 - `dependencies/robot.repos`
-  Curated manifest for all external dependencies including `mtt_core`.
-- `demos/`
-  Local entry points and operator-side workflows.
-- `doc/`
-  Repository documentation and engineering conventions.
-- `documentations/`
-  Reference material such as specifications, manuals, and DBC files.
+  Source of truth for the observed full workspace composition.
 
 ## Quick start
 
-### Full robot workspace bootstrap
-
-Use this when setting up a new machine to acquire the full run-time stack.
-
 Requirements:
-- `vcstool` installed and available as `vcs`,
-- SSH access to the private repositories listed in `dependencies/robot.repos`,
-- ROS 2 Jazzy already installed on the machine.
+- ROS 2 Jazzy installed on the host
+- `vcstool` installed as `vcs`
+- access to the private repositories listed in `dependencies/robot.repos`
+
+### Bootstrap the workspace
 
 ```bash
 ./scripts/create_ws
+```
+
+That imports `src/mtt_core` and the external repositories declared in `dependencies/robot.repos`.
+
+### Build on the host
+
+```bash
 source /opt/ros/jazzy/setup.bash
 colcon build --base-paths src/mtt_core src/external --symlink-install
 source install/setup.bash
 ```
 
-### Docker workflow
-
-The Docker files in this repository support local development inherently matching the physical hardware dependencies.
+### Build in Docker
 
 ```bash
 ./scripts/create_env
@@ -80,29 +76,41 @@ docker compose run --rm compile
 docker compose run --rm bash
 ```
 
-The Docker build logic now detects `src/mtt_core` and `src/external/` automatically. It will mount and compile all imported packages. Rebuild the image (`docker compose -f docker/build.yaml build devel`) whenever a new repository is added to the manifest.
+## Important workflows
 
-## Utilities and Scripts
-
-The `scripts/` directory provides workflow automation tools:
-
-- `./scripts/create_ws`
-  Reads `dependencies/robot.repos` and utilizes `vcs` to clone all missing packages (including `mtt_core`) into `src/`.
 - `./scripts/create_env`
-  Generates the mandatory `.env` file initializing network targets, user IDs, and Git configurations necessary to route data cleanly between Docker and the host.
-- `./scripts/pull`
-  Recursively performs a fast `git pull` on all inner repositories inside your workspace, guaranteeing everything is up to date.
-- `./scripts/autosync_ws`
-  Deploys your locally compiled binaries and parameters to the designated real robot IP using `rsync`, circumventing the need to physically clone code directly on the MTT onboard computer.
+  Creates `.env` and local bind-mount directories used by Docker and demos.
+- `./scripts/create_ws`
+  Imports `mtt_core` and the declared external repositories.
 - `./scripts/status`
-  Runs a comprehensive scan across all nested submodules ensuring no uncommitted files are omitted before deployment.
+  Shows the state of the parent repo, `src/mtt_core`, and imported repos under `src/external`.
+- `./scripts/pull`
+  Pulls the parent repo, `src/mtt_core`, and the imported external repos.
+- `./scripts/autosync_ws`
+  Syncs the local workspace to a robot target with `rsync`.
 
-### Examples
+## Demos
 
-```bash
-./scripts/create_env --robot-target mohamed@192.168.2.2
-./scripts/create_ws
-./scripts/autosync_ws
-docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
-```
+The repository includes two distinct live-runtime entry points in `demos/`:
+- `demos/live_robot`
+  robot-side runtime stack started with Compose
+- `demos/monitor`
+  laptop-side operator stack for monitoring, teleop, and recording
 
+It also includes:
+- description and RViz checks,
+- simulation launch wrappers.
+
+See [`demos/README.md`](./demos/README.md) for the Compose entry points.
+
+## Known limits
+
+- The parent repo is not the full robot runtime by itself.
+- `dependencies/robot.repos` reflects the observed workspace, but runtime truth still depends on what is actually present on the robot.
+- OAK support is still not closed.
+- Foxglove default policy still needs a final runtime decision in `norlab_robot`.
+- CAN truth and steering truth still require robot-side validation.
+
+## Practical note
+
+Because the workspace is built from nested repositories, a plain `git status` at the root is not enough. Use `./scripts/status` before assuming the workspace is clean.

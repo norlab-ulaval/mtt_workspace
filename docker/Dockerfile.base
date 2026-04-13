@@ -1,0 +1,201 @@
+# syntax=docker/dockerfile:1
+# ══════════════════════════════════════════════════════════════════════════════
+# mtt_workspace:base — heavy, rarely-changing layers
+#
+# Build ONCE, then keep forever:
+#   docker build -f docker/Dockerfile.base -t mtt_workspace:base .
+#
+# Contents (in cache-optimal order):
+#   Layer 1  system tools
+#   Layer 2  CUDA 12.6 + TensorRT
+#   Layer 3  ZED SDK 5.2            (1.2 GB download)
+#   Layer 4  NVIDIA driver stubs
+#   Layer 5  depthai-core v2.32.0   (cmake build)
+#   Layer 6a libnabo                (cmake build)
+#   Layer 6b libpointmatcher        (cmake build)
+#   Layer 6c norlab_icp_mapper      (cmake build)
+#   User + rosdep init + entrypoint
+#
+# Rebuild only when upgrading CUDA/ZED/depthai/C++ lib versions.
+# ══════════════════════════════════════════════════════════════════════════════
+
+ARG FROM_IMAGE=docker.io/osrf/ros:jazzy-desktop
+ARG ROS_DISTRO=jazzy
+
+FROM ${FROM_IMAGE}
+
+ARG ROS_DISTRO
+ARG RMW_IMPLEMENTATION=rmw_fastrtps_cpp
+ARG USERNAME=mtt
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    ROS_DISTRO=${ROS_DISTRO} \
+    RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION} \
+    WORKSPACE=/workspaces/mtt_workspace \
+    SHELL=/bin/bash \
+    PATH=/usr/local/cuda/bin:${PATH} \
+    LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+
+# --- Layer 1: system tools (rarely changes) ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+        echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4 && \
+        sed -i \
+            's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; \
+             s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g; \
+             s|http://ca.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+            /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true && \
+        apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    can-utils \
+    ccache \
+    curl \
+    git \
+    iproute2 \
+    iputils-ping \
+    inotify-tools \
+    libhidapi-libusb0 \
+    libpcap-dev \
+    libudev-dev \
+    libusb-1.0-0-dev \
+    pciutils \
+    python3-can \
+    python3-colcon-common-extensions \
+    python3-pip \
+    python3-pyinotify \
+    python3-rosdep \
+    python3-vcstool \
+    python3-yaml \
+    rsync \
+    screen \
+    ssh \
+    sudo \
+    wget \
+    zsh \
+    zstd
+
+# --- Layer 2: CUDA 12.6 + TensorRT ---
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    wget -q https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb && \
+    dpkg -i cuda-keyring_1.1-1_all.deb && \
+    rm cuda-keyring_1.1-1_all.deb && \
+    apt-get update && apt-get install -y --no-install-recommends \
+    cuda-nvcc-12-6 \
+    cuda-cudart-dev-12-6 \
+    cuda-libraries-dev-12-6 \
+    libnvinfer-dev \
+    libnvinfer-plugin-dev
+
+# --- Layer 3: ZED SDK 5.2 (1.2 GB) ---
+RUN wget -q -O /tmp/ZED_SDK_Ubuntu24.run \
+        https://download.stereolabs.com/zedsdk/5.2/cu12/ubuntu24 && \
+    chmod +x /tmp/ZED_SDK_Ubuntu24.run && \
+    /tmp/ZED_SDK_Ubuntu24.run -- silent skip_tools skip_cuda && \
+    rm /tmp/ZED_SDK_Ubuntu24.run && \
+    chmod -R a+rX /usr/local/zed
+
+ENV ZED_DIR=/usr/local/zed \
+    LIBRARY_PATH=/usr/local/cuda/lib64/stubs
+
+# --- Layer 4: NVIDIA driver stubs ---
+RUN printf '%s\n' \
+        'void cuvidCreateDecoder(void){}' \
+        'void cuvidDestroyDecoder(void){}' \
+        'void cuvidDecodePicture(void){}' \
+        'void cuvidGetDecodeStatus(void){}' \
+        'void cuvidReconfigureDecoder(void){}' \
+        'void cuvidGetDecoderCaps(void){}' \
+        'void cuvidCreateVideoParser(void){}' \
+        'void cuvidDestroyVideoParser(void){}' \
+        'void cuvidParseVideoData(void){}' \
+        'void cuvidMapVideoFrame(void){}' \
+        'void cuvidUnmapVideoFrame(void){}' \
+        'void cuvidMapVideoFrame64(void){}' \
+        'void cuvidUnmapVideoFrame64(void){}' \
+        'void cuvidCtxLockCreate(void){}' \
+        'void cuvidCtxLockDestroy(void){}' \
+        'void cuvidCtxLock(void){}' \
+        'void cuvidCtxUnlock(void){}' \
+        > /tmp/nvcuvid_stub.c && \
+    printf '%s\n' \
+        'void NvEncodeAPICreateInstance(void){}' \
+        'void NvEncodeAPIGetMaxSupportedVersion(void){}' \
+        > /tmp/nvencode_stub.c && \
+    gcc -shared -fPIC /tmp/nvcuvid_stub.c  -Wl,-soname,libnvcuvid.so.1    -o /usr/local/cuda/lib64/stubs/libnvcuvid.so.1 && \
+    gcc -shared -fPIC /tmp/nvencode_stub.c -Wl,-soname,libnvidia-encode.so.1 -o /usr/local/cuda/lib64/stubs/libnvidia-encode.so.1 && \
+    ln -sf libnvcuvid.so.1    /usr/local/cuda/lib64/stubs/libnvcuvid.so && \
+    ln -sf libnvidia-encode.so.1 /usr/local/cuda/lib64/stubs/libnvidia-encode.so && \
+    rm /tmp/nvcuvid_stub.c /tmp/nvencode_stub.c && \
+    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so /usr/local/cuda/lib64/stubs/libcuda.so.1 && \
+    ln -sf /usr/local/cuda/lib64/stubs/libnvcuvid.so.1    /usr/lib/x86_64-linux-gnu/libnvcuvid.so.1 && \
+    ln -sf /usr/local/cuda/lib64/stubs/libnvcuvid.so      /usr/lib/x86_64-linux-gnu/libnvcuvid.so && \
+    ln -sf /usr/local/cuda/lib64/stubs/libnvidia-encode.so.1 /usr/lib/x86_64-linux-gnu/libnvidia-encode.so.1 && \
+    ln -sf /usr/local/cuda/lib64/stubs/libnvidia-encode.so   /usr/lib/x86_64-linux-gnu/libnvidia-encode.so && \
+    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so.1 /usr/lib/x86_64-linux-gnu/libcuda.so.1 && \
+    ln -sf /usr/local/cuda/lib64/stubs/libcuda.so   /usr/lib/x86_64-linux-gnu/libcuda.so && \
+    ldconfig
+
+# --- Layer 5: depthai-core v2.32.0 ---
+RUN git clone --depth 1 --branch v2.32.0 https://github.com/luxonis/depthai-core.git /tmp/depthai-core && \
+    cd /tmp/depthai-core && git submodule update --init --recursive && \
+    cmake -S /tmp/depthai-core -B /tmp/depthai-core/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DBUILD_SHARED_LIBS=ON \
+        -DDEPTHAI_BUILD_TESTS=OFF \
+        -DDEPTHAI_BUILD_EXAMPLES=OFF && \
+    cmake --build /tmp/depthai-core/build --parallel $(nproc) && \
+    cmake --install /tmp/depthai-core/build && \
+    ldconfig && \
+    rm -rf /tmp/depthai-core
+
+# --- Layer 6: libnabo → libpointmatcher → norlab_icp_mapper ---
+RUN git clone --depth 1 https://github.com/norlab-ulaval/libnabo.git /tmp/libnabo && \
+    cmake -S /tmp/libnabo -B /tmp/libnabo/build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/libnabo/build --parallel $(nproc) && \
+    cmake --install /tmp/libnabo/build && \
+    rm -rf /tmp/libnabo
+
+RUN git clone --depth 1 https://github.com/norlab-ulaval/libpointmatcher.git /tmp/libpointmatcher && \
+    cmake -S /tmp/libpointmatcher -B /tmp/libpointmatcher/build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/libpointmatcher/build --parallel $(nproc) && \
+    cmake --install /tmp/libpointmatcher/build && \
+    ldconfig && \
+    rm -rf /tmp/libpointmatcher
+
+RUN git clone --depth 1 --branch 2.1.1 https://github.com/norlab-ulaval/norlab_icp_mapper.git /tmp/norlab_icp_mapper && \
+    cmake -S /tmp/norlab_icp_mapper -B /tmp/norlab_icp_mapper/build -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/norlab_icp_mapper/build --parallel $(nproc) && \
+    cmake --install /tmp/norlab_icp_mapper/build && \
+    ldconfig && \
+    rm -rf /tmp/norlab_icp_mapper
+
+# --- user setup ---
+ARG USERNAME=mtt
+ARG USER_UID=1000
+ARG USER_GID=1000
+RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
+    existing_group="$(getent group "${USER_GID}" | cut -d: -f1 || true)" && \
+    if [ -n "${existing_group}" ] && [ "${existing_group}" != "${USERNAME}" ]; then \
+      groupmod -n "${USERNAME}" "${existing_group}"; \
+    elif ! getent group "${USERNAME}" >/dev/null; then \
+      groupadd --gid "${USER_GID}" "${USERNAME}"; \
+    fi && \
+    if [ -n "${existing_user}" ] && [ "${existing_user}" != "${USERNAME}" ]; then \
+      usermod -l "${USERNAME}" "${existing_user}" && \
+      usermod -d "/home/${USERNAME}" -m "${USERNAME}"; \
+    elif ! id -u "${USERNAME}" >/dev/null 2>&1; then \
+      useradd --uid "${USER_UID}" --gid "${USERNAME}" -m -s /bin/bash "${USERNAME}"; \
+    fi && \
+    usermod --gid "${USERNAME}" "${USERNAME}" && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/${USERNAME} && \
+    chmod 0440 /etc/sudoers.d/${USERNAME}
+
+RUN rosdep init 2>/dev/null || true
+
+COPY docker/ros_entrypoint.sh /ros_entrypoint.sh
+COPY docker/ros_setup.sh /ros_setup.sh
+RUN chmod +x /ros_entrypoint.sh /ros_setup.sh
+
+ENTRYPOINT ["/ros_entrypoint.sh"]
+CMD ["bash"]

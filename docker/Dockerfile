@@ -1,41 +1,55 @@
-ARG FROM_IMAGE=docker.io/osrf/ros:jazzy-desktop
+# syntax=docker/dockerfile:1
+# ══════════════════════════════════════════════════════════════════════════════
+# mtt_workspace:devel — fast workspace image
+#
+# Requires mtt_workspace:base to be built first (once):
+#   docker build -f docker/Dockerfile.base -t mtt_workspace:base .
+#
+# Shortcut reusing existing built image (zero cost):
+#   docker tag mtt_workspace:devel mtt_workspace:base
+#
+# Daily workflow — adding/removing a ROS package:
+#   Edit Layer 7 below, then: dc build   (~3-5 min)
+#
+# Layer costs from mtt_workspace:base:
+#   Layer 7  ROS packages   ~2-3 min (Canadian mirror, lists cached)
+#   Layer 8  pip            ~20s
+#   rosdep   workspace deps ~30s (cached when package.xml unchanged)
+#   colcon   build          ~5-15 min (cached when source unchanged)
+# ══════════════════════════════════════════════════════════════════════════════
+
+ARG BASE_IMAGE=mtt_workspace:base
 ARG ROS_DISTRO=jazzy
 
-FROM ${FROM_IMAGE} AS base
+FROM ${BASE_IMAGE} AS base
+
+# Base image may have USER mtt set as last instruction — switch to root for installs.
+USER root
 
 ARG ROS_DISTRO
-ARG RMW_IMPLEMENTATION=rmw_fastrtps_cpp
-ARG USERNAME=mtt
-ARG USER_UID=1000
-ARG USER_GID=1000
 
-ENV DEBIAN_FRONTEND=noninteractive \
-    ROS_DISTRO=${ROS_DISTRO} \
-    RMW_IMPLEMENTATION=${RMW_IMPLEMENTATION} \
-    WORKSPACE=/workspaces/mtt_tools \
-    SHELL=/bin/bash
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    can-utils \
-    ccache \
-    curl \
-    git \
-    iproute2 \
-    iputils-ping \
-    inotify-tools \
-    python3-can \
-    python3-colcon-common-extensions \
-    python3-pip \
-    python3-pyinotify \
-    python3-rosdep \
-    python3-vcstool \
-    python3-yaml \
-    rsync \
-    screen \
-    ssh \
-    sudo \
-    zsh \
+# --- Layer 7: ROS packages (edit here — only busts layers 8+ not CUDA/ZED) ---
+#
+# Network hardening: force IPv4 and use HTTPS Ubuntu archives.
+# This avoids stalls on HTTP/mirror resolution in some environments.
+#
+# apt list cache: --mount=type=cache,target=/var/lib/apt/lists caches the package
+# index across builds so repeated apt-get updates only download the diff (~1 MB)
+# instead of the full 43 MB index every time.
+#
+# Full package list — install all packages needed by the workspace.
+# apt-get install skips already-installed packages in seconds,
+# so this list is correct whether building from a clean Dockerfile.base
+# or from a tagged old image that has most packages already.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    echo 'Acquire::ForceIPv4 "true";' > /etc/apt/apt.conf.d/99force-ipv4 && \
+    sed -i \
+        's|http://archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g; \
+         s|http://security.ubuntu.com/ubuntu|https://security.ubuntu.com/ubuntu|g; \
+         s|http://ca.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
+        /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true && \
+    apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-controller-manager \
     ros-${ROS_DISTRO}-forward-command-controller \
     ros-${ROS_DISTRO}-foxglove-bridge \
@@ -53,76 +67,51 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-${ROS_DISTRO}-ros2-control \
     ros-${ROS_DISTRO}-rviz2 \
     ros-${ROS_DISTRO}-twist-mux \
-    ros-${ROS_DISTRO}-xacro && \
-    rm -rf /var/lib/apt/lists/*
+    ros-${ROS_DISTRO}-xacro \
+    ros-${ROS_DISTRO}-gtsam \
+    ros-${ROS_DISTRO}-nmea-msgs \
+    ros-${ROS_DISTRO}-geographic-msgs \
+    ros-${ROS_DISTRO}-robot-localization \
+    ros-${ROS_DISTRO}-ros2-socketcan
 
-RUN python3 -m pip install --break-system-packages --no-cache-dir --ignore-installed cantools
+# --- Layer 8: pip ---
+RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed cantools && \
+    chmod -R a+rX /usr/local/lib/python3.12/dist-packages/
 
-RUN git clone https://github.com/norlab-ulaval/libnabo.git /tmp/libnabo && \
-    cd /tmp/libnabo && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    make install && \
-    rm -rf /tmp/libnabo
+# ══════════════════════════════════════════════════════════════════════════════
+# devel stage — workspace source + colcon build
+#
+# Cache isolation for rosdep:
+#   1. pkg_manifests stage extracts ONLY package.xml files from src/
+#   2. rosdep layer rebuilds only when ROS dependencies change, not on .cpp/.hpp edits
+#   3. Full source copy + colcon come after, so source edits don't bust rosdep
+# ══════════════════════════════════════════════════════════════════════════════
 
-RUN git clone https://github.com/norlab-ulaval/libpointmatcher.git /tmp/libpointmatcher && \
-    cd /tmp/libpointmatcher && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    make install && \
-    rm -rf /tmp/libpointmatcher && \
-    ldconfig
-
-RUN git clone --branch 2.1.1 https://github.com/norlab-ulaval/norlab_icp_mapper.git /tmp/norlab_icp_mapper && \
-    cd /tmp/norlab_icp_mapper && \
-    mkdir build && cd build && \
-    cmake -DCMAKE_BUILD_TYPE=Release .. && \
-    make -j$(nproc) && \
-    make install && \
-    rm -rf /tmp/norlab_icp_mapper && \
-    ldconfig
-
-
-RUN existing_user="$(getent passwd "${USER_UID}" | cut -d: -f1 || true)" && \
-    existing_group="$(getent group "${USER_GID}" | cut -d: -f1 || true)" && \
-    if [ -n "${existing_group}" ] && [ "${existing_group}" != "${USERNAME}" ]; then \
-      groupmod -n "${USERNAME}" "${existing_group}"; \
-    elif ! getent group "${USERNAME}" >/dev/null; then \
-      groupadd --gid "${USER_GID}" "${USERNAME}"; \
-    fi && \
-    if [ -n "${existing_user}" ] && [ "${existing_user}" != "${USERNAME}" ]; then \
-      usermod -l "${USERNAME}" "${existing_user}" && \
-      usermod -d "/home/${USERNAME}" -m "${USERNAME}"; \
-    elif ! id -u "${USERNAME}" >/dev/null 2>&1; then \
-      useradd --uid "${USER_UID}" --gid "${USERNAME}" -m -s /bin/bash "${USERNAME}"; \
-    fi && \
-    usermod --gid "${USERNAME}" "${USERNAME}" && \
-    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/${USERNAME} && \
-    chmod 0440 /etc/sudoers.d/${USERNAME}
-
-RUN rosdep init 2>/dev/null || true
-
-COPY docker/ros_entrypoint.sh /ros_entrypoint.sh
-COPY docker/ros_setup.sh /ros_setup.sh
-RUN chmod +x /ros_entrypoint.sh /ros_setup.sh
-
-ENTRYPOINT ["/ros_entrypoint.sh"]
-CMD ["bash"]
+FROM base AS pkg_manifests
+COPY src/ /src/
+RUN find /src -name "package.xml" | \
+    while IFS= read -r f; do install -D "$f" "/manifests/${f#/src/}"; done
 
 FROM base AS devel
 
-WORKDIR /workspaces/mtt_tools
-COPY . /workspaces/mtt_tools
+WORKDIR /workspaces/mtt_workspace
 
-RUN bash -lc ' \
-    source /opt/ros/${ROS_DISTRO}/setup.bash && \
-    rosdep update && \
-    mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths) && \
-    apt-get update && \
-    rosdep install -iyr --from-paths "${workspace_paths[@]}" --ignore-src \
-'
+# Step 1: package manifests only — rosdep layer stable across source edits
+COPY --from=pkg_manifests /manifests ./src/
+COPY scripts/workspace_source_paths ./scripts/workspace_source_paths
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    bash -lc ' \
+        source /opt/ros/${ROS_DISTRO}/setup.bash && \
+        rosdep update && \
+        mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths) && \
+        apt-get update && \
+        rosdep install -iyr --from-paths "${workspace_paths[@]}" --ignore-src \
+    '
+
+# Step 2: full source — busts colcon build but not rosdep above
+COPY . .
 
 ARG USERNAME=mtt
 USER ${USERNAME}

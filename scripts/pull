@@ -5,6 +5,10 @@ cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 git pull --ff-only
 
+if git -C src/mtt_core rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  git -C src/mtt_core pull --ff-only
+fi
+
 if ! command -v vcs >/dev/null 2>&1; then
   echo "[pull] vcs not found; skipping src/external" >&2
   exit 0

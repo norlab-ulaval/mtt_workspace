@@ -1,5 +1,29 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
-git status -s
+
+repo_roots=(".")
+
+if git -C src/mtt_core rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  repo_roots+=("src/mtt_core")
+fi
+
+if [[ -d src/external ]]; then
+  while IFS= read -r repo_dir; do
+    if git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      repo_roots+=("${repo_dir}")
+    fi
+  done < <(find src/external -mindepth 1 -maxdepth 1 -type d | sort)
+fi
+
+for repo_dir in "${repo_roots[@]}"; do
+  if [[ "${repo_dir}" == "." ]]; then
+    label="mtt_workspace"
+  else
+    label="${repo_dir}"
+  fi
+
+  printf '\n[%s]\n' "${label}"
+  git -C "${repo_dir}" status --short --branch
+done

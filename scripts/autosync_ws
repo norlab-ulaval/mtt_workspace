@@ -95,6 +95,7 @@ exclude_args=(
   --exclude=data/raw/
   --exclude=data/processed/
   --exclude=tmp/
+  --exclude=.ccache/
   --exclude='*.pyc'
   --exclude='*.pyo'
 )

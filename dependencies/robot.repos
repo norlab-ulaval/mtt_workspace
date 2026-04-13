@@ -73,6 +73,11 @@ repositories:
     url: https://github.com/stereolabs/zed-ros2-wrapper.git
     version: master
 
+  src/external/depthai-ros:
+    type: git
+    url: https://github.com/luxonis/depthai-ros.git
+    version: jazzy
+
   src/external/twist_mux:
     type: git
     url: https://github.com/ros-teleop/twist_mux.git

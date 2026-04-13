@@ -2,9 +2,9 @@
 
 set -euo pipefail
 
-sudo chown -R "$(whoami)" /workspaces/mtt_tools
+sudo chown -R "$(whoami)" /workspaces/mtt_workspace
 sudo apt-get update -y
-cd /workspaces/mtt_tools
+cd /workspaces/mtt_workspace
 rosdep update
 mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
 sudo rosdep install --from-paths "${workspace_paths[@]}" --ignore-src -y

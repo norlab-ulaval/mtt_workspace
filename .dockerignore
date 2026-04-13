@@ -12,9 +12,20 @@ __pycache__
 .pytest_cache
 .mypy_cache
 .venv-tools
-data/raw
-data/processed
-data/live_robot
-data/records
-data/cache
+data/
 tmp
+
+# Exclude heavy runtime artifacts recursively (root and nested workspaces)
+**/data/**
+**/build/**
+**/install/**
+**/log/**
+**/.rsync_partial/**
+
+# Exclude VCS metadata in nested repositories imported under src/external
+**/.git
+**/.git/**
+
+# Exclude local caches and outputs
+**/.ccache/**
+**/__pycache__/**

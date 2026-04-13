@@ -31,6 +31,9 @@ sed \
 
 export ROS_DOMAIN_ID="${live_domain_id}"
 export RMW_IMPLEMENTATION=rmw_zenoh_cpp
+# Keep both names for compatibility, but use the same variable family as
+# norlab_robot on the robot side.
+export ZENOH_SESSION_CONFIG_URI="${rendered_config}"
 export RMW_ZENOH_CONFIG_FILE="${rendered_config}"
 
 echo "[zenoh] ROS_DOMAIN_ID=${ROS_DOMAIN_ID}"
