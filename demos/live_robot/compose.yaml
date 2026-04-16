@@ -1,89 +1,109 @@
+x-build: &mtt_devel_build
+  context: ../..
+  dockerfile: docker/Dockerfile
+  target: devel
+  args:
+    ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    USERNAME: mtt
+    USER_UID: ${UID:-1000}
+    USER_GID: ${GID:-1000}
+
 x-live-robot-base: &live_robot_base
   extends:
-    file: ../../compose.yaml
-    service: bash
-  volumes:
-    - ./config:/config:ro
-    - ${HOME}/.ssh:/home/mtt/.ssh:ro
+    file: ../../docker/common.yaml
+    service: ros_runtime_base
+  image: ${MTT_IMAGE:-mtt_workspace:devel}
+  build: *mtt_devel_build
+  privileged: true
   environment:
-    LIVE_ROBOT_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
     ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
     RMW_IMPLEMENTATION: rmw_zenoh_cpp
-    ROBOT_USER: ${ROBOT_USER:-robot}
-    ROBOT_HOST: ${ROBOT_HOST:-192.168.2.2}
-    ROBOT_WORKSPACE: ${ROBOT_WORKSPACE:-/home/robot/Project/mtt_ws}
-    ROBOT_SSH_TARGET: ${ROBOT_SSH_TARGET:-robot@192.168.2.2}
-    ROBOT_ZENOH_ENDPOINT: ${ROBOT_ZENOH_ENDPOINT:-tcp/192.168.2.2:7447}
-    ROBOT_FOXGLOVE_URL: ${ROBOT_FOXGLOVE_URL:-ws://192.168.2.2:8765}
-    LOCAL_FOXGLOVE_PORT: ${LOCAL_FOXGLOVE_PORT:-8766}
-    MTT_ZENOH_CONFIG_TEMPLATE: /config/zenoh_session.template.json5
-    ZENOH_ROUTER_CHECK_ATTEMPTS: ${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}
+    ROBOT_NAME: ${ROBOT_NAME:-mtt-hl}
+    NORLAB_ROBOT_PATH: ${WORKSPACE}/src/external/norlab_robot
+    ZENOH_ROUTER_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_router.json5
+    ZENOH_SESSION_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
+    RMW_ZENOH_CONFIG_FILE: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
+    RUST_LOG: ${ZENOH_RUST_LOG:-zenoh=info,zenoh_transport=warn}
+  volumes:
+    - /dev:/dev
+    - /run/udev:/run/udev:ro
+    # ZED calibration files persist across container restarts.
+    # The ZED SDK downloads the calibration file on first run (requires internet).
+    # Without this mount the settings dir inside the container is always empty.
+    - /usr/local/zed/settings:/usr/local/zed/settings:rw
 
 services:
   bash:
     <<: [*live_robot_base]
+    profiles: ["debug"]
+    tty: true
+    stdin_open: true
+    command: bash
+
+  zenoh:
+    <<: [*live_robot_base]
+    profiles: ["infra"]
     command:
-      - scripts/run_with_zenoh_session.sh
       - bash
+      - -c
+      - |
+        fuser -k 7447/tcp 2>/dev/null || true
+        sleep 0.5
+        exec ros2 run rmw_zenoh_cpp rmw_zenohd
 
-  monitor:
+  robot:
     <<: [*live_robot_base]
+    privileged: true
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - /usr/local/zed/settings:/usr/local/zed/settings:rw
+      - /dev/bus/usb:/dev/bus/usb
     command:
-      - scripts/run_with_zenoh_session.sh
-      - ros2
-      - run
-      - foxglove_bridge
-      - foxglove_bridge
-      - --ros-args
-      - --params-file
-      - /config/foxglove_bridge.yaml
-      - -p
-      - port:=${LOCAL_FOXGLOVE_PORT:-8766}
-
-  rviz:
-    <<: [*live_robot_base]
-    command:
-      - scripts/run_with_zenoh_session.sh
       - ros2
       - launch
-      - mtt_bringup
-      - mtt_rviz.launch.py
-      - rviz_config:=/workspaces/mtt_tools/src/mtt/mtt_description/rviz/urdf_config.rviz
+      - norlab_robot
+      - live_robot.launch.py
+      - warnings:=false
+      - enable_mapping:=true
+      - enable_teleop:=false
+      - enable_joystick:=false
+      - setup_real_can:=true
 
-
-  teleop_pc:
+  foxglove:
     <<: [*live_robot_base]
+    profiles: ["infra"]
+    depends_on:
+      - robot
+    # network_mode: host (inherited) means the bridge binds on the robot host.
+    # Keep this service opt-in so the default stack can reuse an existing host bridge.
     command:
-      - scripts/run_with_zenoh_session.sh
+      - bash
+      - -lc
+      - |
+        if command -v fuser &>/dev/null; then
+          fuser -k 8765/tcp 2>/dev/null || true
+          sleep 0.5
+        fi
+        exec ros2 run foxglove_bridge foxglove_bridge \
+          --ros-args --params-file \
+          ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml
+
+  teleop_robot:
+    <<: [*live_robot_base]
+    profiles: ["manual"]
+    depends_on:
+      - robot
+    volumes:
+      - /dev:/dev
+      - /run/udev:/run/udev:ro
+      - /dev/input:/dev/input  # joystick devices
+    command:
       - ros2
       - launch
       - mtt_driver
       - mtt_operator_teleop.launch.py
       - joy_device:=/dev/input/js0
-
-  constant_speed:
-    <<: [*live_robot_base]
-    command:
-      - scripts/run_with_zenoh_session.sh
-      - python3
-      - demos/live_robot/scripts/constant_speed.py
-      - --topic
-      - controller/cmd_vel
-      - --linear
-      - ${MTT_LINEAR_SPEED:-0.20}
-      - --angular
-      - ${MTT_ANGULAR_SPEED:-0.0}
-      - --rate
-      - ${MTT_COMMAND_RATE_HZ:-10.0}
-      - --duration
-      - ${MTT_COMMAND_DURATION:-0.0}
-      - --release-estop
-
-  record:
-    <<: [*live_robot_base]
-    command:
-      - scripts/run_with_zenoh_session.sh
-      - python3
-      - demos/live_robot/scripts/record.py
-      - --config
-      - /config/records.yaml
+      - max_linear_speed:=0.6    # m/s  — full stick = this speed
+      - max_angular_speed:=0.6   # rad/s — full stick = this angular rate

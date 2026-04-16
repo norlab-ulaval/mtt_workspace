@@ -1,10 +1,92 @@
+x-monitor-base: &monitor_base
+  extends:
+    file: ../../compose.yaml
+    service: bash
+  volumes:
+    - ../live_robot/config:/config:ro
+  environment:
+    LIVE_ROBOT_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
+    ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
+    RMW_IMPLEMENTATION: rmw_zenoh_cpp
+    ROBOT_USER: ${ROBOT_USER:-robot}
+    ROBOT_HOST: ${ROBOT_HOST:-192.168.2.2}
+    ROBOT_WORKSPACE: ${ROBOT_WORKSPACE:-/home/robot/Project/mtt_ws}
+    ROBOT_SSH_TARGET: ${ROBOT_SSH_TARGET:-robot@192.168.2.2}
+    ROBOT_ZENOH_ENDPOINT: ${ROBOT_ZENOH_ENDPOINT:-tcp/192.168.2.2:7447}
+    ROBOT_FOXGLOVE_URL: ${ROBOT_FOXGLOVE_URL:-ws://192.168.2.2:8765}
+    LOCAL_FOXGLOVE_PORT: ${LOCAL_FOXGLOVE_PORT:-8766}
+    MTT_ZENOH_CONFIG_TEMPLATE: /config/zenoh_session.template.json5
+    ZENOH_ROUTER_CHECK_ATTEMPTS: ${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}
+
 services:
   bash:
-    extends:
-      file: ../../compose.yaml
-      service: bash
+    <<: [*monitor_base]
+    profiles: ["debug"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - bash
 
-  monitor_demo:
-    extends:
-      file: ../../compose.yaml
-      service: monitor
+  monitor:
+    <<: [*monitor_base]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - ros2
+      - run
+      - foxglove_bridge
+      - foxglove_bridge
+      - --ros-args
+      - --params-file
+      - /config/foxglove_bridge.yaml
+      - -p
+      - port:=${LOCAL_FOXGLOVE_PORT:-8766}
+
+  rviz:
+    <<: [*monitor_base]
+    profiles: ["viz"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - ros2
+      - launch
+      - mtt_bringup
+      - mtt_rviz.launch.py
+      - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
+
+  teleop_pc:
+    <<: [*monitor_base]
+    profiles: ["manual"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - ros2
+      - launch
+      - mtt_driver
+      - mtt_operator_teleop.launch.py
+      - joy_device:=/dev/input/js0
+
+  constant_speed:
+    <<: [*monitor_base]
+    profiles: ["command"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - python3
+      - demos/live_robot/scripts/constant_speed.py
+      - --topic
+      - controller/cmd_vel
+      - --linear
+      - ${MTT_LINEAR_SPEED:-0.20}
+      - --angular
+      - ${MTT_ANGULAR_SPEED:-0.0}
+      - --rate
+      - ${MTT_COMMAND_RATE_HZ:-10.0}
+      - --duration
+      - ${MTT_COMMAND_DURATION:-0.0}
+      - --release-estop
+
+  record:
+    <<: [*monitor_base]
+    profiles: ["record"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - python3
+      - demos/live_robot/scripts/record.py
+      - --config
+      - /config/records.yaml

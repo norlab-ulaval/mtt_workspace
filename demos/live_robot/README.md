@@ -1,89 +1,68 @@
 # live_robot
 
-PC-side demo stack for talking to the real MTT over Zenoh and keeping a local record of the session.
+This folder is the robot-side runtime entry point.
 
-It is meant for the operator laptop:
-- joystick on the laptop,
-- monitor on the laptop,
-- bags saved on the laptop,
-- the real CAN path stays on the robot.
+Use it on the robot once the workspace has been synced, the image has been built, and the workspace has been compiled in the container.
 
-## Services
-
-- `bash`: a shell already pointed at the robot Zenoh router
-- `monitor`: a local Foxglove bridge that mirrors the robot topics to `ws://localhost:8766`
-- `teleop_pc`: joystick on the laptop, commands sent to the robot on `cmd_vel/teleop`
-- `constant_speed`: simple repeated command on `/controller/cmd_vel`
-- `record`: local rosbag with config, git state, env snapshot, and a small robot-side snapshot
-
-## Before you start
-
-From the repository root:
+If you changed `norlab_robot` launch files or package metadata, rebuild before using this stack:
 
 ```bash
-./scripts/create_env
-./scripts/autosync_ws
-docker compose run --rm compile
+docker compose build
+docker compose -f ../../compose.yaml run --rm compile
 ```
 
-For the default lab login, this is enough. If your robot user is different, set it once:
+`docker compose up` is the default path here. It starts:
+- `robot`
+
+The `robot` service brings up:
+- the robot description,
+- the current `mtt_driver` launch from `src/mtt_core`,
+- the sensor stack from `norlab_robot`,
+- and mapping after a short delay.
+
+The default assumes the robot already has its host-side Zenoh router and Foxglove bridge running. That is the current state on the real robot, and it avoids binding conflicts on ports `7447` and `8765`.
+
+If those host services are disabled and you want Compose to own them too:
 
 ```bash
-./scripts/create_env --robot-target <robot_user>@192.168.2.2
+docker compose --profile infra up
 ```
 
-The target is kept in your local `.env`, so you do not need to edit tracked files.
+That starts:
+- `zenoh`
+- `robot`
+- `foxglove`
+
+This replaces the old habit of manually chaining `weekly.sh`, `com.sh`, and startup scripts when you want the regular live stack.
 
 ## Basic use
 
-Start the local Foxglove bridge:
+Start the full robot stack:
 
 ```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
+docker compose up
 ```
 
-Then connect Foxglove Studio to:
-
-```text
-ws://localhost:8766
-```
-
-Start joystick teleop from the laptop:
+Start the robot-side joystick teleop only when you need it:
 
 ```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml up teleop_pc
+docker compose up teleop_robot
 ```
 
-Send a fixed command instead:
+Open a shell in the runtime image for debugging:
 
 ```bash
-MTT_LINEAR_SPEED=0.15 MTT_ANGULAR_SPEED=0.0 MTT_COMMAND_DURATION=5 \
-docker compose --env-file .env -f demos/live_robot/compose.yaml up constant_speed
+docker compose --profile debug run --rm bash
 ```
-
-Record a session locally:
-
-```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml up record
-```
-
-Preview the bag command without recording:
-
-```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml \
-  run --rm bash python3 demos/live_robot/scripts/record.py --config demos/live_robot/config/records.yaml --dry-run
-```
-
-The record goes under `data/records/live_robot/<timestamp>/` with:
-- the bag itself,
-- the demo config,
-- git branch / commit / diff,
-- environment snapshot,
-- and a small robot-side snapshot captured over SSH.
 
 ## Notes
 
-- `teleop_pc` only runs the joystick side. It does not open CAN locally.
-- If you want joystick on the robot instead, keep using the robot-side launch there.
-- `constant_speed` publishes on `/controller/cmd_vel`, which keeps it separate from the teleop path.
-- The demo-local helpers live in `demos/live_robot/scripts/`.
+- `teleop_robot` is optional on purpose. The base `robot` service keeps the CAN path and the runtime stack up without assuming a local joystick.
+- `docker compose up` does not open Foxglove Studio for you. The bridge is just a websocket server.
+- Laptop-side monitoring, laptop-side teleop, and laptop-side bagging now live in `../monitor/`.
+- The old scripts under `src/external/norlab_robot/scripts/user_scripts/` are still useful as references, but Compose is now the intended operator-facing entry point.
+- If Compose warns about orphan containers after a service layout change, clean them once with:
+
+```bash
+docker compose down --remove-orphans
+```

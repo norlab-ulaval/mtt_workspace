@@ -1,0 +1,145 @@
+x-build: &mtt_devel_build
+  context: ../..
+  dockerfile: docker/Dockerfile
+  target: devel
+  args:
+    ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    USERNAME: mtt
+    USER_UID: ${UID:-1000}
+    USER_GID: ${GID:-1000}
+
+x-replay-base: &replay_base
+  extends:
+    file: ../../docker/common.yaml
+    service: ros_runtime_base
+  image: ${MTT_IMAGE:-mtt_workspace:devel}
+  build: *mtt_devel_build
+  environment:
+    ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
+    REPLAY_RATE: ${REPLAY_RATE:-1.0}
+    # Path to the bag to replay — set in .env or on the command line:
+    #   BAG_PATH=/path/to/bag dcr up
+    BAG_PATH: ${BAG_PATH:-}
+
+services:
+
+  # ── Bag player with synthetic clock ──────────────────────────────────────
+  # --clock: republishes bag timestamps as /clock → all nodes use bag time
+  # --loop: loops the bag (remove for single-pass)
+  # --rate: playback speed (1.0 = real-time, 0.5 = half speed for debug)
+  bag_player:
+    <<: [*replay_base]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+    command:
+      - bash
+      - -lc
+      - |
+        if [ -z "$${BAG_PATH}" ]; then
+          echo "ERROR: BAG_PATH is not set."
+          echo "Usage: BAG_PATH=/path/to/bag dcr up"
+          exit 1
+        fi
+        echo "==================================================="
+        echo " MTT Bag Replay"
+        echo "   Bag:    $${BAG_PATH}"
+        echo "   Rate:   ${REPLAY_RATE:-1.0}x"
+        echo "==================================================="
+        if [ -f "$${BAG_PATH}/session_info.yaml" ]; then
+          echo "Session info:"
+          cat "$${BAG_PATH}/session_info.yaml"
+          echo "---"
+        fi
+        exec ros2 bag play \
+          --clock \
+          --rate ${REPLAY_RATE:-1.0} \
+          --storage mcap \
+          "$${BAG_PATH}"
+
+  # ── Robot description publisher (needed for TF from URDF) ────────────────
+  description:
+    <<: [*replay_base]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - norlab_robot
+      - live_robot.launch.py
+      - enable_description:=true
+      - enable_sensors:=false
+      - enable_mapping:=false
+      - setup_real_can:=false
+
+  # ── Factor Graph localization in replay mode ──────────────────────────────
+  # Fuses all recorded sensor topics.
+  # use_sim_time:=true ensures the graph runs on bag timestamps.
+  localization:
+    <<: [*replay_base]
+    profiles: ["localization"]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - mtt_localization
+      - localization.launch.py
+      - use_sim_time:=true
+
+  # ── Trailer perception in replay mode ────────────────────────────────────
+  perception:
+    <<: [*replay_base]
+    profiles: ["perception"]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - mtt_perception
+      - perception.launch.py
+      - use_sim_time:=true
+
+  # ── Sensor health check on bag output ────────────────────────────────────
+  health_check:
+    <<: [*replay_base]
+    profiles: ["check"]
+    depends_on:
+      bag_player:
+        condition: service_started
+    environment:
+      HEALTH_CHECK_DURATION: "20"
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting 5s for bag player to settle..."
+        sleep 5
+        python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
+
+  # ── Foxglove for replay visualization ────────────────────────────────────
+  foxglove:
+    <<: [*replay_base]
+    command:
+      - ros2
+      - run
+      - foxglove_bridge
+      - foxglove_bridge
+      - --ros-args
+      - --params-file
+      - ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml
+
+  # ── Debug shell ───────────────────────────────────────────────────────────
+  bash:
+    <<: [*replay_base]
+    profiles: ["debug"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+    tty: true
+    stdin_open: true
+    command: bash

@@ -1,0 +1,174 @@
+#!/bin/bash
+# setup_udev_reach_rs.sh
+#
+# Auto-detects connected Emlid Reach RS receivers over USB and installs
+# udev rules that create stable symlinks:
+#   /dev/reach_left   → left  antenna (port side)
+#   /dev/reach_right  → right antenna (starboard side)
+#
+# Usage:
+#   1. Connect BOTH Reach RS receivers via USB
+#   2. Run this script as root (or with sudo): sudo bash setup_udev_reach_rs.sh
+#   3. Restart udev: sudo udevadm control --reload-rules && sudo udevadm trigger
+#   4. Plug the USB cables back in — symlinks appear immediately
+#
+# After udev is configured, the physical left/right assignment is stable
+# regardless of plug order.
+
+set -euo pipefail
+
+RULES_FILE="/etc/udev/rules.d/99-reach-rs.rules"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+print_header() {
+    echo ""
+    echo "══════════════════════════════════════════"
+    echo "   Emlid Reach RS — udev setup"
+    echo "══════════════════════════════════════════"
+    echo ""
+}
+
+detect_reach_devices() {
+    local devices=()
+    for tty in /dev/ttyACM* /dev/ttyUSB*; do
+        [ -e "$tty" ] || continue
+        local product
+        product=$(udevadm info -a -p "$(udevadm info -q path -n "$tty")" 2>/dev/null \
+                  | grep -m1 'ATTRS{product}' | awk -F'"' '{print $2}')
+        if echo "$product" | grep -qi "reach\|emlid\|gnss\|ublox"; then
+            devices+=("$tty")
+        fi
+    done
+    echo "${devices[@]}"
+}
+
+get_device_info() {
+    local tty="$1"
+    local path
+    path=$(udevadm info -q path -n "$tty" 2>/dev/null)
+    if [ -z "$path" ]; then
+        echo "ERROR: Cannot get path for $tty" >&2
+        return 1
+    fi
+    local info
+    info=$(udevadm info -a -p "$path" 2>/dev/null)
+
+    local serial
+    serial=$(echo "$info" | grep -m1 'ATTRS{serial}' | awk -F'"' '{print $2}')
+    local vendor
+    vendor=$(echo "$info" | grep -m1 'ATTRS{idVendor}' | awk -F'"' '{print $2}')
+    local product_id
+    product_id=$(echo "$info" | grep -m1 'ATTRS{idProduct}' | awk -F'"' '{print $2}')
+    local product_name
+    product_name=$(echo "$info" | grep -m1 'ATTRS{product}' | awk -F'"' '{print $2}')
+
+    echo "device=$tty serial=$serial vendor=$vendor product_id=$product_id product=$product_name"
+}
+
+print_header
+
+echo "[1/4] Detecting connected Reach RS receivers..."
+read -ra DEVICES <<< "$(detect_reach_devices)"
+
+if [ ${#DEVICES[@]} -eq 0 ]; then
+    echo "❌  No Reach RS devices detected. Make sure:"
+    echo "    - Both receivers are connected via USB"
+    echo "    - This script runs with sudo"
+    echo "    - Reach RS is powered on"
+    echo ""
+    echo "    Alternatively look for your device manually:"
+    echo "    ls /dev/ttyACM* /dev/ttyUSB* 2>/dev/null"
+    echo "    udevadm info -a -p \$(udevadm info -q path -n /dev/ttyACM0)"
+    exit 1
+fi
+
+echo "  Found ${#DEVICES[@]} device(s):"
+declare -A DEVICE_INFO_MAP
+for dev in "${DEVICES[@]}"; do
+    info=$(get_device_info "$dev")
+    DEVICE_INFO_MAP[$dev]="$info"
+    local_serial=$(echo "$info" | grep -o 'serial=[^ ]*' | cut -d= -f2)
+    local_product=$(echo "$info" | grep -o 'product=[^=]*$' | cut -d= -f2)
+    echo "  → $dev  serial='$local_serial'  ($local_product)"
+done
+
+echo ""
+echo "[2/4] Assign left/right roles"
+echo "  Looking at your robot: the LEFT antenna is on the PORT side."
+echo ""
+
+if [ ${#DEVICES[@]} -lt 2 ]; then
+    echo "  ⚠  Only 1 device detected. Connect both receivers and re-run."
+    echo "     Showing info for the single device found:"
+    echo "  ${DEVICE_INFO_MAP[${DEVICES[0]}]}"
+    exit 1
+fi
+
+DEV_A="${DEVICES[0]}"
+DEV_B="${DEVICES[1]}"
+INFO_A="${DEVICE_INFO_MAP[$DEV_A]}"
+INFO_B="${DEVICE_INFO_MAP[$DEV_B]}"
+SERIAL_A=$(echo "$INFO_A" | grep -o 'serial=[^ ]*' | cut -d= -f2)
+SERIAL_B=$(echo "$INFO_B" | grep -o 'serial=[^ ]*' | cut -d= -f2)
+VENDOR_A=$(echo "$INFO_A" | grep -o 'vendor=[^ ]*' | cut -d= -f2)
+VENDOR_B=$(echo "$INFO_B" | grep -o 'vendor=[^ ]*' | cut -d= -f2)
+PID_A=$(echo "$INFO_A" | grep -o 'product_id=[^ ]*' | cut -d= -f2)
+PID_B=$(echo "$INFO_B" | grep -o 'product_id=[^ ]*' | cut -d= -f2)
+
+echo "  Device A: $DEV_A  (serial: $SERIAL_A)"
+echo "  Device B: $DEV_B  (serial: $SERIAL_B)"
+echo ""
+echo "  Which device is the LEFT (port) antenna?"
+echo "    [A] $DEV_A — serial: $SERIAL_A"
+echo "    [B] $DEV_B — serial: $SERIAL_B"
+echo ""
+read -rp "  Enter A or B: " choice
+choice="${choice^^}"
+
+if [ "$choice" = "A" ]; then
+    LEFT_SERIAL="$SERIAL_A"; LEFT_VENDOR="$VENDOR_A"; LEFT_PID="$PID_A"
+    RIGHT_SERIAL="$SERIAL_B"; RIGHT_VENDOR="$VENDOR_B"; RIGHT_PID="$PID_B"
+elif [ "$choice" = "B" ]; then
+    LEFT_SERIAL="$SERIAL_B"; LEFT_VENDOR="$VENDOR_B"; LEFT_PID="$PID_B"
+    RIGHT_SERIAL="$SERIAL_A"; RIGHT_VENDOR="$VENDOR_A"; RIGHT_PID="$PID_A"
+else
+    echo "❌  Invalid choice. Aborting."
+    exit 1
+fi
+
+echo ""
+echo "  ✓  LEFT  antenna → serial: $LEFT_SERIAL"
+echo "  ✓  RIGHT antenna → serial: $RIGHT_SERIAL"
+
+echo ""
+echo "[3/4] Generating udev rules → $RULES_FILE"
+
+cat > "$RULES_FILE" << RULES
+# Emlid Reach RS — stable USB symlinks
+# Generated by setup_udev_reach_rs.sh on $(date -Iseconds)
+# Serials auto-detected from connected devices.
+#
+# To re-run: sudo bash ${SCRIPT_DIR}/setup_udev_reach_rs.sh
+
+# Left antenna (PORT side) → /dev/reach_left
+SUBSYSTEM=="tty", ATTRS{idVendor}=="${LEFT_VENDOR}", ATTRS{idProduct}=="${LEFT_PID}", ATTRS{serial}=="${LEFT_SERIAL}", SYMLINK+="reach_left", MODE="0666", GROUP="dialout"
+
+# Right antenna (STARBOARD side) → /dev/reach_right
+SUBSYSTEM=="tty", ATTRS{idVendor}=="${RIGHT_VENDOR}", ATTRS{idProduct}=="${RIGHT_PID}", ATTRS{serial}=="${RIGHT_SERIAL}", SYMLINK+="reach_right", MODE="0666", GROUP="dialout"
+RULES
+
+echo "  Wrote:"
+cat "$RULES_FILE"
+
+echo ""
+echo "[4/4] Reloading udev rules..."
+udevadm control --reload-rules
+udevadm trigger
+
+echo ""
+echo "══════════════════════════════════════════"
+echo "  ✅  Done! Unplug and re-plug the USB cables."
+echo "  Verify: ls -la /dev/reach_left /dev/reach_right"
+echo "  Then update config/gps_serial.yaml if defaults differ."
+echo "══════════════════════════════════════════"
+echo ""

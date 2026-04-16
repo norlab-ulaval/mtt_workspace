@@ -3,6 +3,7 @@ services:
     extends:
       file: ../../compose.yaml
       service: bash
+    profiles: ["manual"]
 
   simulation:
     extends:
@@ -14,11 +15,11 @@ services:
     extends:
       file: ../../compose.yaml
       service: bash
-    command: ros2 launch mtt_bringup mtt_rviz.launch.py rviz_config:=/workspaces/mtt_tools/src/mtt/mtt_description/rviz/urdf_config.rviz
+    command: ros2 launch mtt_bringup mtt_rviz.launch.py use_sim_time:=True rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
 
   monitor:
     extends:
       file: ../../compose.yaml
       service: bash
+    profiles: ["infra"]
     command: ros2 run foxglove_bridge foxglove_bridge --ros-args -p port:=${LOCAL_FOXGLOVE_PORT:-8766}
-

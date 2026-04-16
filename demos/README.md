@@ -1,31 +1,56 @@
 # demos
 
-This directory is reserved for reproducible local scenarios and launch recipes.
+This directory holds the runtime entry points around the workspace.
 
-Run these from the repository root so Compose picks up the workspace `.env`:
+Use the demo that matches the machine you are on:
+- `live_robot/`
+  robot-side runtime stack
+- `monitor/`
+  laptop-side operator stack for a live session
+- `data_collection/`
+  robot-side bagging workflow with session metadata
+- `bag_replay/`
+  local replay workflow for recorded sessions
+- `description/`
+  local description and RViz checks
+- `simulation/`
+  local simulation stack
+
+## Common commands
+
+From the repository root:
 
 ```bash
 xhost +local:docker
-docker compose --env-file .env -f demos/description/compose.yaml up description
-docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
-docker compose --env-file .env -f demos/monitor/compose.yaml up monitor_demo
-docker compose --env-file .env -f demos/live_robot/compose.yaml up monitor
+docker compose run --rm compile
+docker compose run --rm bash
 ```
 
-The root services remain available too:
+On the robot:
 
 ```bash
-docker compose run --rm bash
-docker compose run --rm compile
-docker compose up monitor
+docker compose --env-file .env -f demos/live_robot/compose.yaml up
 ```
 
-`compile` uses the same workspace detection as the host scripts:
-- core-only if `src/external/` is empty,
-- full workspace if external repositories were bootstrapped first.
+That starts the `robot` service only by default. If the host-side Zenoh router and Foxglove bridge are disabled on the robot, use:
 
-The `live_robot/` demo is the laptop-side workflow for the real MTT:
-- `monitor` runs a local Foxglove bridge and subscribes to the robot through Zenoh,
-- `teleop_pc` publishes joystick commands from your laptop into `cmd_vel/teleop`,
-- `constant_speed` publishes a fixed `TwistStamped` for short checks,
-- `record` saves a bag plus the local config, git state, and a remote runtime snapshot under `data/records/`.
+```bash
+docker compose --env-file .env -f demos/live_robot/compose.yaml --profile infra up
+```
+
+On the operator laptop:
+
+```bash
+docker compose --env-file .env -f demos/monitor/compose.yaml up
+```
+
+That starts the Foxglove bridge only. Open Foxglove Studio separately and connect to `ws://localhost:8766`.
+
+For local description or simulation checks:
+
+```bash
+docker compose --env-file .env -f demos/description/compose.yaml up description
+docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
+```
+
+Before using a live demo, run `./scripts/status` from the repo root. The parent repo is only one layer of the workspace state.

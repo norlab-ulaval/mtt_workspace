@@ -1,37 +1,38 @@
 {
+  // Client mode: all traffic routes through the robot's Zenoh router.
+  // No peer-to-peer connection attempts → no "Unable to connect to scouted peer" spam.
+  // The robot peers listen on tcp/localhost:0 (not reachable from the PC); client mode
+  // avoids the P2P discovery path entirely and relies on the router to broker everything.
   mode: "client",
   connect: {
-    timeout_ms: { router: -1, peer: -1, client: 0 },
+    // -1: wait indefinitely for the router — don't fail if robot is not up yet.
+    timeout_ms: { client: -1 },
     endpoints: [
       "tcp/__ROBOT_HOST__:__ROBOT_ZENOH_PORT__"
     ],
-    exit_on_failure: { router: false, peer: false, client: true },
+    exit_on_failure: { client: false },
     retry: {
       period_init_ms: 1000,
       period_max_ms: 4000,
       period_increase_factor: 2,
     },
   },
-  listen: {
-    timeout_ms: 0,
-    endpoints: [
-      "tcp/localhost:0"
-    ],
-    exit_on_failure: true,
-    retry: {
-      period_init_ms: 1000,
-      period_max_ms: 4000,
-      period_increase_factor: 2,
+  open: {
+    return_conditions: {
+      // false: don't block session open waiting for scouting — start immediately
+      // and let the connection happen asynchronously in the background.
+      connect_scouted: false,
+      declares: false,
     },
   },
   scouting: {
+    timeout: 3000,
+    delay: 200,
     multicast: {
       enabled: false,
     },
     gossip: {
-      enabled: true,
-      multihop: false,
-      autoconnect: { router: [], peer: ["router", "peer"] },
+      enabled: false,
     },
   },
   timestamping: {
@@ -39,9 +40,30 @@
     drop_future_timestamp: false,
   },
   queries_default_timeout: 10000,
-  routing: {
-    peer: {
-      mode: "peer_to_peer",
+  transport: {
+    link: {
+      tx: {
+        queue: {
+          congestion_control: {
+            // Drop sensor data fast (1ms) rather than blocking the TX queue.
+            // RELIABLE topics (cmd_vel, services) use Block — unaffected.
+            drop: {
+              wait_before_drop: 1000,
+              max_wait_before_drop_fragments: 50000,
+            },
+          },
+        },
+      },
+      rx: {
+        // 4MB RX buffer on the PC client — needs to absorb large lidar frames
+        // (Hesai ~2MB/scan) and ZED images (~3MB/frame) arriving over TCP.
+        buffer_size: 4194304,
+      },
+    },
+    // SHM is only useful for intra-machine zero-copy; disable it on the monitor
+    // to avoid ENOMEM crashes when Docker limits /dev/shm.
+    shared_memory: {
+      enabled: false,
     },
   },
 }

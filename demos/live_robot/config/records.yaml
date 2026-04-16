@@ -28,7 +28,11 @@ topics:
   - /mti100/data
   - /mti100/data_raw
   - /mti10/data
+  - /imu_and_wheel_odom
+  - /command_odom
   - /mapping/icp_odom
   - /mapping/map
+  - /mapping/pose_in
   - /hesai_lidar/points
   - /rsairy_ns/points
+  - /zed/zed_node/imu/data
