@@ -6,33 +6,10 @@ config: true
 vcs: true
 remote_snapshot: true
 storage: mcap
-max_cache_size: 1048576000
-storage_config: demos/live_robot/config/mcap_writer_options.yaml
-topics:
-  - /cmd_vel
-  - /cmd_vel/nav
-  - /cmd_vel/teleop
-  - /controller/cmd_vel
-  - /joint_states
-  - /joy
-  - /mtt_articulation_angle
-  - /mtt_aux_cmd
-  - /mtt_driving_mode
-  - /mtt_odometry
-  - /mtt_status
-  - /mtt_steer_cmd
-  - /mtt_tachometer
-  - /robot_description
-  - /tf
-  - /tf_static
-  - /mti100/data
-  - /mti100/data_raw
-  - /mti10/data
-  - /imu_and_wheel_odom
-  - /command_odom
-  - /mapping/icp_odom
-  - /mapping/map
-  - /mapping/pose_in
-  - /hesai_lidar/points
-  - /rsairy_ns/points
-  - /zed/zed_node/imu/data
+# Keep the cache large enough for throughput, but not so large that shutdown
+# takes minutes and invites a second Ctrl-C / forced kill.
+max_cache_size: 1073741824
+storage_config: src/external/norlab_robot/config/rosbag_record/mcap_writer_options_full.yaml
+qos_override: src/external/norlab_robot/config/rosbag_record/qos_override.yaml
+topics_file: src/external/norlab_robot/config/rosbag_record/all_sensors_full.yaml
+topics_key: topics_main

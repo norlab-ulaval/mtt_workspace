@@ -54,22 +54,31 @@ def _render_summary(frames: dict[int, LatestFrame], start_time: float, interface
     uptime = now - start_time
 
     lines = [
-        f"MTT CAN monitor  interface={interface}  uptime={uptime:.1f}s  dbc={'on' if dbc_loaded else 'off'} ({dbc_path.name})",
+        f"MTT CAN monitor  interface={interface}  uptime={uptime:.1f}s  dbc={'on' if dbc_loaded else 'fallback'} ({dbc_path})",
         "",
     ]
 
     battery = frames.get(0x602)
     if battery and battery.decoded:
         signals = battery.decoded["signals"]
-        lines.append(
+        current_raw = _value(signals, "BatteryCurrent_raw")
+        current_a = _value(signals, "BatteryCurrent")
+        if not isinstance(current_a, (int, float)) and isinstance(current_raw, (int, float)):
+            current_a = current_raw * 0.0103 - 0.72
+        battery_line = (
             "battery  "
             f"soc={_value(signals, 'StateOfCharge')}%  "
-            f"current_raw={_value(signals, 'BatteryCurrent_raw')}  "
+            f"current_raw={current_raw}  "
+        )
+        if isinstance(current_a, (int, float)):
+            battery_line += f"current_A={current_a:.2f}  "
+        battery_line += (
             f"voltage_raw={_value(signals, 'BatteryVoltage_raw')}  "
             f"heatpads=A{_value(signals, 'HeatpadA_On', 'HeatpadAOn')}/B{_value(signals, 'HeatpadB_On', 'HeatpadBOn')}  "
             f"remaining={_value(signals, 'ChargeTimeRemaining')} min  "
             f"age={format_age(now - battery.timestamp)}"
         )
+        lines.append(battery_line)
     else:
         lines.append("battery  no 0x602 frame seen yet")
 
@@ -110,6 +119,11 @@ def _render_summary(frames: dict[int, LatestFrame], start_time: float, interface
             f"tempB={_value(signals, 'MainSensorTempB')}C  "
             f"age={format_age(now - drive.timestamp)}"
         )
+        lines.append(
+            "         "
+            f"speed_ms={derived.get('speed_ms_estimate', 'n/a')}  "
+            f"decode={drive.decoded.get('source', 'unknown')}"
+        )
     else:
         lines.append("drive    no 0x2FF frame seen yet")
 
@@ -135,6 +149,8 @@ def _render_summary(frames: dict[int, LatestFrame], start_time: float, interface
             f"mode={_value(signals, 'SteeringModeClosedLoop')}  "
             f"age={format_age(now - command_frame.timestamp)}"
         )
+        if command_frame.frame_id == 0x100:
+            lines.append("         external control frame is currently the freshest command")
     else:
         lines.append("command  no 0x001 or 0x100 frame seen yet")
 
@@ -144,7 +160,7 @@ def _render_summary(frames: dict[int, LatestFrame], start_time: float, interface
         lines.append("recent")
         for item in seen_ids:
             lines.append(
-                f"  0x{item.frame_id:X:<8} {KNOWN_MTT_IDS.get(item.frame_id, 'unknown'):<24} "
+                f"  0x{item.frame_id:<8X} {KNOWN_MTT_IDS.get(item.frame_id, 'unknown'):<24} "
                 f"count={item.count:<5} age={format_age(now - item.timestamp)}"
             )
 
@@ -168,6 +184,8 @@ def main() -> int:
         return 1
 
     database, dbc_path = load_dbc(args.dbc)
+    if database is None:
+        print(f"DBC not loaded, using manual fallback decode from {dbc_path}")
     bus = can.interface.Bus(interface="socketcan", channel=args.interface)
     frames: dict[int, LatestFrame] = {}
     start_time = time.monotonic()
@@ -192,6 +210,8 @@ def main() -> int:
                     print("\033[2J\033[H", end="")
                 print(_render_summary(frames, start_time, args.interface, dbc_path, database is not None), flush=True)
                 next_refresh = now + max(0.1, args.refresh)
+    except KeyboardInterrupt:
+        pass
     finally:
         bus.shutdown()
 

@@ -27,22 +27,8 @@ if [[ -f "$ENV_FILE" ]]; then
   set -a; source "$ENV_FILE" 2>/dev/null || true; set +a
 fi
 
-# ROBOT_HOST and ROBOT_WS: env var > .env > hardcoded fallback
-ROBOT_HOST="${ROBOT_HOST:-192.168.2.2}"
+# Connectivity and targets will be resolved after argument parsing to handle --eth
 ROBOT_WS="${ROBOT_WS:-${ROBOT_WORKSPACE:-/home/mohamed/Project/mtt_ws}}"
-
-# SSH target: use ROBOT_SSH_TARGET (user@host) from .env if available,
-# otherwise fall back to ROBOT_USER@ROBOT_HOST, or bare ROBOT_HOST.
-if [[ -n "${ROBOT_SSH_TARGET:-}" ]]; then
-  SSH_TARGET="${ROBOT_SSH_TARGET}"
-elif [[ -n "${ROBOT_USER:-}" ]]; then
-  SSH_TARGET="${ROBOT_USER}@${ROBOT_HOST}"
-else
-  SSH_TARGET="${ROBOT_HOST}"
-fi
-
-ROBOT_DATA="${SSH_TARGET}:${ROBOT_WS}/data/"
-
 LOCAL_DATA_DIR="${LOCAL_DATA_DIR:-${WORKSPACE}/data}"
 
 # ── Colors ────────────────────────────────────────────────────────────────────
@@ -52,20 +38,26 @@ RED="\033[91m"; RESET="\033[0m"
 # ── Args ──────────────────────────────────────────────────────────────────────
 dry_run=false
 list_only=false
+use_eth=false
+use_remote=false
 filters=()
 
 for arg in "$@"; do
   case "$arg" in
     --dry-run)   dry_run=true ;;
     --list)      list_only=true ;;
+    --eth)       use_eth=true ;;
+    --remote)    use_remote=true ;;
     --help|-h)
-      echo "Usage: bash scripts/sync_bags.sh [--dry-run] [--list] [session_pattern...]"
+      echo "Usage: bash scripts/sync_bags.sh [--dry-run] [--list] [--eth] [--remote] [session_pattern...]"
       echo ""
       echo "  --dry-run             Show what would be copied without transferring"
       echo "  --list                List sessions available on the robot"
+      echo "  --eth                 Use Ethernet connection (ROBOT_HOST_ETH)"
+      echo "  --remote              Use Tailscale remote connection (ROBOT_HOST_REMOTE)"
       echo "  session_pattern       Sync only matching sessions (e.g. mtt_nominal_exp_*)"
       echo ""
-      echo "  ROBOT_HOST=${ROBOT_HOST}   (override with env var)"
+      echo "  ROBOT_HOST=${ROBOT_HOST:-192.168.2.2}   (override with env var)"
       echo "  ROBOT_WS=${ROBOT_WS}   (override with env var)"
       exit 0
       ;;
@@ -75,6 +67,41 @@ for arg in "$@"; do
       filters+=("$arg") ;;
   esac
 done
+
+# ── Connectivity Setup ────────────────────────────────────────────────────────
+# ROBOT_HOST and SSH_TARGET: env var > .env > hardcoded fallback
+if [[ "${use_remote}" == true ]]; then
+  ROBOT_HOST="${ROBOT_HOST_REMOTE:-100.77.55.41}"
+  if [[ -n "${ROBOT_SSH_TARGET_REMOTE:-}" ]]; then
+    SSH_TARGET="${ROBOT_SSH_TARGET_REMOTE}"
+  elif [[ -n "${ROBOT_USER:-}" ]]; then
+    SSH_TARGET="${ROBOT_USER}@${ROBOT_HOST}"
+  else
+    SSH_TARGET="${ROBOT_HOST}"
+  fi
+elif [[ "${use_eth}" == true ]]; then
+  ROBOT_HOST="${ROBOT_HOST_ETH:-192.168.3.102}"
+  if [[ -n "${ROBOT_SSH_TARGET_ETH:-}" ]]; then
+    SSH_TARGET="${ROBOT_SSH_TARGET_ETH}"
+  elif [[ -n "${ROBOT_USER:-}" ]]; then
+    SSH_TARGET="${ROBOT_USER}@${ROBOT_HOST}"
+  else
+    SSH_TARGET="${ROBOT_HOST}"
+  fi
+else
+  ROBOT_HOST="${ROBOT_HOST:-192.168.2.2}"
+  if [[ -n "${ROBOT_SSH_TARGET:-}" ]]; then
+    SSH_TARGET="${ROBOT_SSH_TARGET}"
+  elif [[ -n "${ROBOT_USER:-}" ]]; then
+    SSH_TARGET="${ROBOT_USER}@${ROBOT_HOST}"
+  else
+    SSH_TARGET="${ROBOT_HOST}"
+  fi
+fi
+
+ROBOT_DATA="${SSH_TARGET}:${ROBOT_WS}/data/"
+
+
 
 echo ""
 echo -e "${BOLD}${CYAN}══════════════════════════════════════════════════${RESET}"
@@ -113,7 +140,8 @@ fi
 mkdir -p "${LOCAL_DATA_DIR}"
 
 rsync_opts=(
-  --archive           # preserve permissions, timestamps, symlinks
+  --recursive         # copy directories recursively
+  --times             # preserve modification times (crucial for analysis)
   --human-readable    # sizes in KB/MB/GB
   --progress          # per-file progress
   --partial           # resume interrupted transfers (important for large mcap)
@@ -170,10 +198,22 @@ if [ $exit_code -eq 0 ]; then
         printf "    %-55s %s\n" "$session" "$size"
       done
   echo ""
-elif [ $exit_code -eq 24 ]; then
+elif [ $exit_code -eq 23 ] || [ $exit_code -eq 24 ]; then
   # exit 24 = some files vanished during transfer (normal for active recording)
-  echo -e "${YELLOW}${BOLD}⚠   Sync complete with warnings (some files changed during transfer).${RESET}"
-  echo "   This is normal if the robot is still recording."
+  # exit 23 = partial transfer due to error (e.g. symlinks on exFAT)
+  echo -e "${YELLOW}${BOLD}⚠   Sync complete with warnings (some files changed or symlinks ignored).${RESET}"
+  echo "   This is normal if the robot is still recording or if saving to an exFAT drive."
+  echo ""
+  echo -e "  Local data dir: ${LOCAL_DATA_DIR}/"
+  echo -e "  Sessions synced:"
+  ls -1t "${LOCAL_DATA_DIR}" 2>/dev/null \
+    | grep -v '^\.' | grep -v gitkeep \
+    | head -10 \
+    | while read -r session; do
+        size=$(du -sh "${LOCAL_DATA_DIR}/${session}" 2>/dev/null | cut -f1)
+        printf "    %-55s %s\n" "$session" "$size"
+      done
+  echo ""
 else
   echo -e "${RED}${BOLD}✗   rsync failed (exit code ${exit_code}).${RESET}"
   exit $exit_code

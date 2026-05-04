@@ -11,7 +11,7 @@
 #   4. Disk space
 #   5. Workspace / bag storage
 #
-# Usage: bash scripts/pre_session_check.sh [--gps-mode serial|tcp]
+# Usage: bash scripts/pre_session_check.sh [--gps-mode serial|tcp] [--gps-antennas single|dual]
 
 set -uo pipefail
 
@@ -24,13 +24,15 @@ RESET="\033[0m"
 
 # ── Config (can be overridden by env vars) ────────────────────────────────────
 GPS_MODE="${GPS_MODE:-serial}"
+GPS_ANTENNAS="${GPS_ANTENNAS:-single}"
+TACHOMETER_MODE="${TACHOMETER_MODE:-real}"
 HESAI_IP="${HESAI_IP:-192.168.2.201}"
 # NOTE: enp8s0 on the robot is 192.168.1.102 — make sure RS_IP is the Bpearl's actual IP,
 # not the robot's own address (pinging yourself always succeeds, masking a real failure).
 RS_IP="${RS_IP:-192.168.1.102}"
-# Reach RS device IPs (the IP of each Reach RS box on its USB-ethernet interface).
-# Confirmed: gps_left (Reach+) = 192.168.2.59 / gps_right (Reach) = 192.168.2.241
-# TCP output ports are currently CLOSED on both units — serial mode is used.
+# Reach RS rover IP (single mode) and legacy dual-antenna IPs.
+REACH_ROVER_IP="${REACH_ROVER_IP:-192.168.2.59}"
+REACH_ROVER_TCP_PORT="${REACH_ROVER_TCP_PORT:-9001}"
 REACH_LEFT_IP="${REACH_LEFT_IP:-192.168.2.59}"
 REACH_RIGHT_IP="${REACH_RIGHT_IP:-192.168.2.241}"
 REACH_LEFT_TCP_PORT="${REACH_LEFT_TCP_PORT:-9001}"
@@ -47,6 +49,8 @@ for arg in "$@"; do
     case "$arg" in
         --gps-mode=*) GPS_MODE="${arg#*=}" ;;
         --gps-mode) shift; GPS_MODE="$1" ;;
+        --gps-antennas=*) GPS_ANTENNAS="${arg#*=}" ;;
+        --gps-antennas) shift; GPS_ANTENNAS="$1" ;;
     esac
 done
 
@@ -84,6 +88,7 @@ echo ""
 echo -e "${BOLD}══════════════════════════════════════════════════${RESET}"
 echo -e "${BOLD}   MTT Pre-Session Checklist${RESET}"
 echo -e "${BOLD}══════════════════════════════════════════════════${RESET}"
+echo -e "  GPS: mode=${GPS_MODE} antennas=${GPS_ANTENNAS}   Tachometer: mode=${TACHOMETER_MODE}"
 echo ""
 
 # ─── 1. Clock / NTP ──────────────────────────────────────────────────────────
@@ -144,13 +149,18 @@ r=$(ping_host "$RS_IP")
 check "RS Bpearl ($RS_IP)" "$r"
 
 # Reach RS devices expose a USB-ethernet interface — ping them directly.
-# If not reachable: device not plugged in, or no USB-ethernet link.
-r=$(ping_host "$REACH_LEFT_IP")
-check "Reach+ left  ($REACH_LEFT_IP)" "$r" \
-    "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in?")"
-r=$(ping_host "$REACH_RIGHT_IP")
-check "Reach  right ($REACH_RIGHT_IP)" "$r" \
-    "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in?")"
+if [ "$GPS_ANTENNAS" = "single" ]; then
+    r=$(ping_host "$REACH_ROVER_IP")
+    check "Reach rover ($REACH_ROVER_IP)" "$r" \
+        "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in or rover not on WiFi?")"
+else
+    r=$(ping_host "$REACH_LEFT_IP")
+    check "Reach+ left  ($REACH_LEFT_IP)" "$r" \
+        "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in?")"
+    r=$(ping_host "$REACH_RIGHT_IP")
+    check "Reach  right ($REACH_RIGHT_IP)" "$r" \
+        "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in?")"
+fi
 
 # GPS TCP port test — only useful if GPS_MODE=tcp (currently ports are closed).
 # Kept here for when TCP output is configured in ReachView3.
@@ -176,11 +186,16 @@ PYEOF
 }
 
 if [ "$GPS_MODE" = "tcp" ]; then
-    gps_test_left=$(tcp_port_test "$REACH_LEFT_IP" "$REACH_LEFT_TCP_PORT" 2>/dev/null)
-    check "Reach+ left  TCP $REACH_LEFT_IP:$REACH_LEFT_TCP_PORT" "${gps_test_left%%:*}" "${gps_test_left#*:}"
+    if [ "$GPS_ANTENNAS" = "single" ]; then
+        gps_test_rover=$(tcp_port_test "$REACH_ROVER_IP" "$REACH_ROVER_TCP_PORT" 2>/dev/null)
+        check "Reach rover TCP $REACH_ROVER_IP:$REACH_ROVER_TCP_PORT" "${gps_test_rover%%:*}" "${gps_test_rover#*:}"
+    else
+        gps_test_left=$(tcp_port_test "$REACH_LEFT_IP" "$REACH_LEFT_TCP_PORT" 2>/dev/null)
+        check "Reach+ left  TCP $REACH_LEFT_IP:$REACH_LEFT_TCP_PORT" "${gps_test_left%%:*}" "${gps_test_left#*:}"
 
-    gps_test_right=$(tcp_port_test "$REACH_RIGHT_IP" "$REACH_RIGHT_TCP_PORT" 2>/dev/null)
-    check "Reach  right TCP $REACH_RIGHT_IP:$REACH_RIGHT_TCP_PORT" "${gps_test_right%%:*}" "${gps_test_right#*:}"
+        gps_test_right=$(tcp_port_test "$REACH_RIGHT_IP" "$REACH_RIGHT_TCP_PORT" 2>/dev/null)
+        check "Reach  right TCP $REACH_RIGHT_IP:$REACH_RIGHT_TCP_PORT" "${gps_test_right%%:*}" "${gps_test_right#*:}"
+    fi
 else
     check "GPS TCP ports" "ok" "serial mode — TCP not needed"
 fi
@@ -190,23 +205,36 @@ echo ""
 # ─── 3. USB / Serial ─────────────────────────────────────────────────────────
 echo -e "${BOLD}[3] USB devices${RESET}"
 
-# Reach RS serial devices confirmed:
-#   gps_left  (Reach+) → /dev/ttyACM1   (or /dev/reach_left  if udev configured)
-#   gps_right (Reach)  → /dev/ttyACM0   (or /dev/reach_right if udev configured)
+# Reach RS serial devices:
+#   single mode → /dev/reach_rover
+#   dual mode   → /dev/reach_left + /dev/reach_right
 if [ "$GPS_MODE" = "serial" ]; then
-    if [ -e /dev/reach_left ]; then
-        check "GPS left  (/dev/reach_left → udev symlink)" "ok"
-    elif [ -e /dev/ttyACM1 ]; then
-        check "GPS left  (/dev/ttyACM1)" "ok" "udev symlink not set up — using ttyACM1 directly"
+    if [ "$GPS_ANTENNAS" = "single" ]; then
+        if [ -e /dev/reach_rover ]; then
+            check "GPS rover (/dev/reach_rover → udev symlink)" "ok"
+        else
+            first_acm=$(ls /dev/ttyACM* 2>/dev/null | head -n 1 || true)
+            if [ -n "$first_acm" ]; then
+                check "GPS rover ($first_acm)" "warn" "udev symlink missing — prefer /dev/reach_rover"
+            else
+                check "GPS rover (/dev/reach_rover)" "fail" "not found — Reach RS not plugged in"
+            fi
+        fi
     else
-        check "GPS left  (/dev/ttyACM1)" "fail" "not found — Reach+ not plugged in"
-    fi
-    if [ -e /dev/reach_right ]; then
-        check "GPS right (/dev/reach_right → udev symlink)" "ok"
-    elif [ -e /dev/ttyACM0 ]; then
-        check "GPS right (/dev/ttyACM0)" "ok" "udev symlink not set up — using ttyACM0 directly"
-    else
-        check "GPS right (/dev/ttyACM0)" "fail" "not found — Reach not plugged in"
+        if [ -e /dev/reach_left ]; then
+            check "GPS left  (/dev/reach_left → udev symlink)" "ok"
+        elif [ -e /dev/ttyACM1 ]; then
+            check "GPS left  (/dev/ttyACM1)" "ok" "udev symlink not set up — using ttyACM1 directly"
+        else
+            check "GPS left  (/dev/ttyACM1)" "fail" "not found — Reach+ not plugged in"
+        fi
+        if [ -e /dev/reach_right ]; then
+            check "GPS right (/dev/reach_right → udev symlink)" "ok"
+        elif [ -e /dev/ttyACM0 ]; then
+            check "GPS right (/dev/ttyACM0)" "ok" "udev symlink not set up — using ttyACM0 directly"
+        else
+            check "GPS right (/dev/ttyACM0)" "fail" "not found — Reach not plugged in"
+        fi
     fi
 else
     check "GPS serial devices" "ok" "GPS mode=tcp — NMEA over network, no ttyACM needed"
@@ -238,6 +266,11 @@ if ip link show can0 &>/dev/null; then
 else
     check "CAN interface can0" "warn" "Not found — will be configured by Docker startup"
 fi
+if [ "$TACHOMETER_MODE" = "cmd_sim" ]; then
+    check "Tachometer source" "warn" "command-sim mode — usable for bringup, not for slip truth"
+else
+    check "Tachometer source" "ok" "real CAN tachometer expected"
+fi
 
 # IMU devices
 MTI100_PATH="/dev/serial/by-id/${MTI100_ID}"
@@ -267,10 +300,17 @@ if command -v lsusb &>/dev/null; then
     if lsusb 2>/dev/null | grep -qi "$OAK_USB_ID"; then
         check "OAK-D camera ($OAK_USB_ID)" "ok"
     else
-        check "OAK-D camera ($OAK_USB_ID)" "warn" "Not found — OAK not connected or not powered"
+        check "OAK-D camera ($OAK_USB_ID)" "warn" "Not found — USB link likely loose after vibration, reseat both ends and add strain relief"
     fi
 else
     check "OAK-D USB check" "warn" "lsusb not found"
+fi
+
+# Optional local joystick for manual override during repeat
+if [ -e /dev/input/js0 ]; then
+    check "Joystick override device (/dev/input/js0)" "ok" "local teleop override available"
+else
+    check "Joystick override device (/dev/input/js0)" "warn" "not present here — repeat override requires teleop stack on an operator machine"
 fi
 echo ""
 

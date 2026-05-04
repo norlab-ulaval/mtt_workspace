@@ -6,10 +6,12 @@ cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 print_usage() {
   cat <<'EOF'
-Usage: ./scripts/autosync_ws [--watch] [--dry-run] [--no-prepare] [[user@]host] [remote_path]
+Usage: ./scripts/autosync_ws [--watch] [--dry-run] [--no-prepare] [--eth] [--remote] [[user@]host] [remote_path]
 
 Examples:
   ./scripts/autosync_ws
+  ./scripts/autosync_ws --eth
+  ./scripts/autosync_ws --remote
   ./scripts/autosync_ws <robot_user>@192.168.2.2
   ./scripts/autosync_ws --watch <robot_user>@192.168.2.2 /home/<robot_user>/Project/mtt_ws
 
@@ -24,6 +26,8 @@ EOF
 watch_mode=false
 dry_run=false
 prepare_remote=true
+use_eth=false
+use_remote=false
 positionals=()
 
 while [[ $# -gt 0 ]]; do
@@ -40,6 +44,14 @@ while [[ $# -gt 0 ]]; do
       prepare_remote=false
       shift
       ;;
+    --eth)
+      use_eth=true
+      shift
+      ;;
+    --remote)
+      use_remote=true
+      shift
+      ;;
     -h|--help)
       print_usage
       exit 0
@@ -52,8 +64,16 @@ while [[ $# -gt 0 ]]; do
 done
 
 default_robot_user="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_USER "robot")"
-default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST "192.168.2.2")"
-default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET "${default_robot_user}@${default_robot_host}")"
+if [[ "${use_remote}" == true ]]; then
+  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_REMOTE "100.77.55.41")"
+  default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET_REMOTE "${default_robot_user}@${default_robot_host}")"
+elif [[ "${use_eth}" == true ]]; then
+  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_ETH "192.168.3.102")"
+  default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET_ETH "${default_robot_user}@${default_robot_host}")"
+else
+  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST "192.168.2.2")"
+  default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET "${default_robot_user}@${default_robot_host}")"
+fi
 
 host="${positionals[0]:-${default_robot_target}}"
 target_user="$(mtt_target_user "${host}" || true)"

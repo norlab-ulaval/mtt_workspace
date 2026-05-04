@@ -84,6 +84,8 @@ services:
   record:
     <<: [*monitor_base]
     profiles: ["record"]
+    stop_signal: SIGINT
+    stop_grace_period: 5m
     command:
       - scripts/run_with_zenoh_session.sh
       - python3

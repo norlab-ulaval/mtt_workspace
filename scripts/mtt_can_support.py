@@ -12,7 +12,12 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DBC_PATH = REPO_ROOT / "documentations" / "MTT_CAN_v1_1_simple.dbc"
+DEFAULT_DBC_CANDIDATES = (
+    REPO_ROOT / "documentations" / "MTT_CAN_v1_1_simple.dbc",
+    REPO_ROOT / "documentations" / "mttDriver.dbc",
+    REPO_ROOT / "documentations" / "MTT_CAN_v1.1_simple.dbc",
+    REPO_ROOT / "documentations" / "MTT_CAN_v1_1.dbc",
+)
 DEFAULT_TOOL_VENV_PYTHON = REPO_ROOT / ".venv-tools" / "bin" / "python"
 
 
@@ -52,6 +57,7 @@ CSV_FIELDS = [
     "data_hex",
     "decode_source",
     "StateOfCharge",
+    "BatteryCurrent",
     "BatteryCurrent_raw",
     "BatteryVoltage_raw",
     "HeatpadA_On",
@@ -101,7 +107,16 @@ _CANDUMP_BRACKET_RE = re.compile(
 def resolve_repo_path(path: str | Path | None) -> Path:
     """Resolve paths relative to the repo root."""
     if path is None:
-        return DEFAULT_DBC_PATH
+        env_path = os.environ.get("MTT_DBC_PATH")
+        if env_path:
+            resolved = Path(env_path).expanduser()
+            return resolved if resolved.is_absolute() else REPO_ROOT / resolved
+
+        for candidate in DEFAULT_DBC_CANDIDATES:
+            if candidate.exists():
+                return candidate
+
+        return DEFAULT_DBC_CANDIDATES[0]
     resolved = Path(path).expanduser()
     if resolved.is_absolute():
         return resolved
@@ -147,7 +162,11 @@ def load_dbc(path: str | Path | None = None) -> tuple[Any | None, Path]:
     except ModuleNotFoundError:
         return None, dbc_path
 
-    database = cantools.database.load_file(str(dbc_path))
+    try:
+        database = cantools.database.load_file(str(dbc_path))
+    except Exception:
+        return None, dbc_path
+
     return database, dbc_path
 
 
@@ -305,6 +324,11 @@ def derive_metrics(frame_id: int, signals: dict[str, Any]) -> dict[str, Any]:
         if isinstance(cumulative_ticks, (int, float)):
             distance_m = (float(cumulative_ticks) / MTT_ENCODER_FINAL_RATIO) * MTT_TRACK_LENGTH_M
             derived["absolute_distance_m_estimate"] = round(distance_m, 6)
+    elif frame_id == 0x602:
+        battery_current_raw = signals.get("BatteryCurrent_raw")
+        battery_current_a = signals.get("BatteryCurrent")
+        if isinstance(battery_current_raw, (int, float)) and not isinstance(battery_current_a, (int, float)):
+            derived["BatteryCurrent"] = round(float(battery_current_raw) * 0.0103 - 0.72, 6)
 
     return derived
 

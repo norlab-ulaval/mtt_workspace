@@ -7,9 +7,18 @@ It is meant for local debugging and log analysis.
 ## Files
 
 - `MTT_CAN_v1_1_simple.dbc`
+- `mttDriver.dbc`
 - `../scripts/mtt_can_monitor.py`
 - `../scripts/mtt_can_audit.py`
 - `../scripts/mtt_can_export.py`
+
+Recommended usage:
+
+- `MTT_CAN_v1_1_simple.dbc`
+  curated local DBC, aligned with the current ROS driver semantics
+- `mttDriver.dbc`
+  raw DBC recovered from the robot-side scripts, useful as an additional source
+  of truth and for checking signal naming or scaling differences
 
 ## Covered frames
 
@@ -35,6 +44,38 @@ It exposes:
 - heatpad state
 - remaining charge time
 
+## Temperature map
+
+The current decoded temperature signals are:
+
+- `0x2FF`
+  - `MainSensorTempA`
+  - `MainSensorTempB`
+  - main controller / main module temperatures
+- `0x600`
+  - `CellTemp1` to `CellTemp4`
+  - battery cell-group temperatures
+- `0x601`
+  - `AmbientTemp`
+  - `MosfetTemp`
+  - `HeatpadATemp`
+  - `HeatpadBTemp`
+  - battery enclosure / BMS / heating temperatures
+
+## Raw vs physical values
+
+The driver now follows a strict rule:
+
+- `*_raw` = direct CAN payload
+- physical values are only published when the scaling is actually known
+
+At the moment:
+
+- battery temperatures are treated as physical temperatures from the local CAN spec
+- battery current is also published as an estimated ampere value using the DBC scaling you provided
+- battery voltage is still kept as raw until validated on the robot
+- power in watts is intentionally kept invalid until voltage scaling is confirmed
+
 ## Current limits
 
 Two points still need robot-side validation:
@@ -43,6 +84,46 @@ Two points still need robot-side validation:
 - the physical scaling of some battery values
 
 Because of that, some fields are kept as raw values on purpose. Raw data is better than a wrong unit.
+
+## Health topic and fallback odom
+
+The ROS driver now exposes a higher-level monitor topic:
+
+- `mtt_health`
+
+It is meant for operator checks and bagging diagnostics:
+
+- command currently sent
+- telemetry freshness / tachometer stale state
+- main module temperatures
+- battery / BMS temperatures
+- raw vs estimated current / voltage / power semantics
+- simple warnings such as brake+throttle conflict
+
+It also publishes:
+
+- `mtt_monitor/cmd_fallback_odom`
+
+This is a command-only motion estimate used only as a degraded fallback when the
+tachometer is stale or broken. It is not a replacement for LiDAR/ICP, GNSS, or
+any other real localization source.
+
+## Temperature interpretation used by the monitor
+
+The terminal monitor labels the temperature sources conservatively:
+
+- `MainSensorTempA`
+  main controller / main module side
+- `MainSensorTempB`
+  encoder / tachometer side to watch closely during experiments
+- `CellTemp1..4`
+  battery cell-group temperatures
+- `AmbientTemp`
+  battery enclosure ambient temperature
+- `MosfetTemp`
+  battery power electronics temperature
+- `HeatpadATemp`, `HeatpadBTemp`
+  battery heating pad temperatures
 
 ## Usage
 
