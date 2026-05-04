@@ -40,26 +40,51 @@ services:
       - |
         if [ -z "$${BAG_PATH}" ]; then
           echo "ERROR: BAG_PATH is not set."
-          echo "Usage: BAG_PATH=/path/to/bag dcr up"
+          echo "Usage: BAG_PATH=/path/to/session_or_bag docker compose up"
+          exit 1
+        fi
+        PLAY_PATH="$${BAG_PATH}"
+        if [ -f "$${PLAY_PATH}" ]; then
+          PLAY_PATH="$$(dirname "$${PLAY_PATH}")"
+        elif [ -d "$${PLAY_PATH}/bag" ] && [ -f "$${PLAY_PATH}/bag/metadata.yaml" ]; then
+          PLAY_PATH="$${PLAY_PATH}/bag"
+        fi
+        if [ ! -f "$${PLAY_PATH}/metadata.yaml" ]; then
+          echo "ERROR: resolved bag path '$${PLAY_PATH}' does not contain metadata.yaml"
+          echo "You can pass:"
+          echo "  - a session directory (contains bag/)"
+          echo "  - a bag directory (contains metadata.yaml)"
+          echo "  - a .mcap file inside the bag directory"
           exit 1
         fi
         echo "==================================================="
         echo " MTT Bag Replay"
-        echo "   Bag:    $${BAG_PATH}"
+        echo "   Input:  $${BAG_PATH}"
+        echo "   Bag:    $${PLAY_PATH}"
         echo "   Rate:   ${REPLAY_RATE:-1.0}x"
         echo "==================================================="
-        if [ -f "$${BAG_PATH}/session_info.yaml" ]; then
+        if [ -f "$$(dirname "$${PLAY_PATH}")/session_info.yaml" ]; then
           echo "Session info:"
-          cat "$${BAG_PATH}/session_info.yaml"
+          cat "$$(dirname "$${PLAY_PATH}")/session_info.yaml"
           echo "---"
         fi
         exec ros2 bag play \
           --clock \
           --rate ${REPLAY_RATE:-1.0} \
           --storage mcap \
-          "$${BAG_PATH}"
+          --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
+          "$${PLAY_PATH}"
 
   # ── Robot description publisher (needed for TF from URDF) ────────────────
+  # CRITICAL: use_sim_time:=true required for bag replay.
+  # Without it, robot_state_publisher publishes TF with wall-clock timestamps
+  # while the bag player emits /clock at bag timestamps → TF2 lookups at bag
+  # time fail ("TF_FUTURE_TRANSFORM") and the robot model is invisible in Foxglove.
+  #
+  # Note: the bag also contains /tf_static from the recording session.
+  # robot_state_publisher publishes /tf_static from the current URDF (calibrated).
+  # TF2 merges both; for the same (parent,child) pair the last-published wins —
+  # the description service value (current calibration) overrides the bag value.
   description:
     <<: [*replay_base]
     depends_on:
@@ -73,7 +98,10 @@ services:
       - enable_description:=true
       - enable_sensors:=false
       - enable_mapping:=false
+      - enable_perception:=false
+      - enable_localization:=false
       - setup_real_can:=false
+      - use_sim_time:=true
 
   # ── Factor Graph localization in replay mode ──────────────────────────────
   # Fuses all recorded sensor topics.
@@ -91,19 +119,57 @@ services:
       - localization.launch.py
       - use_sim_time:=true
 
-  # ── Trailer perception in replay mode ────────────────────────────────────
+  # ── Offline ICP rebuild for one session or a whole data directory ────────
+  # Replays the bag, rebuilds the merged cloud if both LiDARs are available,
+  # runs the ICP mapper, and saves:
+  #   <session>/map.vtk
+  #   <session>/trajectory.vtk
+  #
+  # Usage examples:
+  #   BAG_PATH=${WORKSPACE}/data/mtt_nominal_outside_2026-04-30_16-08-13 \
+  #     docker compose --profile offline_icp up offline_icp
+  #
+  #   docker compose --profile offline_icp up offline_icp
+  #     → processes every mtt_* session under ${WORKSPACE}/data
+  offline_icp:
+    <<: [*replay_base]
+    profiles: ["offline_icp"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      DATA_DIR: ${DATA_DIR:-${WORKSPACE}/data}
+      REPLAY_RATE: ${REPLAY_RATE:-1.0}
+      OFFLINE_ICP_MODE: ${OFFLINE_ICP_MODE:-auto}
+      OFFLINE_ICP_FORCE: ${OFFLINE_ICP_FORCE:-false}
+      OFFLINE_ICP_SETTLE_S: ${OFFLINE_ICP_SETTLE_S:-4.0}
+      OFFLINE_ICP_READY_TIMEOUT_S: ${OFFLINE_ICP_READY_TIMEOUT_S:-30.0}
+      OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S: ${OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S:-90.0}
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/demos/bag_replay/scripts/offline_icp.py
+
+  # ── Perception in replay (cloud_merger_node + trailer_detector_node) ────────
+  # cloud_merger_node: fuses Hesai + RS-Airy → base_link frame → /merged_points_filtered
+  # trailer_detector_node: RANSAC articulation angle on the same filtered merged cloud
+  # Depends on description so robot_state_publisher has published TF before
+  # cloud_merger_node tries to transform clouds (hesai_lidar → base_link).
   perception:
     <<: [*replay_base]
     profiles: ["perception"]
     depends_on:
       bag_player:
         condition: service_started
+      description:
+        condition: service_started
     command:
-      - ros2
-      - launch
-      - mtt_perception
-      - perception.launch.py
-      - use_sim_time:=true
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /clock and TF to settle..."
+        sleep 3
+        exec ros2 launch mtt_perception perception.launch.py use_sim_time:=true
 
   # ── Sensor health check on bag output ────────────────────────────────────
   health_check:
@@ -123,16 +189,46 @@ services:
         python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
 
   # ── Foxglove for replay visualization ────────────────────────────────────
+  # Connect Foxglove Studio → "Open connection" → "Foxglove WebSocket" → ws://localhost:8765
   foxglove:
     <<: [*replay_base]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        fuser -k 8765/tcp 2>/dev/null || true
+        sleep 0.3
+        echo "Foxglove WebSocket bridge → ws://localhost:8765"
+        exec ros2 run foxglove_bridge foxglove_bridge \
+          --ros-args \
+          --params-file ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml \
+          -p port:=8765
+
+  # ── RViz (optional — requires X11 display on host) ───────────────────────
+  # Usage: DISPLAY=:0 dc run --rm rviz
+  # Or with X forwarding: ssh -X host → then dc run --rm rviz
+  rviz:
+    <<: [*replay_base]
+    profiles: ["rviz"]
+    environment:
+      DISPLAY: ${DISPLAY:-:0}
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
     command:
       - ros2
-      - run
-      - foxglove_bridge
-      - foxglove_bridge
-      - --ros-args
-      - --params-file
-      - ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml
+      - launch
+      - mtt_bringup
+      - mtt_rviz.launch.py
+      - use_sim_time:=true
+      - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
 
   # ── Debug shell ───────────────────────────────────────────────────────────
   bash:

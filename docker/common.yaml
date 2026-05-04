@@ -14,6 +14,7 @@ services:
     stop_signal: SIGINT
     volumes:
       - ${WORKSPACE}:${WORKSPACE}
+      - /data:/data
       - ${HOME}/.ros:/home/mtt/.ros
       - ${HOME}/.bash_history:/home/mtt/.bash_history
       - ${HOME}/.config/ros.org:/home/mtt/.config/ros.org

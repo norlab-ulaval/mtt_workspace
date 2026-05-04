@@ -50,7 +50,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
          s|http://ca.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
         /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
+    # Keep the Fast-DDS / Fast-CDR stack explicit here. The robot often reuses an
+    # older `mtt_workspace:base` image, and ZED message binaries can otherwise end
+    # up newer than the middleware serialization libs available in that base image.
+    ros-${ROS_DISTRO}-fastcdr \
+    ros-${ROS_DISTRO}-fastrtps \
+    ros-${ROS_DISTRO}-fastrtps-cmake-module \
     ros-${ROS_DISTRO}-controller-manager \
+    ros-${ROS_DISTRO}-zed-description \
+    ros-${ROS_DISTRO}-zed-msgs \
     ros-${ROS_DISTRO}-forward-command-controller \
     ros-${ROS_DISTRO}-foxglove-bridge \
     ros-${ROS_DISTRO}-gz-ros2-control \
@@ -72,10 +80,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ros-${ROS_DISTRO}-nmea-msgs \
     ros-${ROS_DISTRO}-geographic-msgs \
     ros-${ROS_DISTRO}-robot-localization \
-    ros-${ROS_DISTRO}-ros2-socketcan
+    ros-${ROS_DISTRO}-ros2-socketcan \
+    ros-${ROS_DISTRO}-rosidl-typesupport-fastrtps-c \
+    ros-${ROS_DISTRO}-rosidl-typesupport-fastrtps-cpp
 
 # --- Layer 8: pip ---
-RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed cantools && \
+RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
+        cantools \
+        "open3d>=0.13" \
+        scipy \
+        opencv-python-headless && \
     chmod -R a+rX /usr/local/lib/python3.12/dist-packages/
 
 # ══════════════════════════════════════════════════════════════════════════════

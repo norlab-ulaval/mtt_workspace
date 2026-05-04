@@ -4,7 +4,7 @@ check_bags.py — Vérifie les message counts de tous les bags MTT.
 Lit les metadata.yaml directement — aucun ROS requis, marche partout.
 
 Usage:
-  python3 ~/Project/mtt_ws/scripts/check_bags.py
+  python3 Workspace/mtt_workspace/scripts/check_bags.py
   python3 ~/Project/mtt_ws/scripts/check_bags.py --data-dir /chemin/vers/data
 """
 
@@ -17,7 +17,14 @@ try:
 except ImportError:
     HAS_YAML = False
 
-DATA_DIR = Path.home() / "Project" / "mtt_ws" / "data"
+def infer_workspace_root(script_path: Path) -> Path:
+    for candidate in [script_path.parent, *script_path.parents]:
+        if (candidate / "src").exists() and (candidate / "demos").exists():
+            return candidate
+    return script_path.parent
+
+
+DATA_DIR = infer_workspace_root(Path(__file__).resolve()) / "data"
 
 BOLD  = "\033[1m"; RED   = "\033[91m"; YELLOW = "\033[93m"
 GREEN = "\033[92m"; CYAN  = "\033[96m"; DIM   = "\033[2m"
@@ -33,9 +40,16 @@ WATCH = {
         ("/zed/zed_node/imu/data",                                 False, "imu/data"),
     ],
     "OAK": [
-        ("/oak/rgb/image_rect/compressed",                         True,  "rgb/compressed"),
+        ("/oak/rgb/image_rect",                                    True,  "rgb/image_rect"),
+        ("/oak/stereo/image_raw",                                  True,  "stereo/image_raw"),
+        ("/oak/points",                                            False, "points"),
     ],
-    "GPS": [
+    "GPS Single": [
+        ("/gps/fix",                                               True,  "gps/fix"),
+        ("/gps/time_reference",                                    False, "gps/time_reference"),
+        ("/gps/nmea_sentence",                                     False, "gps/nmea_sentence"),
+    ],
+    "GPS Dual": [
         ("/gps_left/fix",                                          True,  "gps_left/fix"),
         ("/gps_right/fix",                                         True,  "gps_right/fix"),
         ("/gps/heading",                                           True,  "gps/heading"),
@@ -56,7 +70,9 @@ WATCH = {
         ("/mtt_odometry",                                          False, "mtt_odometry"),
     ],
     "ICP": [
+        ("/merged_points_filtered",                                  False, "merged_points_filtered"),
         ("/mapping/icp_odom",                                      True,  "mapping/icp_odom"),
+        ("/trailer/angle",                                         False, "trailer/angle"),
     ],
     "BMS": [
         ("/mtt_battery/status",                                    True,  "mtt_battery/status"),
@@ -81,6 +97,12 @@ KNOWN_CAUSES = {
     "/gps_right/fix":
         "Driver GPS tente TCP port 5001 → Reach RS écoute sur 9001 ou 9696\n"
         "     FIX: corriger host/port dans gps_tcp.yaml ⚠️  À FAIRE",
+    "/gps/fix":
+        "Le Reach RS publie du NMEA mais aucun GGA valide n'est converti en NavSatFix\n"
+        "     FIX: vérifier GGA 5 Hz + RMC 1 Hz côté ReachView3 et lire les compteurs du driver GPS",
+    "/gps/time_reference":
+        "Pas de date RMC valide ou pas de GGA valide → pas de GPS UTC publié\n"
+        "     FIX: vérifier la sortie RMC côté Reach et les diagnostics du parser",
     "/gps/heading":
         "Dépend de gps_left/fix + gps_right/fix → mort si GPS morts",
     "/gps_left/nmea_sentence":
@@ -91,8 +113,17 @@ KNOWN_CAUSES = {
         "Encodeur inductif mort avant 14h58 (disque 10 dents a frotté face capteur)\n"
         "     FIX: remplacement matériel + vérifier gap 1-2mm 🔧 MATÉRIEL",
     "/mapping/icp_odom":
-        "ICP mapper ne publie pas sur ce topic — vérifier nom du topic dans norlab_icp_mapper\n"
-        "     (sessions courtes = normal, sessions 788s/1332s = bug config ou topic name)",
+        "ICP absent ou inutilisable — vérifier le topic, le délai de lancement, et surtout le mode deskew\n"
+        "     Avec tachometer_mode=cmd_sim, traiter /mapping/icp_odom comme référence locale, pas comme ground truth",
+    "/merged_points_filtered":
+        "Le cloud merger ne publie pas ce que le mapper consomme\n"
+        "     FIX: vérifier TF lidar->base_link, /hesai_lidar/points, /rsairy_ns/points et perception.launch.py",
+    "/oak/stereo/image_raw":
+        "Le pipeline RGBD OAK ne sort pas — souvent câble USB desserré après vibration\n"
+        "     FIX: rebrancher l'OAK, vérifier /dev/bus/usb et relancer le driver",
+    "/oak/points":
+        "Le point cloud OAK n'est pas activé ou l'entrée depth RGBD ne sort pas\n"
+        "     FIX: activer pointcloud.enable=true et vérifier /oak/stereo/image_raw",
     "/mtt_battery/status":
         "BMS decoding non compile avant aujourd'hui — rebuild mtt_driver et redéployer\n"
         "     FIX: colcon build --packages-select mtt_msgs mtt_driver && dc up --build robot",
@@ -153,12 +184,11 @@ def group_status(entries, counts):
     if all(c == -1 for t, c in primary_counts):
         return "missing"
 
-    primary_ok   = [c for t, c in primary_counts if c > 0]
-    primary_dead = [c for t, c in primary_counts if c == 0]
+    primary_ok = [c for t, c in primary_counts if c > 0]
 
-    if primary_ok and not primary_dead:
+    if all(c > 0 for t, c in primary_counts):
         return "ok"
-    if primary_ok and primary_dead:
+    if primary_ok:
         return "partial"
     return "dead"
 
