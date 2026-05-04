@@ -69,6 +69,67 @@ It is not a claim that `mtt_workspace` or `src/mtt_core` alone own that logic.
 - `launch/include/imu_and_wheel_odom.launch.py`
 - `launch/include/icp_mapper.launch.py`
 
+## TF state observed on the live robot
+
+[OBSERVÉ] The live robot runtime publishes the core model topics:
+- `/tf`
+- `/tf_static`
+- `/robot_description`
+- `/joint_states`
+
+[OBSERVÉ] The MTT body tree is present:
+- `base_footprint -> base_link`
+- `base_link -> center_lidar_link`
+
+[OBSERVÉ] `center_lidar_link` exists in the URDF and in the live TF tree.
+
+[OBSERVÉ] The Hesai driver publishes data under `/hesai_lidar/*`, but the
+runtime expected a frame named `hesai_lidar` that was not present in the TF
+tree.
+
+[RECOMMANDATION] Keep `center_lidar_link` as the physical mount in the URDF and
+publish a fixed compatibility frame `hesai_lidar` on top of it. This is a safe
+alias because the live stack, mapping config, and bagging config already use the
+`hesai_lidar` name.
+
+[OBSERVÉ] `imu_link` and `mti10_imu_link_right` are used as IMU frame ids in the
+runtime configs, but no matching links were found in the current MTT URDF.
+
+[À VÉRIFIER] Their physical poses are still missing from the audited workspace.
+
+[RECOMMANDATION] Do not invent IMU extrinsics in the URDF. Confirm the actual
+mounting poses on the robot first, then add those links in `mtt_description`.
+
+[OBSERVÉ] `zed_state_publisher` publishes a separate ZED TF tree, but
+`base_link -> zed_camera_link` is currently not connected on the live robot.
+
+[DÉDUIT] The ZED wrapper is publishing its own camera-local URDF without a
+robot-side parent transform.
+
+[RECOMMANDATION] Treat the ZED extrinsic as a missing runtime calibration item.
+Do not hard-code a fake static transform until the camera mount pose is measured
+or sourced from a trusted calibration file.
+
+[OBSERVÉ] The live robot had two publishers on `/robot_description`:
+- `robot_state_publisher`
+- `oak_state_publisher`
+
+[DÉDUIT] The previous OAK launch path was publishing a second standalone camera
+description on the same topic, which can confuse RViz and Foxglove.
+
+[RECOMMANDATION] Launch OAK with the upstream
+`camera_as_part_of_a_robot.launch.py` path until the real OAK parent frame and
+extrinsic pose are calibrated. That keeps the camera topics without pretending
+the OAK already has a validated robot-side TF attachment.
+
+[OBSERVÉ] A measured extrinsic was later provided for:
+- `rsairy -> oak_rgb_camera_optical_frame`
+
+[RECOMMANDATION] Use that calibration in the OAK launch path so the OAK and the
+RS Bpearl share one TF subtree. This still does not anchor them to the main
+robot body until `rsairy` itself is tied into the MTT URDF or by a trusted
+static transform.
+
 ## What stays uncertain
 
 [OBSERVÉ] OAK is referenced by:

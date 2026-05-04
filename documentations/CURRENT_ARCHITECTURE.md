@@ -58,3 +58,8 @@ Those points depend on the external integration layer and still require robot-si
 - Steering truth is still weaker than command truth in the current audited stack.
 - OAK support is still incomplete at the workspace level.
 - The namespace story is only partially cleaned up in the older launch files.
+- TF is not fully closed yet across all sensors:
+  - the live model tree is present,
+  - `hesai_lidar` needed a compatibility alias over `center_lidar_link`,
+  - IMU frame links are still missing from the audited URDF,
+  - ZED currently publishes a disconnected camera-local tree on the live robot.
