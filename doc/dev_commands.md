@@ -10,6 +10,10 @@ candump can0
 candump can0 -xct z -n 10
 python3 scripts/mtt_can_audit.py --interface can0 --duration 8
 python3 scripts/mtt_can_monitor.py --interface can0
+python3 scripts/mtt_health_monitor.py
+python3 scripts/mtt_brake_cycle.py --mode release
+python3 scripts/mtt_brake_cycle.py --mode pulse --max-brake 1.0 --min-brake 0.0 --period 1.2 --cycles 8
+python3 scripts/mtt_brake_cycle.py --mode triangle --max-brake 1.0 --period 2.0 --cycles 5
 .venv-tools/bin/python scripts/mtt_can_export.py /path/to/candump.log
 ```
 
