@@ -1,0 +1,10 @@
+/**:
+  wiln_node:
+    ros__parameters:
+      follow_path_topic: /follow_path
+      enable_mapping_service: /mapping/enable_mapping
+      disable_mapping_service: /mapping/disable_mapping
+      save_map_service: /mapping/save_map
+      load_map_service: /mapping/load_map
+      trajectory_speed: 0.70
+      smoothing_window_size: 15

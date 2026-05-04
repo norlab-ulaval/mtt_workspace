@@ -16,12 +16,14 @@ x-dc-base: &dc_base
   extends:
     file: ../../docker/common.yaml
     service: ros_runtime_base
+  env_file:
+    - ./config/runtime.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
   privileged: true
   environment:
     ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
-    RMW_IMPLEMENTATION: rmw_zenoh_cpp
+    RMW_IMPLEMENTATION: ${MTT_RMW_IMPLEMENTATION:-rmw_zenoh_cpp}
     ROBOT_NAME: ${ROBOT_NAME:-mtt-hl}
     NORLAB_ROBOT_PATH: ${WORKSPACE}/src/external/norlab_robot
     ZENOH_ROUTER_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_router.json5
@@ -37,19 +39,16 @@ x-dc-base: &dc_base
     WEATHER: ${WEATHER:-unknown}
     TEMPERATURE: ${TEMPERATURE:-0}                 # °C
     NOTES: ${NOTES:-}
-    GPS_MODE: ${GPS_MODE:-serial}                  # serial | tcp
-    # ── Robot motion limits (hot-reload: change here + dc down && dc up) ──────
-    # Articulation: physical joint limit is ±60°. Lower for tighter safety margin.
-    MTT_MAX_ARTICULATION_DEG: ${MTT_MAX_ARTICULATION_DEG:-60.0}
-    # Speed for the driver controller (m/s). 2.0 = full motor range.
-    MTT_MAX_LINEAR_SPEED_MS: ${MTT_MAX_LINEAR_SPEED_MS:-2.0}
-    # Teleop operator speed limits (m/s and rad/s) — caps what the joystick can send.
-    MTT_TELEOP_MAX_LINEAR:  ${MTT_TELEOP_MAX_LINEAR:-1.0}
-    MTT_TELEOP_MAX_ANGULAR: ${MTT_TELEOP_MAX_ANGULAR:-0.6}
+    BAG_CACHE_SIZE_BYTES: ${BAG_CACHE_SIZE_BYTES:-1073741824}
+    BAG_DISK_MIN_GB: ${BAG_DISK_MIN_GB:-40}
+    BAG_DISK_WARN_GB: ${BAG_DISK_WARN_GB:-80}
     LOCAL_FOXGLOVE_PORT: ${LOCAL_FOXGLOVE_PORT:-8765}
-    # CAN command deadzones (0.0–1.0, normalized). Tune to remove mechanical slop.
-    MTT_THROTTLE_DEADBAND: ${MTT_THROTTLE_DEADBAND:-0.05}
-    MTT_STEER_DEADBAND:    ${MTT_STEER_DEADBAND:-0.05}
+    DRIVER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_driver.yaml
+    HEALTH_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_health_monitor.yaml
+    CONTROL_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_control.yaml
+    FOLLOWER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_path_follower.yaml
+    SUPERVISOR_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml
+    WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
   volumes:
     - /dev:/dev
     - /run/udev:/run/udev:ro
@@ -59,10 +58,12 @@ x-dc-base: &dc_base
 services:
 
   # ── Zenoh router ──────────────────────────────────────────────────────────
+  # No profile → starts automatically with dc up.
+  # The robot service depends on it so the router is always up before ROS nodes
+  # attempt to register. The fuser kill ensures no stale router from a previous
+  # session is holding port 7447.
   zenoh:
     <<: [*dc_base]
-    profiles: ["infra"]
-    # Start this only when Compose should own the router on the robot host.
     command:
       - bash
       - -c
@@ -75,28 +76,46 @@ services:
   robot:
     <<: [*dc_base]
     privileged: true
+    depends_on:
+      zenoh:
+        condition: service_started
     volumes:
       - /dev:/dev
+      - /dev/input:/dev/input
       - /run/udev:/run/udev:ro
       - /dev/bus/usb:/dev/bus/usb
       - /usr/local/zed/settings:/usr/local/zed/settings:rw
     command:
-      - ros2
-      - launch
-      - norlab_robot
-      - live_robot.launch.py
-      - warnings:=false
-      - enable_mapping:=true
-      - enable_sensors:=true
-      - enable_teleop:=false
-      - enable_joystick:=false
-      - setup_real_can:=true
-      - gps_mode:=${GPS_MODE:-serial}
-      - mapping_delay_seconds:=5.0
-      - max_articulation_deg:=${MTT_MAX_ARTICULATION_DEG:-60.0}
-      - max_linear_speed_ms:=${MTT_MAX_LINEAR_SPEED_MS:-2.0}
-      - throttle_deadband:=${MTT_THROTTLE_DEADBAND:-0.05}
-      - steer_deadband:=${MTT_STEER_DEADBAND:-0.05}
+      - bash
+      - -lc
+      - |
+        echo "Runtime config → demos/data_collection/config/runtime.env + demos/common/config/"
+        echo "  env:          ${WORKSPACE}/demos/data_collection/config/runtime.env"
+        echo "  driver:       $${DRIVER_PARAMS_FILE}"
+        echo "  health:       $${HEALTH_PARAMS_FILE}"
+        echo "  control:      $${CONTROL_PARAMS_FILE}"
+        echo "  teleop=$${ENABLE_TELEOP} joystick=$${ENABLE_JOYSTICK} joy_device=$${JOYSTICK_DEVICE}"
+        exec ros2 launch norlab_robot live_robot.launch.py \
+          warnings:=false \
+          enable_mapping:=$${ENABLE_MAPPING} \
+          enable_sensors:=$${ENABLE_SENSORS} \
+          enable_perception:=$${ENABLE_PERCEPTION} \
+          enable_teleop:=$${ENABLE_TELEOP} \
+          enable_joystick:=$${ENABLE_JOYSTICK} \
+          setup_real_can:=true \
+          gps_mode:=$${GPS_MODE} \
+          gps_antennas:=$${GPS_ANTENNAS} \
+          driver_params_file:=$${DRIVER_PARAMS_FILE} \
+          health_params_file:=$${HEALTH_PARAMS_FILE} \
+          control_params_file:=$${CONTROL_PARAMS_FILE} \
+          mapping_delay_seconds:=5.0 \
+          mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
+          mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
+          mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
+          mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
+          joy_device:=$${JOYSTICK_DEVICE} \
+          joy_deadzone:=$${JOYSTICK_DEADZONE}
 
   # ── Sensor health check (runs once, then exits) ───────────────────────────
   # Waits 10s for sensors to settle, checks frequencies for 15s.
@@ -114,7 +133,8 @@ services:
     command:
       - bash
       - -lc
-      - python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
+      - |
+        exec python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
 
   # ── Bag recorder ─────────────────────────────────────────────────────────
   # Launch manually when ready:  dcr record  (or: dc up --profile record)
@@ -123,6 +143,7 @@ services:
     <<: [*dc_base]
     profiles: ["record"]
     stop_signal: SIGINT   # ros2 bag record needs SIGINT to finalize the bag cleanly
+    stop_grace_period: 5m
     depends_on:
       robot:
         condition: service_started
@@ -139,8 +160,28 @@ services:
         echo "   Operator:   $${OPERATOR}"
         echo "   Weather:    $${WEATHER}  $${TEMPERATURE}°C"
         echo "   GPS mode:   $${GPS_MODE}"
+        echo "   Teleop:     $${ENABLE_TELEOP}  Joystick: $${ENABLE_JOYSTICK}"
+        echo "   Driver cfg: $${DRIVER_PARAMS_FILE}"
+        echo "   Control cfg:$${CONTROL_PARAMS_FILE}"
+        echo "   WILN cfg:   $${WILN_PARAMS_FILE}"
         echo "   Storage:    ${WORKSPACE}/data/"
         echo "==================================================="
+        # ── Disk space check — abort early rather than corrupt a bag ──
+        DATA_DIR="${WORKSPACE}/data"
+        mkdir -p "$$DATA_DIR"
+        AVAIL_GB=$$(df -BG "$$DATA_DIR" | awk 'NR==2 {gsub("G",""); print $4}')
+        MIN_FREE_GB="$${BAG_DISK_MIN_GB:-40}"
+        WARN_FREE_GB="$${BAG_DISK_WARN_GB:-80}"
+        echo "Available disk space in $$DATA_DIR: $${AVAIL_GB} GB"
+        if [ "$${AVAIL_GB}" -lt "$${MIN_FREE_GB}" ]; then
+          echo "ERROR: Less than $${MIN_FREE_GB} GB free in $$DATA_DIR ($${AVAIL_GB} GB available)."
+          echo "       Free space before recording to avoid bag corruption."
+          exit 1
+        fi
+        if [ "$${AVAIL_GB}" -lt "$${WARN_FREE_GB}" ]; then
+          echo "WARNING: Only $${AVAIL_GB} GB free — session may be cut short. Consider freeing space."
+        fi
+
         echo "Waiting for primary sensors..."
         for i in $$(seq 1 40); do
           if ros2 topic info /hesai_lidar/points 2>/dev/null | grep -qE "Publisher count: [1-9]"; then
@@ -178,6 +219,16 @@ services:
           printf 'temperature_c: %s\n'     "$${TEMPERATURE}"
           printf 'notes: "%s"\n'           "$${NOTES}"
           printf 'gps_mode: "%s"\n'        "$${GPS_MODE}"
+          printf 'gps_antennas: "%s"\n'    "$${GPS_ANTENNAS}"
+          printf 'enable_teleop: %s\n'     "$${ENABLE_TELEOP}"
+          printf 'enable_joystick: %s\n'   "$${ENABLE_JOYSTICK}"
+          printf 'mapping_points_topic: "%s"\n' "$${MAPPING_POINTS_TOPIC}"
+          printf 'driver_params_file: "%s"\n' "$${DRIVER_PARAMS_FILE}"
+          printf 'health_params_file: "%s"\n' "$${HEALTH_PARAMS_FILE}"
+          printf 'control_params_file: "%s"\n' "$${CONTROL_PARAMS_FILE}"
+          printf 'follower_params_file: "%s"\n' "$${FOLLOWER_PARAMS_FILE}"
+          printf 'supervisor_params_file: "%s"\n' "$${SUPERVISOR_PARAMS_FILE}"
+          printf 'wiln_params_file: "%s"\n' "$${WILN_PARAMS_FILE}"
           printf 'started_at: "%s"\n'      "$$(date -Iseconds)"
           printf 'robot_host: "%s"\n'      "${ROBOT_HOST:-192.168.2.2}"
           printf 'session_dir: "%s"\n'     "$${BAG_DIR}"
@@ -198,7 +249,7 @@ services:
 
         # ── Snapshot ROS parameters for key nodes ──────────────────
         echo "  Waiting for key nodes before param snapshot..."
-        for NODE in /mtt_can_node /mtt_odometry_node /twist_mux; do
+        for NODE in /mtt_can_node /mtt_odometry_node /mtt_cmd_arbiter_node; do
           for i in $$(seq 1 30); do
             ros2 node list 2>/dev/null | grep -qF "$$NODE" && break
             [ "$$i" -eq 30 ] && echo "  WARNING: $$NODE not found" && break
@@ -207,7 +258,7 @@ services:
           echo "  $$NODE ready"
         done
         PARAM_FILE="$${BAG_DIR}/ros_params.yaml"
-        for NODE in /mtt_can_node /mtt_odometry_node /twist_mux /mtt_operator_teleop; do
+        for NODE in /mtt_can_node /mtt_odometry_node /mtt_operator_input_node /mtt_manual_cmd_filter_node /mtt_mode_manager_node /mtt_cmd_arbiter_node; do
           echo "# --- $${NODE} ---" >> "$${PARAM_FILE}" 2>/dev/null
           ros2 param dump "$${NODE}" 2>/dev/null >> "$${PARAM_FILE}" || \
             echo "# $${NODE}: not available" >> "$${PARAM_FILE}"
@@ -219,36 +270,161 @@ services:
         ros2 topic list --show-types 2>/dev/null > "$${BAG_DIR}/topic_list_with_types.txt" || true
         echo "  Topics → $${BAG_DIR}/topic_list.txt"
 
-        # ── Background size monitor ─────────────────────────────────
+        wait_for_topic() {
+          local topic="$$1"
+          local timeout_s="$$2"
+          local label="$$3"
+          local i
+          for i in $$(seq 1 "$$timeout_s"); do
+            if ros2 topic info "$$topic" 2>/dev/null | grep -qE "Publisher count: [1-9]"; then
+              echo "  $$label ready ($${i}s)"
+              return 0
+            fi
+            sleep 1
+          done
+          echo "  WARNING: $$label not available after $${timeout_s}s"
+          return 1
+        }
+
+        echo "Waiting for latched and runtime-critical topics..."
+        wait_for_topic /tf 20 "dynamic TF" || true
+        wait_for_topic /tf_static 20 "static TF" || true
+        wait_for_topic /robot_description 20 "robot description" || true
+        wait_for_topic /joint_states 20 "joint states" || true
+
+        echo "Checking optional camera topics before record..."
+        wait_for_topic /zed/zed_node/rgb/color/rect/image/compressed 15 "ZED RGB" || true
+        wait_for_topic /zed/zed_node/depth/depth_registered/compressedDepth 15 "ZED depth" || true
+        wait_for_topic /zed/zed_node/point_cloud/cloud_registered 15 "ZED point cloud" || true
+        wait_for_topic /oak/rgb/image_rect 15 "OAK RGB" || true
+        wait_for_topic /oak/stereo/image_raw 15 "OAK depth" || true
+        wait_for_topic /oak/points 15 "OAK point cloud" || true
+        wait_for_topic /gps/fix 15 "GPS fix" || true
+        wait_for_topic /gps/time_reference 15 "GPS time reference" || true
+        wait_for_topic /merged_points_filtered 15 "merged mapper cloud" || true
+        wait_for_topic /mapping/icp_odom 20 "ICP odom" || true
+
+        TOPIC_CONFIG="${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/all_sensors_full.yaml"
+        mapfile -t RECORD_TOPICS < <(
+          python3 -c 'import sys,yaml; from pathlib import Path; config=yaml.safe_load(Path(sys.argv[1]).read_text()); print("\n".join(config["topics_main"]))' "$${TOPIC_CONFIG}"
+        )
+        if [ "$${#RECORD_TOPICS[@]}" -eq 0 ]; then
+          echo "ERROR: topic config $$TOPIC_CONFIG is empty"
+          exit 1
+        fi
+        printf '%s\n' "$${RECORD_TOPICS[@]}" > "$${BAG_DIR}/record_topics.txt"
+        echo "  Recording $${#RECORD_TOPICS[@]} configured topics"
+        echo "  Topic list  → $${BAG_DIR}/record_topics.txt"
+
+        CLEANUP_DONE=0
+        BAG_PID=""
+        MONITOR_PID=""
+        cleanup_recording() {
+          if [ "$${CLEANUP_DONE}" -eq 1 ]; then
+            return
+          fi
+          CLEANUP_DONE=1
+          if [ -n "$${MONITOR_PID}" ]; then
+            kill "$${MONITOR_PID}" 2>/dev/null || true
+            MONITOR_PID=""
+          fi
+          if [ -n "$${BAG_PID}" ] && kill -0 "$${BAG_PID}" 2>/dev/null; then
+            echo ""
+            echo "  Stopping ros2 bag record..."
+            echo "  Pausing intake, then sending SIGINT for clean finalize. Do not press Ctrl-C again."
+            timeout 5s ros2 service call /rosbag2_recorder/pause rosbag2_interfaces/srv/Pause "{}" >/tmp/rosbag_pause.out 2>&1 || true
+            sleep 1
+            kill -INT "$${BAG_PID}" 2>/dev/null || true
+          fi
+          if [ ! -f "$${BAG_SUBDIR}/metadata.yaml" ]; then
+            echo "  Waiting for rosbag metadata.yaml..."
+            for i in $$(seq 1 180); do
+              if [ -f "$${BAG_SUBDIR}/metadata.yaml" ]; then
+                break
+              fi
+              sleep 1
+            done
+          fi
+          if [ ! -f "$${BAG_SUBDIR}/metadata.yaml" ]; then
+            echo "  metadata.yaml still missing — attempting ros2 bag reindex"
+            ros2 bag reindex "$${BAG_SUBDIR}" > "$${BAG_DIR}/ros2_bag_reindex.txt" 2>&1 || true
+            for i in $$(seq 1 30); do
+              if [ -f "$${BAG_SUBDIR}/metadata.yaml" ]; then
+                break
+              fi
+              sleep 1
+            done
+          fi
+          if [ -n "$${BAG_PID}" ] && kill -0 "$${BAG_PID}" 2>/dev/null; then
+            echo "  Stopping recorder process after writer close..."
+            kill -TERM "$${BAG_PID}" 2>/dev/null || true
+            for i in $$(seq 1 10); do
+              if ! kill -0 "$${BAG_PID}" 2>/dev/null; then
+                break
+              fi
+              sleep 1
+            done
+            if kill -0 "$${BAG_PID}" 2>/dev/null; then
+              echo "  Recorder process still alive — sending SIGKILL"
+              kill -KILL "$${BAG_PID}" 2>/dev/null || true
+            fi
+            wait "$${BAG_PID}" 2>/dev/null || true
+          fi
+          PRIMARY_MCAP=$$(find "$${BAG_SUBDIR}" -maxdepth 1 -type f -name '*.mcap' | sort | head -n 1)
+          if [ -n "$${PRIMARY_MCAP}" ]; then
+            ln -sfn "$${PRIMARY_MCAP}" "$${BAG_DIR}/session.mcap"
+            echo "  Primary MCAP → $${BAG_DIR}/session.mcap"
+          fi
+          ros2 bag info "$${BAG_SUBDIR}" > "$${BAG_DIR}/ros2_bag_info.txt" 2>&1 || true
+          python3 "${WORKSPACE}/scripts/audit_bag_topics.py" "$${BAG_DIR}" --show-ok > "$${BAG_DIR}/audit_bag_topics.txt" 2>&1 || true
+          python3 "${WORKSPACE}/scripts/post_session_report.py" "$${BAG_DIR}" > "$${BAG_DIR}/post_session_report.stdout" 2>&1 || true
+          echo ''
+          echo '  Bag closed — saving ICP map and trajectory...'
+          ros2 service call /mapping/save_map norlab_icp_mapper_ros/srv/SaveMap "{map_file_name: {data: \"$${BAG_DIR}/map.vtk\"}}" 2>/dev/null && echo "  Map        → $${BAG_DIR}/map.vtk" || echo '  WARNING: save_map failed (mapper not running?)'
+          ros2 service call /mapping/save_trajectory norlab_icp_mapper_ros/srv/SaveTrajectory "{trajectory_file_name: {data: \"$${BAG_DIR}/trajectory.vtk\"}}" 2>/dev/null && echo "  Trajectory → $${BAG_DIR}/trajectory.vtk" || echo '  WARNING: save_trajectory failed'
+          echo "  Session dir: $${BAG_DIR}"
+        }
+        trap cleanup_recording EXIT INT TERM
+
+        # ── Record configured topics into BAG_DIR/bag/ ──────────────
+        # We use the curated topic list instead of --all because the live stack
+        # contains late publishers and transient-local topics (/tf_static,
+        # /robot_description). With an explicit list + QoS overrides the bag is
+        # much more reproducible.
+        setsid ros2 bag record \
+          --node-name rosbag2_recorder \
+          --disable-keyboard-controls \
+          --storage mcap \
+          --output "$${BAG_SUBDIR}" \
+          --max-cache-size "$${BAG_CACHE_SIZE_BYTES:-1073741824}" \
+          --storage-config-file "${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/mcap_writer_options_full.yaml" \
+          --qos-profile-overrides-path "${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_override.yaml" \
+          "$${RECORD_TOPICS[@]}" &
+        BAG_PID=$$!
+
+        # ── Background size + disk monitor ──────────────────────────
         (while true; do
           sleep 60
           SIZE=$$(du -sh "$${BAG_DIR}" 2>/dev/null | cut -f1)
-          echo "  [$$(date +%H:%M:%S)] Session size: $${SIZE}"
+          AVAIL_GB=$$(df -BG "${WORKSPACE}/data" | awk 'NR==2 {gsub("G",""); print $4}')
+          echo "  [$$(date +%H:%M:%S)] Session size: $${SIZE}  |  Free: $${AVAIL_GB} GB"
+          if [ "$${AVAIL_GB}" -lt 10 ]; then
+            echo "  CRITICAL: Less than 10 GB free — stopping record to protect bag integrity"
+            kill -INT "$${BAG_PID}" 2>/dev/null || true
+            break
+          fi
         done) &
         MONITOR_PID=$$!
 
-        trap "kill $${MONITOR_PID} 2>/dev/null; \
-              echo ''; \
-              echo '  Bag closed.'; \
-              echo '  Session dir: $${BAG_DIR}'; \
-              echo '  Run post-session report:'; \
-              echo '    python3 ${WORKSPACE}/scripts/post_session_report.py $${BAG_DIR}'" EXIT
-
-        # ── Record ALL topics into BAG_DIR/bag/ ────────────────────
-        # ros2 bag record creates its output dir itself — must NOT pre-exist.
-        # All metadata (session_info.yaml, ros_params.yaml, etc.) stays in BAG_DIR/.
-        exec ros2 bag record \
-          --storage mcap \
-          --all \
-          --output "$${BAG_SUBDIR}" \
-          --max-cache-size 536870912 \
-          --storage-config-file "${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/mcap_writer_options_full.yaml" \
-          --qos-profile-overrides-path "${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_override.yaml"
+        wait "$${BAG_PID}"
+        RECORD_EXIT=$$?
+        exit "$${RECORD_EXIT}"
 
   # ── Foxglove live visualisation ───────────────────────────────────────────
+  # No profile → starts automatically with dc up (same as zenoh and robot).
+  # Previously required --profile infra which meant it was never started in practice.
   foxglove:
     <<: [*dc_base]
-    profiles: ["infra"]
     depends_on:
       robot:
         condition: service_started
@@ -266,6 +442,20 @@ services:
           --params-file ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml \
           -p port:=${LOCAL_FOXGLOVE_PORT:-8765}
 
+  rviz:
+    <<: [*dc_base]
+    profiles: ["viz"]
+    depends_on:
+      robot:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - mtt_bringup
+      - mtt_rviz.launch.py
+      - use_sim_time:=false
+      - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
+
   # ── Manual teleop ─────────────────────────────────────────────────────────
   teleop:
     <<: [*dc_base]
@@ -273,18 +463,13 @@ services:
     depends_on:
       robot:
         condition: service_started
-    volumes:
-      - /dev:/dev
-      - /run/udev:/run/udev:ro
-      - /dev/input:/dev/input
     command:
-      - ros2
-      - launch
-      - mtt_driver
-      - mtt_operator_teleop.launch.py
-      - joy_device:=/dev/input/js0
-      - max_linear_speed:=${MTT_TELEOP_MAX_LINEAR:-1.0}
-      - max_angular_speed:=${MTT_TELEOP_MAX_ANGULAR:-0.6}
+      - bash
+      - -lc
+      - |
+        echo "teleop service is now a compatibility stub."
+        echo "Joystick teleop already runs inside the robot service."
+        echo "Edit demos/data_collection/config/runtime.env and demos/common/config/mtt_control.yaml to change joystick behavior."
 
   # ── SocketCAN → ROS2 bridge ───────────────────────────────────────────────
   # Publishes raw CAN frames from can0 on /from_can_bus (can_msgs/Frame)
@@ -341,50 +526,43 @@ services:
       WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
     command:
       - bash
-      - -c
+      - -lc
       - |
-        # Wait for ICP odometry to be available (mapper has a 5-10s startup delay)
         echo "Waiting for /mapping/icp_odom..."
         for i in $$(seq 1 30); do
-          ros2 topic info /mapping/icp_odom --verbose 2>/dev/null | grep -q "Publisher count" && break
+          ros2 topic info /mapping/icp_odom >/dev/null 2>&1 && break
           sleep 1
         done
-        echo "ICP ready — starting WILN stack"
-
-        # odom_to_pose_converter: converts /mapping/icp_odom (nav_msgs/Odometry)
-        # to PoseWithCovarianceStamped for WILN localization.
-        ros2 run odom_to_pose_converter odom_to_pose_converter_node \
-          --ros-args \
-            -r odom_in:=/mapping/icp_odom \
-            -r pose_out:=/wiln/pose &
-        ODOM_CONV_PID=$$!
-
-        # WILN node: teach & repeat using ICP localization.
-        # - pose_in     ← /wiln/pose     (from odom_to_pose_converter)
-        # - odom_in     ← /mapping/icp_odom (velocity feedback)
-        # - cmd_vel_out → /controller/cmd_vel (→ twist_mux priority 50 → /cmd_vel → robot)
-        ros2 run wiln wiln_node \
-          --ros-args \
-            -r pose_in:=/wiln/pose \
-            -r odom_in:=/mapping/icp_odom \
-            -r cmd_vel_out:=/controller/cmd_vel \
-            --params-file "${WORKSPACE}/src/external/norlab_robot/config/_wiln.yaml" &
-        WILN_PID=$$!
-
+        echo "ICP ready — starting teach/repeat stack"
         echo ""
-        echo "  WILN running (odom_conv PID=$${ODOM_CONV_PID}, wiln PID=$${WILN_PID})"
+        echo "  Fresh route:"
+        echo "    dc run --rm wiln_teach_start     — start teaching"
+        echo "    ... drive manually ..."
+        echo "    dc run --rm wiln_teach_stop      — stop teaching, route armed in memory"
+        echo "    dc run --rm wiln_replay          — replay immediately (same session)"
+        echo "    dc run --rm wiln_save            — optional, save to $${WILN_LTR_DIR}/route.ltr"
         echo ""
-        echo "  Control via Docker Compose:"
-        echo "    dc run --rm wiln_teach_start     — start recording"
-        echo "    dc run --rm wiln_teach_stop      — stop recording"
-        echo "    dc run --rm wiln_save            — save to $${WILN_LTR_DIR}/route.ltr"
+        echo "  Existing route:"
         echo "    dc run --rm wiln_load            — load from $${WILN_LTR_DIR}/route.ltr"
-        echo "    dc run --rm wiln_replay          — start autonomous repeat"
-        echo "    dc run --rm wiln_replay_stop     — cancel replay"
+        echo "    dc run --rm wiln_replay          — replay loaded route"
         echo ""
-
-        # Wait for either child to exit
-        wait $${WILN_PID} $${ODOM_CONV_PID}
+        echo "  Diagnostics:"
+        echo "    dc run --rm wiln_status"
+        echo "    dc run --rm wiln_replay_stop"
+        echo ""
+        echo "  Note:"
+        echo "    Do not use 'ros2 launch wiln' directly for MTT."
+        echo "    This service already launches the full MTT teach/repeat stack."
+        echo ""
+        echo "  WILN cfg:           $${WILN_PARAMS_FILE}"
+        echo "  Follower cfg:       $${FOLLOWER_PARAMS_FILE}"
+        echo "  Supervisor cfg:     $${SUPERVISOR_PARAMS_FILE}"
+        echo ""
+        exec ros2 launch norlab_robot teach_repeat.launch.py \
+          use_sim_time:=false \
+          wiln_params_file:=$${WILN_PARAMS_FILE} \
+          follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
+          supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE}
 
   # ── WILN control (one-shot) ──────────────────────────────────────────────
   # Run with:  dc run --rm wiln_teach_start
@@ -398,9 +576,9 @@ services:
       - ros2
       - service
       - call
-      - /start_recording
+      - /mtt_repeat/teach_start
       - std_srvs/srv/Trigger
-      - '{}'
+      - "{}"
 
   wiln_teach_stop:
     <<: [*dc_base]
@@ -409,9 +587,9 @@ services:
       - ros2
       - service
       - call
-      - /stop_recording
+      - /mtt_repeat/teach_stop
       - std_srvs/srv/Trigger
-      - '{}'
+      - "{}"
 
   wiln_save:
     <<: [*dc_base]
@@ -420,8 +598,9 @@ services:
       WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
     command:
       - bash
-      - -c
-      - 'ros2 service call /save_ltr wiln_msgs/srv/SaveLtr "{file_name: \"$${WILN_LTR_DIR}/route.ltr\"}"'
+      - -lc
+      - |
+        ros2 service call /save_map_traj wiln/srv/SaveMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
 
   wiln_load:
     <<: [*dc_base]
@@ -430,8 +609,10 @@ services:
       WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
     command:
       - bash
-      - -c
-      - 'ros2 service call /load_ltr wiln_msgs/srv/LoadLtr "{file_name: \"$${WILN_LTR_DIR}/route.ltr\"}"'
+      - -lc
+      - |
+        ros2 service call /load_map_traj wiln/srv/LoadMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
+        ros2 service call /mtt_repeat/mark_ready std_srvs/srv/Trigger "{}"
 
   wiln_replay:
     <<: [*dc_base]
@@ -440,9 +621,9 @@ services:
       - ros2
       - service
       - call
-      - /play_trajectory
+      - /mtt_repeat/play_line
       - std_srvs/srv/Trigger
-      - '{}'
+      - "{}"
 
   wiln_replay_stop:
     <<: [*dc_base]
@@ -451,9 +632,9 @@ services:
       - ros2
       - service
       - call
-      - /cancel_trajectory
+      - /mtt_repeat/cancel
       - std_srvs/srv/Trigger
-      - '{}'
+      - "{}"
 
   wiln_replay_loop:
     <<: [*dc_base]
@@ -462,8 +643,65 @@ services:
       N: ${N:-1}
     command:
       - bash
-      - -c
-      - 'ros2 service call /play_loop_trajectory wiln_msgs/srv/PlayLoopTrajectory "{nbLoops: $${N}}"'
+      - -lc
+      - |
+        ros2 service call /mtt_repeat/play_loop wiln/srv/PlayLoop "{nb_loops: {data: $${N}}}"
+
+  wiln_status:
+    <<: [*dc_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - bash
+      - -lc
+      - |
+        echo "WILN native services:"
+        for svc in /start_recording /stop_recording /play_line /cancel_trajectory /save_map_traj /load_map_traj /play_loop; do
+          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+        done
+        echo ""
+        echo "Supervisor services:"
+        for svc in /mtt_repeat/teach_start /mtt_repeat/teach_stop /mtt_repeat/play_line /mtt_repeat/play_loop /mtt_repeat/cancel /mtt_repeat/mark_ready; do
+          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+        done
+        echo ""
+        echo "Topics / action:"
+        for topic in /mapping/icp_odom /mtt_health /mtt_repeat/state /mtt_repeat/ready /cmd_vel/manual /controller/cmd_vel /mtt_control/selected_source; do
+          ros2 topic list 2>/dev/null | grep -qx "$$topic" && echo "  ✓ $$topic" || echo "  ✗ $$topic"
+        done
+        echo ""
+        echo "Latched repeat state:"
+        timeout 2s ros2 topic echo --once /mtt_repeat/state 2>/dev/null || echo "  /mtt_repeat/state unavailable"
+        timeout 2s ros2 topic echo --once /mtt_repeat/ready 2>/dev/null || echo "  /mtt_repeat/ready unavailable"
+
+  # ── ICP map + trajectory saver (one-shot) ────────────────────────────────
+  # Manually save the current map and trajectory at any time during a session.
+  # Usage:  dc run --rm -e OUT_DIR=${WORKSPACE}/data/my_session map_saver
+  # Default output: ${WORKSPACE}/data/map_<timestamp>.vtk + trajectory_<timestamp>.vtk
+  map_saver:
+    <<: [*dc_base]
+    profiles: ["save"]
+    depends_on:
+      robot:
+        condition: service_started
+    environment:
+      OUT_DIR: ${OUT_DIR:-${WORKSPACE}/data}
+    command:
+      - bash
+      - -lc
+      - |
+        TS=$$(date +%Y-%m-%d_%H-%M-%S)
+        MAP_FILE="$${OUT_DIR}/map_$${TS}.vtk"
+        TRAJ_FILE="$${OUT_DIR}/trajectory_$${TS}.vtk"
+        mkdir -p "$${OUT_DIR}"
+        echo "Saving ICP map → $${MAP_FILE}"
+        ros2 service call /mapping/save_map \
+          norlab_icp_mapper_ros/srv/SaveMap \
+          "{map_file_name: {data: \"$${MAP_FILE}\"}}"
+        echo "Saving trajectory → $${TRAJ_FILE}"
+        ros2 service call /mapping/save_trajectory \
+          norlab_icp_mapper_ros/srv/SaveTrajectory \
+          "{trajectory_file_name: {data: \"$${TRAJ_FILE}\"}}"
+        echo "Done."
 
   # ── Debug shell ───────────────────────────────────────────────────────────
   bash:

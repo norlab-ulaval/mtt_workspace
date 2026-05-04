@@ -3,6 +3,8 @@
 This directory holds the runtime entry points around the workspace.
 
 Use the demo that matches the machine you are on:
+- `common/`
+  shared runtime YAML config used by the live demos
 - `live_robot/`
   robot-side runtime stack
 - `monitor/`

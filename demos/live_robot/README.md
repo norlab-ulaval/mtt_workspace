@@ -12,6 +12,7 @@ docker compose -f ../../compose.yaml run --rm compile
 ```
 
 `docker compose up` is the default path here. It starts:
+- `zenoh`
 - `robot`
 
 The `robot` service brings up:
@@ -20,18 +21,21 @@ The `robot` service brings up:
 - the sensor stack from `norlab_robot`,
 - and mapping after a short delay.
 
-The default assumes the robot already has its host-side Zenoh router and Foxglove bridge running. That is the current state on the real robot, and it avoids binding conflicts on ports `7447` and `8765`.
-
-If those host services are disabled and you want Compose to own them too:
+Foxglove stays opt-in under `--profile infra`:
 
 ```bash
 docker compose --profile infra up
 ```
 
 That starts:
-- `zenoh`
 - `robot`
 - `foxglove`
+
+If you want RViz from the same stack:
+
+```bash
+docker compose --profile viz up rviz
+```
 
 This replaces the old habit of manually chaining `weekly.sh`, `com.sh`, and startup scripts when you want the regular live stack.
 
@@ -43,10 +47,15 @@ Start the full robot stack:
 docker compose up
 ```
 
-Start the robot-side joystick teleop only when you need it:
+Edit the operator-facing runtime settings here:
 
 ```bash
-docker compose up teleop_robot
+demos/live_robot/config/runtime.env
+demos/common/config/mtt_driver.yaml
+demos/common/config/mtt_control.yaml
+demos/common/config/mtt_path_follower.yaml
+demos/common/config/mtt_repeat_supervisor.yaml
+demos/common/config/wiln.yaml
 ```
 
 Open a shell in the runtime image for debugging:
@@ -57,12 +66,57 @@ docker compose --profile debug run --rm bash
 
 ## Notes
 
-- `teleop_robot` is optional on purpose. The base `robot` service keeps the CAN path and the runtime stack up without assuming a local joystick.
+- joystick teleop now runs directly inside the base `robot` service
+- `teleop_robot` is kept only as a compatibility stub and should not be used as a second teleop stack
 - `docker compose up` does not open Foxglove Studio for you. The bridge is just a websocket server.
+- `rviz` is opt-in so the base robot stack stays lightweight.
+- shared runtime behavior now lives in `../common/config/`
 - Laptop-side monitoring, laptop-side teleop, and laptop-side bagging now live in `../monitor/`.
 - The old scripts under `src/external/norlab_robot/scripts/user_scripts/` are still useful as references, but Compose is now the intended operator-facing entry point.
 - If Compose warns about orphan containers after a service layout change, clean them once with:
 
 ```bash
 docker compose down --remove-orphans
+```
+
+## Teach And Repeat
+
+Start the base robot stack first:
+
+```bash
+docker compose up robot
+```
+
+Start WILN in a second terminal:
+
+```bash
+docker compose --profile wiln up wiln
+```
+
+Fresh route in the same live session:
+
+```bash
+docker compose run --rm wiln_teach_start
+# drive manually
+docker compose run --rm wiln_teach_stop
+docker compose run --rm wiln_replay
+```
+
+Save is optional if you want to reuse the route later:
+
+```bash
+docker compose run --rm wiln_save
+```
+
+Replay an existing saved route:
+
+```bash
+docker compose run --rm wiln_load
+docker compose run --rm wiln_replay
+```
+
+Diagnostics:
+
+```bash
+docker compose run --rm wiln_status
 ```

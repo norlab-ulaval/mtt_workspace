@@ -13,18 +13,26 @@ x-live-robot-base: &live_robot_base
   extends:
     file: ../../docker/common.yaml
     service: ros_runtime_base
+  env_file:
+    - ./config/runtime.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
   privileged: true
   environment:
     ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
-    RMW_IMPLEMENTATION: rmw_zenoh_cpp
+    RMW_IMPLEMENTATION: ${MTT_RMW_IMPLEMENTATION:-rmw_zenoh_cpp}
     ROBOT_NAME: ${ROBOT_NAME:-mtt-hl}
     NORLAB_ROBOT_PATH: ${WORKSPACE}/src/external/norlab_robot
     ZENOH_ROUTER_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_router.json5
     ZENOH_SESSION_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
     RMW_ZENOH_CONFIG_FILE: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
     RUST_LOG: ${ZENOH_RUST_LOG:-zenoh=info,zenoh_transport=warn}
+    DRIVER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_driver.yaml
+    HEALTH_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_health_monitor.yaml
+    CONTROL_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_control.yaml
+    FOLLOWER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_path_follower.yaml
+    SUPERVISOR_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml
+    WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
   volumes:
     - /dev:/dev
     - /run/udev:/run/udev:ro
@@ -43,7 +51,8 @@ services:
 
   zenoh:
     <<: [*live_robot_base]
-    profiles: ["infra"]
+    # No profile → starts automatically with dc up.
+    # The robot service depends on it so the router is up before ROS nodes connect.
     command:
       - bash
       - -c
@@ -55,21 +64,45 @@ services:
   robot:
     <<: [*live_robot_base]
     privileged: true
+    depends_on:
+      zenoh:
+        condition: service_started
     volumes:
       - /dev:/dev
+      - /dev/input:/dev/input
       - /run/udev:/run/udev:ro
       - /usr/local/zed/settings:/usr/local/zed/settings:rw
       - /dev/bus/usb:/dev/bus/usb
     command:
-      - ros2
-      - launch
-      - norlab_robot
-      - live_robot.launch.py
-      - warnings:=false
-      - enable_mapping:=true
-      - enable_teleop:=false
-      - enable_joystick:=false
-      - setup_real_can:=true
+      - bash
+      - -lc
+      - |
+        echo "Runtime config → demos/live_robot/config/runtime.env + demos/common/config/"
+        echo "  env:          ${WORKSPACE}/demos/live_robot/config/runtime.env"
+        echo "  driver:       $${DRIVER_PARAMS_FILE}"
+        echo "  health:       $${HEALTH_PARAMS_FILE}"
+        echo "  control:      $${CONTROL_PARAMS_FILE}"
+        echo "  teleop=$${ENABLE_TELEOP} joystick=$${ENABLE_JOYSTICK} joy_device=$${JOYSTICK_DEVICE}"
+        exec ros2 launch norlab_robot live_robot.launch.py \
+          warnings:=false \
+          enable_mapping:=$${ENABLE_MAPPING} \
+          enable_sensors:=$${ENABLE_SENSORS} \
+          enable_perception:=$${ENABLE_PERCEPTION} \
+          enable_teleop:=$${ENABLE_TELEOP} \
+          enable_joystick:=$${ENABLE_JOYSTICK} \
+          setup_real_can:=true \
+          gps_mode:=$${GPS_MODE} \
+          gps_antennas:=$${GPS_ANTENNAS} \
+          driver_params_file:=$${DRIVER_PARAMS_FILE} \
+          health_params_file:=$${HEALTH_PARAMS_FILE} \
+          control_params_file:=$${CONTROL_PARAMS_FILE} \
+          mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
+          mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
+          mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
+          mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
+          joy_device:=$${JOYSTICK_DEVICE} \
+          joy_deadzone:=$${JOYSTICK_DEADZONE}
 
   foxglove:
     <<: [*live_robot_base]
@@ -90,20 +123,175 @@ services:
           --ros-args --params-file \
           ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml
 
+  rviz:
+    <<: [*live_robot_base]
+    profiles: ["viz"]
+    depends_on:
+      - robot
+    command:
+      - ros2
+      - launch
+      - mtt_bringup
+      - mtt_rviz.launch.py
+      - use_sim_time:=false
+      - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
+
   teleop_robot:
     <<: [*live_robot_base]
     profiles: ["manual"]
     depends_on:
       - robot
-    volumes:
-      - /dev:/dev
-      - /run/udev:/run/udev:ro
-      - /dev/input:/dev/input  # joystick devices
+    command:
+      - bash
+      - -lc
+      - |
+        echo "teleop_robot is now a compatibility stub."
+        echo "Joystick teleop already runs inside the base robot service."
+        echo "Edit demos/live_robot/config/runtime.env and demos/common/config/mtt_control.yaml to change joystick behavior."
+
+  wiln:
+    <<: [*live_robot_base]
+    profiles: ["wiln"]
+    depends_on:
+      - robot
+    environment:
+      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /mapping/icp_odom..."
+        for i in $$(seq 1 30); do
+          ros2 topic info /mapping/icp_odom >/dev/null 2>&1 && break
+          sleep 1
+        done
+        echo "ICP ready — starting teach/repeat stack"
+        echo ""
+        echo "  Fresh route:"
+        echo "    dc run --rm wiln_teach_start     — start teaching"
+        echo "    ... drive manually ..."
+        echo "    dc run --rm wiln_teach_stop      — stop teaching, route armed in memory"
+        echo "    dc run --rm wiln_replay          — replay immediately (same session)"
+        echo "    dc run --rm wiln_save            — optional, save to $${WILN_LTR_DIR}/route.ltr"
+        echo ""
+        echo "  Existing route:"
+        echo "    dc run --rm wiln_load            — load from $${WILN_LTR_DIR}/route.ltr"
+        echo "    dc run --rm wiln_replay          — replay loaded route"
+        echo ""
+        echo "  Diagnostics:"
+        echo "    dc run --rm wiln_status"
+        echo "    dc run --rm wiln_replay_stop"
+        echo ""
+        echo "  WILN cfg:           $${WILN_PARAMS_FILE}"
+        echo "  Follower cfg:       $${FOLLOWER_PARAMS_FILE}"
+        echo "  Supervisor cfg:     $${SUPERVISOR_PARAMS_FILE}"
+        echo ""
+        exec ros2 launch norlab_robot teach_repeat.launch.py \
+          use_sim_time:=false \
+          wiln_params_file:=$${WILN_PARAMS_FILE} \
+          follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
+          supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE}
+
+  wiln_teach_start:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
     command:
       - ros2
-      - launch
-      - mtt_driver
-      - mtt_operator_teleop.launch.py
-      - joy_device:=/dev/input/js0
-      - max_linear_speed:=0.6    # m/s  — full stick = this speed
-      - max_angular_speed:=0.6   # rad/s — full stick = this angular rate
+      - service
+      - call
+      - /mtt_repeat/teach_start
+      - std_srvs/srv/Trigger
+      - "{}"
+
+  wiln_teach_stop:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_repeat/teach_stop
+      - std_srvs/srv/Trigger
+      - "{}"
+
+  wiln_save:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /save_map_traj wiln/srv/SaveMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
+
+  wiln_load:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /load_map_traj wiln/srv/LoadMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
+        ros2 service call /mtt_repeat/mark_ready std_srvs/srv/Trigger "{}"
+
+  wiln_replay:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_repeat/play_line
+      - std_srvs/srv/Trigger
+      - "{}"
+
+  wiln_replay_stop:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_repeat/cancel
+      - std_srvs/srv/Trigger
+      - "{}"
+
+  wiln_replay_loop:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      N: ${N:-1}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /mtt_repeat/play_loop wiln/srv/PlayLoop "{nb_loops: {data: $${N}}}"
+
+  wiln_status:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - bash
+      - -lc
+      - |
+        echo "WILN native services:"
+        for svc in /start_recording /stop_recording /play_line /cancel_trajectory /save_map_traj /load_map_traj /play_loop; do
+          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+        done
+        echo ""
+        echo "Supervisor services:"
+        for svc in /mtt_repeat/teach_start /mtt_repeat/teach_stop /mtt_repeat/play_line /mtt_repeat/play_loop /mtt_repeat/cancel /mtt_repeat/mark_ready; do
+          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+        done
+        echo ""
+        echo "Topics / action:"
+        for topic in /mapping/icp_odom /mtt_health /mtt_repeat/state /mtt_repeat/ready /cmd_vel/manual /controller/cmd_vel /mtt_control/selected_source; do
+          ros2 topic list 2>/dev/null | grep -qx "$$topic" && echo "  ✓ $$topic" || echo "  ✗ $$topic"
+        done
+        echo ""
+        echo "Latched repeat state:"
+        timeout 2s ros2 topic echo --once /mtt_repeat/state 2>/dev/null || echo "  /mtt_repeat/state unavailable"
+        timeout 2s ros2 topic echo --once /mtt_repeat/ready 2>/dev/null || echo "  /mtt_repeat/ready unavailable"

@@ -1,4 +1,6 @@
-# mtt_workspace
+# MTT_workspace
+
+![MTT Robot](./mtt.jpg)
 
 ROS 2 Jazzy workspace for the MTT platform.
 
@@ -13,6 +15,33 @@ The actual ROS code is split into nested repositories:
   External dependencies imported with `vcstool`.
 - `src/external/norlab_robot`
   Runtime integration layer for the real robot.
+
+## Runtime command architecture
+
+The intended live control architecture is:
+
+```text
+joy               -> cmd_vel/manual_raw -> cmd_vel/manual
+autonomy intent   -> controller/cmd_vel
+mode + arbiter    -> mtt_cmd_arbiter_node
+final robot cmd   -> cmd_vel
+driver consumer   -> mtt_can_node
+```
+
+The important rule is simple:
+- only `mtt_cmd_arbiter_node` should publish the final `cmd_vel`
+- only `mtt_can_node` should consume the final `cmd_vel` for drive commands
+
+For field tuning, do not edit package YAML files first. Use:
+- `demos/common/config/mtt_driver.yaml`
+- `demos/common/config/mtt_control.yaml`
+- `demos/common/config/mtt_path_follower.yaml`
+- `demos/common/config/mtt_repeat_supervisor.yaml`
+- `demos/common/config/wiln.yaml`
+- `demos/data_collection/config/runtime.env`
+- `demos/live_robot/config/runtime.env`
+
+The shared YAML files under `demos/common/config/` own runtime behavior. The per-demo `runtime.env` files only own launch toggles and hardware-side switches.
 
 ## Repository layout
 
