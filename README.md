@@ -1,49 +1,19 @@
-# MTT_workspace
+# MTT workspace
+
+ROS 2 Jazzy workspace for the MTT robot.
 
 ![MTT Robot](./mtt.jpg)
 
-ROS 2 Jazzy workspace for the MTT platform.
+This repository is the workspace shell around the robot software. It owns:
+- Docker images and Compose entry points
+- dependency manifests
+- demo configurations
+- helper scripts
+- workspace-level documentation
 
-This repository is the workspace shell around the robot software. It owns the Docker files, the dependency manifests, the helper scripts, the demos, and the project documentation.
+The ROS packages themselves are split across nested repositories under `src/`.
 
-It does not contain the whole robot source tree by itself.
-
-The actual ROS code is split into nested repositories:
-- `src/mtt_core`
-  MTT-owned packages such as the driver, description, bringup, interfaces, and messages.
-- `src/external/*`
-  External dependencies imported with `vcstool`.
-- `src/external/norlab_robot`
-  Runtime integration layer for the real robot.
-
-## Runtime command architecture
-
-The intended live control architecture is:
-
-```text
-joy               -> cmd_vel/manual_raw -> cmd_vel/manual
-autonomy intent   -> controller/cmd_vel
-mode + arbiter    -> mtt_cmd_arbiter_node
-final robot cmd   -> cmd_vel
-driver consumer   -> mtt_can_node
-```
-
-The important rule is simple:
-- only `mtt_cmd_arbiter_node` should publish the final `cmd_vel`
-- only `mtt_can_node` should consume the final `cmd_vel` for drive commands
-
-For field tuning, do not edit package YAML files first. Use:
-- `demos/common/config/mtt_driver.yaml`
-- `demos/common/config/mtt_control.yaml`
-- `demos/common/config/mtt_path_follower.yaml`
-- `demos/common/config/mtt_repeat_supervisor.yaml`
-- `demos/common/config/wiln.yaml`
-- `demos/data_collection/config/runtime.env`
-- `demos/live_robot/config/runtime.env`
-
-The shared YAML files under `demos/common/config/` own runtime behavior. The per-demo `runtime.env` files only own launch toggles and hardware-side switches.
-
-## Repository layout
+## What is in this workspace
 
 ```text
 mtt_workspace/
@@ -57,38 +27,80 @@ mtt_workspace/
   doc/
   documentations/
   scripts/
-  data/
 ```
 
-## What lives where
-
-- `mtt_workspace`
-  Workspace infrastructure, manifests, docs, and local workflows.
 - `src/mtt_core`
-  MTT-specific ROS packages.
+  MTT-owned ROS packages: driver, control, description, bringup, messages, interfaces.
 - `src/external`
-  Imported dependencies that stay outside the parent git history.
+  Imported dependencies and runtime overlays.
 - `src/external/norlab_robot`
-  Robot runtime overlay: sensors, startup, mapping, recording, Foxglove, and related runtime glue.
+  Robot runtime integration: sensors, mapping, recording, Foxglove, teach-and-repeat.
 - `dependencies/robot.repos`
-  Source of truth for the observed full workspace composition.
+  Source of truth for the imported repositories expected in this workspace.
 
-## Quick start
+## Before you start
 
-Requirements:
-- ROS 2 Jazzy installed on the host
+Host requirements:
+- Ubuntu with Docker installed and working
+- ROS 2 Jazzy available on the host if you want to build outside Docker
 - `vcstool` installed as `vcs`
 - access to the private repositories listed in `dependencies/robot.repos`
 
-### Bootstrap the workspace
+Typical host setup:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3-vcstool
+```
+
+Typical Docker setup:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y docker.io docker-compose-plugin
+sudo usermod -aG docker "$USER"
+newgrp docker
+```
+
+## Bootstrap
+
+Create the local environment files and bind-mount directories:
+
+```bash
+./scripts/create_env
+```
+
+Import the nested repositories:
 
 ```bash
 ./scripts/create_ws
 ```
 
-That imports `src/mtt_core` and the external repositories declared in `dependencies/robot.repos`.
+Check the result:
 
-### Build on the host
+```bash
+./scripts/status
+```
+
+## Build
+
+### Docker build
+
+This is the standard path for this workspace.
+
+```bash
+docker compose -f compose.yaml run --rm compile
+```
+
+Open a shell in the runtime image:
+
+```bash
+docker compose -f compose.yaml run --rm bash
+```
+
+### Host build
+
+Use this only if you really want a host-side build.
 
 ```bash
 source /opt/ros/jazzy/setup.bash
@@ -96,50 +108,75 @@ colcon build --base-paths src/mtt_core src/external --symlink-install
 source install/setup.bash
 ```
 
-### Build in Docker
+## Runtime model
 
-```bash
-./scripts/create_env
-docker compose -f docker/build.yaml build devel
-docker compose run --rm compile
-docker compose run --rm bash
+The live stack is assembled from demo-owned configuration. Runtime tuning should happen in the demo YAML files first, not in package defaults under `src/**/config`.
+
+Current runtime ownership:
+- `demos/common/config/`
+  shared runtime tuning
+- `demos/data_collection/config/`
+  data collection demo settings
+- `demos/live_robot/config/`
+  live robot demo settings
+- `demos/bag_replay/`
+  offline replay and reconstruction
+
+The control path is intended to stay simple:
+
+```text
+manual intent   -> cmd_vel/manual_raw -> cmd_vel/manual
+auto intent     -> controller/cmd_vel
+arbiter         -> cmd_vel
+driver          -> mtt_can_node
 ```
 
-## Important workflows
+Only the final arbiter should publish the final `cmd_vel`.
 
-- `./scripts/create_env`
-  Creates `.env` and local bind-mount directories used by Docker and demos.
-- `./scripts/create_ws`
-  Imports `mtt_core` and the declared external repositories.
-- `./scripts/status`
-  Shows the state of the parent repo, `src/mtt_core`, and imported repos under `src/external`.
-- `./scripts/pull`
-  Pulls the parent repo, `src/mtt_core`, and the imported external repos.
-- `./scripts/autosync_ws`
-  Syncs the local workspace to a robot target with `rsync`.
+## Main demos
 
-## Demos
+Start from [demos/README.md](./demos/README.md).
 
-The repository includes two distinct live-runtime entry points in `demos/`:
+Most common entry points:
 - `demos/live_robot`
-  robot-side runtime stack started with Compose
+  robot-side live runtime
+- `demos/data_collection`
+  robot-side recording workflow
 - `demos/monitor`
-  laptop-side operator stack for monitoring, teleop, and recording
+  laptop-side monitoring and operator tools
+- `demos/bag_replay`
+  offline replay and reconstruction
 
-It also includes:
-- description and RViz checks,
-- simulation launch wrappers.
+## Useful workspace commands
 
-See [`demos/README.md`](./demos/README.md) for the Compose entry points.
+```bash
+./scripts/status
+./scripts/pull
+./scripts/autosync_ws
+```
 
-## Known limits
+- `status`
+  shows the parent repo and the nested repos together
+- `pull`
+  updates the parent repo and nested repos
+- `autosync_ws`
+  pushes the workspace to a robot target with `rsync`
 
-- The parent repo is not the full robot runtime by itself.
-- `dependencies/robot.repos` reflects the observed workspace, but runtime truth still depends on what is actually present on the robot.
-- OAK support is still not closed.
-- Foxglove default policy still needs a final runtime decision in `norlab_robot`.
-- CAN truth and steering truth still require robot-side validation.
+Because this workspace uses nested repositories, root-level `git status` is not enough to decide whether the workspace is clean.
 
-## Practical note
+## Documentation layout
 
-Because the workspace is built from nested repositories, a plain `git status` at the root is not enough. Use `./scripts/status` before assuming the workspace is clean.
+- `doc/`
+  workspace notes, setup notes, and operator-facing material
+- `documentations/`
+  technical references, architecture notes, DBC files, and vendor material
+
+Start with:
+- [doc/README.md](./doc/README.md)
+- [documentations/README.md](./documentations/README.md)
+
+## Notes
+
+- Do not treat package default YAML files under `src/` as the normal operator surface.
+- Do not assume the parent repo alone describes the full runtime. `norlab_robot` still owns a large part of the live assembly.
+- If something works in one demo and not another, compare the demo-owned config first before changing package code.

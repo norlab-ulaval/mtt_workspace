@@ -1,9 +1,22 @@
 # doc
 
-Architecture notes, design decisions, and operator-facing documentation belong here.
+This directory is for workspace notes that are useful to an engineer running or maintaining the robot.
 
-Large PDFs and raw field material should stay outside git unless they are genuinely part of the repository history.
+Keep this folder for:
+- setup notes
+- workspace structure notes
+- operator-facing checks
+- short practical references
 
-Quick command snippets that used to live in the repository root now live in [dev_commands.md](./dev_commands.md).
+Do not use this folder for:
+- vendor manuals
+- raw exported artifacts
+- private working notes
+- investigation notes written only for one cleanup pass
 
-The current runtime and sensor-layer audit lives in [runtime_sensor_audit.md](./runtime_sensor_audit.md).
+Use these files as entry points:
+- [workspace_architecture.md](./workspace_architecture.md)
+- [runtime_sensor_audit.md](./runtime_sensor_audit.md)
+- [dev_commands.md](./dev_commands.md)
+
+If a document is mainly a technical reference or a long-lived spec, it belongs in `documentations/`.
