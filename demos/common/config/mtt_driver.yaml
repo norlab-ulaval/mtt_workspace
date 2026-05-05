@@ -18,6 +18,18 @@ mtt_can_node:
     model_yaw_slip_speed_gain: 0.05
     model_yaw_slip_articulation_gain: 0.15
     model_yaw_slip_min_scale: 0.55
+    hold_assist_enabled: true
+    hold_assist_entry_speed_ms: 0.03
+    hold_assist_release_speed_ms: 0.015
+    hold_assist_exit_command_ms: 0.08
+    hold_assist_kp: 1.2
+    hold_assist_ki: 0.8
+    hold_assist_integrator_limit: 0.25
+    hold_assist_output_limit: 0.35
+    hold_assist_deadband_compensation: 0.12
+    hold_assist_dither_enabled: false
+    hold_assist_dither_amplitude: 0.02
+    hold_assist_dither_frequency_hz: 6.0
     publish_can_debug: false
     can_debug_topic: mtt_can/debug_frames
 

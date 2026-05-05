@@ -72,7 +72,7 @@ services:
           --clock \
           --rate ${REPLAY_RATE:-1.0} \
           --storage mcap \
-          --exclude-topics /robot_description /joint_states /runtime_joint_states \
+          --exclude-topics /robot_description /joint_states /runtime_joint_states /tf /tf_static \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
@@ -120,7 +120,7 @@ services:
       - -p
       - runtime_joint_states_topic:=joint_states
       - -p
-      - broadcast_tf:=false
+      - broadcast_tf:=true
       - -p
       - cmd_vel_topic:=cmd_vel
       - -r

@@ -87,6 +87,8 @@ python3 ./scripts/audit_bag_topics.py /path/to/session/session.mcap --show-ok
 - `use_sim_time` is handled by the replay-side launch paths.
 - `joint_state_converter` rebuilds `joint_states` from recorded tachometer and
   `cmd_vel` so the current URDF still animates on older bags.
+- replay excludes recorded `/tf`, `/tf_static`, and recorded joint-state topics
+  by default so the current URDF and replay-side odometry remain the only body-state owners
 - the replay-side driver, localization, perception, and RViz now all consume bag time
 - live bags do not need to record `/clock`; replay synthesizes it via `ros2 bag play --clock`
 - If the bag comes from `demos/data_collection`, the session metadata is printed at startup.

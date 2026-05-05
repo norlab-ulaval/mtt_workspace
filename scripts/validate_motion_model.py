@@ -29,6 +29,7 @@ TOPICS = {
     "/cmd_vel",
     "/cmd_vel/teleop",
     "/controller/cmd_vel",
+    "/mtt_status",
     "/mtt_tachometer",
     "/mtt_odometry",
     "/mtt_articulation_angle",
@@ -95,6 +96,24 @@ def extract_sample(topic: str, msg, bag_time_s: float) -> dict[str, float | str 
             "tachometer_source": str(msg.tachometer_source),
         }
 
+    if topic == "/mtt_status":
+        t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
+        return {
+            "t": t,
+            "speed_ms": float(msg.speed_ms),
+            "steer_normalized": float(msg.steer_normalized),
+            "throttle_raw": int(msg.throttle_raw),
+            "brake_raw": int(msg.brake_raw),
+            "command_linear_speed_ms": float(msg.command_linear_speed_ms),
+            "effective_linear_speed_command_ms": float(msg.effective_linear_speed_command_ms),
+            "hold_assist_active": bool(msg.hold_assist_active),
+            "hold_assist_mode": str(msg.hold_assist_mode),
+            "hold_assist_output_ms": float(msg.hold_assist_output_ms),
+            "command_timeout_active": bool(msg.command_timeout_active),
+            "tachometer_is_synthetic": bool(msg.tachometer_is_synthetic),
+            "tachometer_source": str(msg.tachometer_source),
+        }
+
     if topic in {"/mtt_odometry", "/mapping/icp_odom"}:
         t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
         return {
@@ -130,11 +149,25 @@ def read_topic_samples(bag_dir: Path) -> dict[str, list[dict[str, float | str | 
     reader.set_filter(rosbag2_py.StorageFilter(topics=selected_topics))
     msg_types = {topic: get_message(type_map[topic]) for topic in selected_topics}
     samples = {topic: [] for topic in selected_topics}
+    skipped_topics: set[str] = set()
 
     while reader.has_next():
         topic, data, timestamp_ns = reader.read_next()
-        msg = deserialize_message(data, msg_types[topic])
-        samples[topic].append(extract_sample(topic, msg, timestamp_ns / 1e9))
+        if topic in skipped_topics:
+            continue
+        try:
+            msg = deserialize_message(data, msg_types[topic])
+            samples[topic].append(extract_sample(topic, msg, timestamp_ns / 1e9))
+        except Exception as exc:
+            if topic == "/mtt_status":
+                print(
+                    f"warning: skipping {topic} due to message/schema mismatch: {exc}",
+                    file=sys.stderr,
+                )
+                skipped_topics.add(topic)
+                samples.pop(topic, None)
+                continue
+            raise
 
     return samples
 
@@ -208,6 +241,7 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
     teleop_series = TimeSeries(samples.get("/cmd_vel/teleop", []))
     controller_series = TimeSeries(samples.get("/controller/cmd_vel", []))
     articulation_series = TimeSeries(samples.get("/mtt_articulation_angle", []))
+    status_series = TimeSeries(samples.get("/mtt_status", []))
     reference_samples = odom_samples or samples.get("/mtt_tachometer", [])
     if not reference_samples:
         raise SystemExit("Neither /mtt_odometry nor /mtt_tachometer is available for validation.")
@@ -221,6 +255,7 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
         controller_sample = controller_series.nearest(t, 0.1)
         icp_sample = icp_series.nearest(t, 0.2)
         articulation_sample = articulation_series.nearest(t, 0.1)
+        status_sample = status_series.nearest(t, 0.1)
         odom_sample = reference_sample if odom_samples else None
 
         row: dict[str, float | str | bool | None] = {
@@ -242,6 +277,24 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
             "controller_linear_x": float(controller_sample["linear_x"]) if controller_sample else None,
             "controller_angular_z": float(controller_sample["angular_z"]) if controller_sample else None,
             "articulation_rad": float(articulation_sample["articulation_rad"]) if articulation_sample else None,
+            "status_speed_ms": float(status_sample["speed_ms"]) if status_sample else None,
+            "status_steer_normalized": float(status_sample["steer_normalized"]) if status_sample else None,
+            "status_throttle_raw": int(status_sample["throttle_raw"]) if status_sample else None,
+            "status_brake_raw": int(status_sample["brake_raw"]) if status_sample else None,
+            "status_command_linear_speed_ms": (
+                float(status_sample["command_linear_speed_ms"]) if status_sample else None
+            ),
+            "status_effective_linear_speed_command_ms": (
+                float(status_sample["effective_linear_speed_command_ms"]) if status_sample else None
+            ),
+            "status_hold_assist_active": bool(status_sample["hold_assist_active"]) if status_sample else None,
+            "status_hold_assist_mode": str(status_sample["hold_assist_mode"]) if status_sample else None,
+            "status_hold_assist_output_ms": (
+                float(status_sample["hold_assist_output_ms"]) if status_sample else None
+            ),
+            "status_command_timeout_active": (
+                bool(status_sample["command_timeout_active"]) if status_sample else None
+            ),
             "tach_speed_ms": float(tacho_sample["speed_ms"]) if tacho_sample else None,
             "tach_model_speed_ms": float(tacho_sample["model_speed_ms"]) if tacho_sample else None,
             "tach_direction": str(tacho_sample["direction"]) if tacho_sample else None,
@@ -265,10 +318,19 @@ def compute_summary(rows: list[dict[str, float | str | bool | None]], session_di
     sign_total = 0
     sign_matches = 0
     synthetic_rows = 0
+    hold_assist_rows = 0
+    max_hold_assist_output_ms = 0.0
 
     for row in rows:
         if row["tachometer_is_synthetic"]:
             synthetic_rows += 1
+        if row["status_hold_assist_active"]:
+            hold_assist_rows += 1
+        if row["status_hold_assist_output_ms"] is not None:
+            max_hold_assist_output_ms = max(
+                max_hold_assist_output_ms,
+                abs(float(row["status_hold_assist_output_ms"])),
+            )
         if row["icp_linear_x"] is not None and row["odom_linear_x"] is not None:
             speed_pred.append(float(row["odom_linear_x"]))
             speed_ref.append(float(row["icp_linear_x"]))
@@ -302,6 +364,8 @@ def compute_summary(rows: list[dict[str, float | str | bool | None]], session_di
         "duration_s": max(0.0, end_t - start_t),
         "row_count": len(rows),
         "synthetic_ratio": (synthetic_rows / len(rows)) if rows else 0.0,
+        "hold_assist_ratio": (hold_assist_rows / len(rows)) if rows else 0.0,
+        "max_hold_assist_output_ms": max_hold_assist_output_ms if rows else None,
         "speed_rmse_ms": rmse(speed_pred, speed_ref),
         "yaw_rate_rmse_rad_s": rmse(yaw_pred, yaw_ref),
         "sign_agreement": (sign_matches / sign_total) if sign_total else None,
