@@ -72,6 +72,7 @@ services:
           --clock \
           --rate ${REPLAY_RATE:-1.0} \
           --storage mcap \
+          --exclude-topics /robot_description /joint_states /runtime_joint_states \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
@@ -93,15 +94,39 @@ services:
     command:
       - ros2
       - launch
-      - norlab_robot
-      - live_robot.launch.py
-      - enable_description:=true
-      - enable_sensors:=false
-      - enable_mapping:=false
-      - enable_perception:=false
-      - enable_localization:=false
-      - setup_real_can:=false
+      - ${WORKSPACE}/src/external/norlab_robot/launch/include/description.launch.py
+      - use_joint_state_publisher:=false
       - use_sim_time:=true
+
+  # ── Joint state reconstruction from recorded tachometer / cmd_vel ───────
+  # Older bags do not always carry usable joint_states. Replay a runtime
+  # odometry node against the recorded tachometer and cmd_vel stream so the
+  # current URDF still animates correctly in Foxglove and RViz.
+  joint_state_converter:
+    <<: [*replay_base]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - ros2
+      - run
+      - mtt_driver
+      - mtt_odometry_node_exe
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - publish_runtime_joint_states:=true
+      - -p
+      - runtime_joint_states_topic:=joint_states
+      - -p
+      - broadcast_tf:=false
+      - -p
+      - cmd_vel_topic:=cmd_vel
+      - -r
+      - mtt_odometry:=mtt_odometry/runtime
+      - -r
+      - mtt_articulation_angle:=mtt_articulation_angle/runtime
 
   # ── Factor Graph localization in replay mode ──────────────────────────────
   # Fuses all recorded sensor topics.
