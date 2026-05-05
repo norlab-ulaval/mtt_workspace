@@ -90,6 +90,7 @@ python3 ./scripts/audit_bag_topics.py /path/to/session/session.mcap --show-ok
 - the replay-side articulation mapping is configured directly in `compose.yaml`
   with `runtime_joint_pitch_rad`, `runtime_joint_roll_rad`, `runtime_joint_articulation_sign`,
   and `runtime_joint_articulation_offset_rad`
+- with the current MTT URDF, replay uses `runtime_joint_pitch_rad = pi/2` so the trailer chain lies on the ground instead of standing upright
 - replay excludes recorded `/tf`, `/tf_static`, and recorded joint-state topics
   by default so the current URDF and replay-side odometry remain the only body-state owners
 - the replay-side driver, localization, perception, and RViz now all consume bag time
