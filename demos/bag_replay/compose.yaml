@@ -122,6 +122,14 @@ services:
       - -p
       - broadcast_tf:=true
       - -p
+      - runtime_joint_pitch_rad:=0.0
+      - -p
+      - runtime_joint_roll_rad:=0.0
+      - -p
+      - runtime_joint_articulation_sign:=1.0
+      - -p
+      - runtime_joint_articulation_offset_rad:=0.0
+      - -p
       - cmd_vel_topic:=cmd_vel
       - -r
       - mtt_odometry:=mtt_odometry/runtime
