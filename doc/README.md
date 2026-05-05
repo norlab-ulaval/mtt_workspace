@@ -13,6 +13,7 @@ Do not use this folder for:
 - raw exported artifacts
 - private working notes
 - investigation notes written only for one cleanup pass
+- temporary scratch documents or handoff files that are not meant to ship
 
 Use these files as entry points:
 - [workspace_architecture.md](./workspace_architecture.md)
