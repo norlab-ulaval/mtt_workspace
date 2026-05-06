@@ -346,6 +346,7 @@ def run_pipeline(
                 "enable_perception:=false",
                 "enable_localization:=false",
                 "setup_real_can:=false",
+                "publish_runtime_joint_states:=false",
                 "use_sim_time:=true",
             ],
             log_dir / f"description_{pipeline.mode}.log",
