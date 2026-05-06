@@ -70,3 +70,71 @@ services:
       - --ros-args
       - --params-file
       - ${WORKSPACE}/docker/foxglove_bridge.yaml
+
+  foxglove:
+    extends:
+      service: monitor
+
+  simulation:
+    extends:
+      file: docker/common.yaml
+      service: x11_base
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
+    build: *mtt_devel_build
+    tty: true
+    stdin_open: true
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+        source ${WORKSPACE}/install/local_setup.bash
+        ros2 launch mtt_bringup mtt_simulation.launch.py \
+          use_rviz:=${SIM_USE_RVIZ:-false} \
+          headless:=${SIM_HEADLESS:-true} \
+          enable_operator_control:=${SIM_ENABLE_OPERATOR_CONTROL:-false} \
+          enable_joystick:=${SIM_ENABLE_JOYSTICK:-false} \
+          joy_device:=${SIM_JOY_DEVICE:-/dev/input/js0}
+
+  simulation_rviz:
+    extends:
+      file: docker/common.yaml
+      service: x11_base
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
+    build: *mtt_devel_build
+    tty: true
+    stdin_open: true
+    depends_on:
+      - simulation
+    command:
+      - bash
+      - -lc
+      - |
+        sleep 3
+        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+        source ${WORKSPACE}/install/local_setup.bash
+        ros2 launch mtt_bringup mtt_rviz.launch.py \
+          use_sim_time:=true \
+          rviz_config:=${SIM_RVIZ_CONFIG:-${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz}
+
+  simulation_control:
+    extends:
+      file: docker/common.yaml
+      service: x11_base
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
+    build: *mtt_devel_build
+    tty: true
+    stdin_open: true
+    depends_on:
+      - simulation
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
+        source ${WORKSPACE}/install/local_setup.bash
+        ros2 launch mtt_control operator_control.launch.py \
+          use_sim_time:=true \
+          enable_joystick:=${SIM_CONTROL_ENABLE_JOYSTICK:-true} \
+          joy_device:=${SIM_JOY_DEVICE:-/dev/input/js0} \
+          joy_deadzone:=${SIM_JOY_DEADZONE:-0.15}
