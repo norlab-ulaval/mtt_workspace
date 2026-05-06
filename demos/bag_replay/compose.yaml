@@ -98,11 +98,11 @@ services:
       - use_joint_state_publisher:=false
       - use_sim_time:=true
 
-  # ── Joint state reconstruction from recorded tachometer / cmd_vel ───────
-  # Older bags do not always carry usable joint_states. Replay a runtime
-  # odometry node against the recorded tachometer and cmd_vel stream so the
-  # current URDF still animates correctly in Foxglove and RViz.
-  joint_state_converter:
+  # ── Runtime odometry rebuild for replay ──────────────────────────────────
+  # Older bags do not always carry a usable articulated body state for the
+  # current URDF. Re-run the current odometry node on top of the recorded
+  # tachometer/cmd_vel stream, but keep its outputs on replay-local topics.
+  runtime_odometry:
     <<: [*replay_base]
     depends_on:
       bag_player:
@@ -116,25 +116,36 @@ services:
       - -p
       - use_sim_time:=true
       - -p
-      - publish_runtime_joint_states:=true
-      - -p
-      - runtime_joint_states_topic:=joint_states
-      - -p
       - broadcast_tf:=true
-      - -p
-      - runtime_joint_pitch_rad:=-1.5707963267948966
-      - -p
-      - runtime_joint_roll_rad:=-1.5707963267948966
-      - -p
-      - runtime_joint_articulation_sign:=1.0
-      - -p
-      - runtime_joint_articulation_offset_rad:=1.5707963267948966
       - -p
       - cmd_vel_topic:=cmd_vel
       - -r
       - mtt_odometry:=mtt_odometry/runtime
       - -r
       - mtt_articulation_angle:=mtt_articulation_angle/runtime
+
+  # ── Joint-state reconstruction from replay-local articulation + tachometer ─
+  # One shared builder owns the articulated visualization in replay and in
+  # simulation. The bag keeps sensors and odometry, but not body TF/joint state.
+  joint_state_builder:
+    <<: [*replay_base]
+    depends_on:
+      runtime_odometry:
+        condition: service_started
+    command:
+      - ros2
+      - run
+      - mtt_driver
+      - mtt_joint_state_builder_node_exe
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - joint_state_topic:=joint_states
+      - -p
+      - articulation_topic:=mtt_articulation_angle/runtime
+      - -p
+      - tachometer_topic:=mtt_tachometer
 
   # ── Factor Graph localization in replay mode ──────────────────────────────
   # Fuses all recorded sensor topics.

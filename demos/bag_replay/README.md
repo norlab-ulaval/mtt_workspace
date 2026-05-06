@@ -20,7 +20,8 @@ Or use the helper from the workspace root:
 That starts:
 - `bag_player`
 - `description`
-- `joint_state_converter`
+- `runtime_odometry`
+- `joint_state_builder`
 - `foxglove`
 - `rviz` can be started separately if you want the same calibrated robot model there too
 
@@ -85,14 +86,12 @@ python3 ./scripts/audit_bag_topics.py /path/to/session/session.mcap --show-ok
 ## Notes
 
 - `use_sim_time` is handled by the replay-side launch paths.
-- `joint_state_converter` rebuilds `joint_states` from recorded tachometer and
-  `cmd_vel` so the current URDF still animates on older bags.
-- the replay-side articulation mapping is configured directly in `compose.yaml`
-  with `runtime_joint_pitch_rad`, `runtime_joint_roll_rad`, `runtime_joint_articulation_sign`,
-  and `runtime_joint_articulation_offset_rad`
-- with the current MTT URDF, replay uses `runtime_joint_pitch_rad = -pi/2` and
-  `runtime_joint_roll_rad = -pi/2`, plus a `runtime_joint_articulation_offset_rad = +pi/2`,
-  so the trailer chain matches the simulation-style rest pose and points toward the detected trailer frame instead of staying rotated by 90 degrees
+- `runtime_odometry` recomputes the current articulation and odometry from the
+  replayed tachometer/cmd stream on replay-local topics.
+- `joint_state_builder` rebuilds the articulated `joint_states` stream from the
+  replay-local articulation plus the tachometer-derived wheel travel so the
+  current URDF animates like the simulation stack, even on older bags that
+  never recorded `/joint_states`.
 - replay excludes recorded `/tf`, `/tf_static`, and recorded joint-state topics
   by default so the current URDF and replay-side odometry remain the only body-state owners
 - the replay-side driver, localization, perception, and RViz now all consume bag time
