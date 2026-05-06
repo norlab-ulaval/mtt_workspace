@@ -53,6 +53,9 @@ For local description or simulation checks:
 ```bash
 docker compose --env-file .env -f demos/description/compose.yaml up description
 docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
+docker compose --env-file .env -f demos/simulation/compose.yaml up rviz
+docker compose --env-file .env -f demos/simulation/compose.yaml up foxglove
+docker compose --env-file .env -f demos/simulation/compose.yaml up control
 ```
 
 Before using a live demo, run `./scripts/status` from the repo root. The parent repo is only one layer of the workspace state.
