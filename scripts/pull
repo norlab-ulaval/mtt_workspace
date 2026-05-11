@@ -24,17 +24,24 @@ if [[ -z "$(find src/external -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head
   exit 0
 fi
 
-# Repos pinned to a tag (e.g. norlab_icp_mapper_ros: 2.1.1,
-# libpointmatcher_ros: 2.0.1) are in detached HEAD — git pull returns 1
-# for them, which would abort the whole script. We let vcs report any
-# real failures but continue regardless.
-vcs pull src/external || true
-
-# Update nested submodules (e.g. HesaiLidar_SDK_2.0 inside HesaiLidar_ROS_2.0).
-# vcs pull only updates the top-level repo; submodules need an explicit sync.
 while IFS= read -r repo_dir; do
+  ! git -C "${repo_dir}" rev-parse --is-inside-work-tree >/dev/null 2>&1 && continue
+  label="src/external/$(basename "${repo_dir}")"
+
+  # Detached HEAD = tag pin; just refresh remote refs silently
+  if ! git -C "${repo_dir}" symbolic-ref HEAD >/dev/null 2>&1; then
+    echo "[pull] ${label}: tag pin, fetching"
+    git -C "${repo_dir}" fetch --quiet
+  # Branch with no upstream tracking → skip with a warning
+  elif ! git -C "${repo_dir}" rev-parse '@{u}' >/dev/null 2>&1; then
+    echo "[pull] ${label}: no upstream tracking branch, skipping" >&2
+  else
+    git -C "${repo_dir}" pull --ff-only
+  fi
+
+  # Update nested submodules (e.g. HesaiLidar_SDK_2.0)
   if [[ -f "${repo_dir}/.gitmodules" ]]; then
-    echo "[pull] updating submodules in ${repo_dir}"
+    echo "[pull] ${label}: updating submodules"
     git -C "${repo_dir}" submodule update --init --recursive
   fi
 done < <(find src/external -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
