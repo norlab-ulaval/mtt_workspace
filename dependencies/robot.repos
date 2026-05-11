@@ -55,7 +55,7 @@ repositories:
 
   src/external/HesaiLidar_ROS_2.0:
     type: git
-    url: git@github.com:norlab-ulaval/HesaiLidar_ROS_2.0.git
+    url: git@github.com:norlab-ulaval/HesaiLidar_ROS.git
     version: jazzy
 
   src/external/rslidar_msg:

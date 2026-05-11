@@ -117,6 +117,52 @@ services:
           joy_device:=$${JOYSTICK_DEVICE} \
           joy_deadzone:=$${JOYSTICK_DEADZONE}
 
+  # ── Localization: Factor Graph + Trailer Localizer ───────────────────────
+  # Runs mtt_localization/localization.launch.py (live, no sim time).
+  # Launches two nodes:
+  #   - factor_graph_node: ISAM2 tractor pose + optimised φ
+  #     Publishes: /localization/odom (SE(3) with 6×6 covariance)
+  #                /localization/articulation_angle (optimised φ, std_msgs/Float64)
+  #   - mtt_trailer_localizer_node: trailer SE(3) pose in map
+  #     Publishes: /trailer/odom, /trailer/pose_in_map, TF map→trailer_body
+  #
+  # Profile "localization" — opt-in because it requires all sensors to be healthy.
+  # Start with:  dc up --profile localization
+  # Or add to your session:  dc run --rm localization
+  #
+  # Waits for /mtt/articulation_state and /mapping/icp_odom before launching
+  # so that factor_graph_node starts with a valid prior.
+  localization:
+    <<: [*dc_base]
+    profiles: ["localization"]
+    depends_on:
+      robot:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "==================================================="
+        echo " MTT Localization (Factor Graph + Trailer)"
+        echo "==================================================="
+        echo "Waiting for /mtt/articulation_state..."
+        for i in $$(seq 1 60); do
+          ros2 topic info /mtt/articulation_state 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 60 ] && echo "  WARNING: /mtt/articulation_state not ready after 60s — launching anyway" && break
+          echo "  ($$i/60) Waiting..."
+          sleep 1
+        done
+        echo "Waiting for /mapping/icp_odom (LiDAR odom prior)..."
+        for i in $$(seq 1 45); do
+          ros2 topic info /mapping/icp_odom 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 45 ] && echo "  WARNING: /mapping/icp_odom not ready after 45s — launching anyway" && break
+          echo "  ($$i/45) Waiting..."
+          sleep 1
+        done
+        echo "Starting localization stack..."
+        exec ros2 launch mtt_localization localization.launch.py \
+          use_sim_time:=false
+
   # ── Sensor health check (runs once, then exits) ───────────────────────────
   # Waits 10s for sensors to settle, checks frequencies for 15s.
   # Exits 0 if all required sensors OK. Record service starts regardless

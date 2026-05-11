@@ -80,6 +80,8 @@ services:
             /trailer/angle /trailer/articulation_angle /trailer/pose \
             /trailer/body_markers /trailer/trailer_roi_cloud \
             /planned_trajectory /real_trajectory /wiln/pose /wiln/markers \
+            /localization/articulation_angle \
+            /trailer/odom /trailer/pose_in_map \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
