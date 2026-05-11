@@ -1,6 +1,7 @@
 services:
   base:
     image: ${MTT_IMAGE:-mtt_workspace:devel}
+    pull_policy: never
     working_dir: ${WORKSPACE}
     environment:
       - WORKSPACE
