@@ -13,10 +13,26 @@ __pycache__
 .mypy_cache
 .venv-tools
 data/
-tmp
+results/
+tmp/
+
+# Media and heavy files
+*.mp4
+*.mov
+*.avi
+*.png
+*.jpg
+*.jpeg
+*.pcd
+*.ply
+*.llc
+*.mcap
+*.bag
+*.db3
 
 # Exclude heavy runtime artifacts recursively (root and nested workspaces)
 **/data/**
+**/results/**
 **/build/**
 **/install/**
 **/log/**

@@ -72,7 +72,14 @@ services:
           --clock \
           --rate ${REPLAY_RATE:-1.0} \
           --storage mcap \
-          --exclude-topics /robot_description /joint_states /runtime_joint_states /tf /tf_static \
+          --exclude-topics \
+            /robot_description /joint_states /runtime_joint_states /tf /tf_static \
+            /merged_points /merged_points_raw /merged_points_filtered /hesai_in_base /rsairy_in_base \
+            /mapping/icp_odom /mapping/map /mapping/pose_in \
+            /mapping/scan_after_deskew /mapping/scan_after_input_filters \
+            /trailer/angle /trailer/articulation_angle /trailer/pose \
+            /trailer/body_markers /trailer/trailer_roi_cloud \
+            /planned_trajectory /real_trajectory /wiln/pose /wiln/markers \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
@@ -166,8 +173,9 @@ services:
   # ── Offline ICP rebuild for one session or a whole data directory ────────
   # Replays the bag, rebuilds the merged cloud if both LiDARs are available,
   # runs the ICP mapper, and saves:
-  #   <session>/map.vtk
-  #   <session>/trajectory.vtk
+  #   <session>/offline_icp/map.vtk
+  #   <session>/offline_icp/trajectory.vtk
+  # plus top-level map.vtk/trajectory.vtk compatibility copies.
   #
   # Usage examples:
   #   BAG_PATH=${WORKSPACE}/data/mtt_nominal_outside_2026-04-30_16-08-13 \
@@ -180,15 +188,22 @@ services:
     profiles: ["offline_icp"]
     volumes:
       - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
     environment:
       BAG_PATH: ${BAG_PATH:-}
-      DATA_DIR: ${DATA_DIR:-${WORKSPACE}/data}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
       REPLAY_RATE: ${REPLAY_RATE:-1.0}
       OFFLINE_ICP_MODE: ${OFFLINE_ICP_MODE:-auto}
       OFFLINE_ICP_FORCE: ${OFFLINE_ICP_FORCE:-false}
+      OFFLINE_ICP_QUALITY: ${OFFLINE_ICP_QUALITY:-standard}
       OFFLINE_ICP_SETTLE_S: ${OFFLINE_ICP_SETTLE_S:-4.0}
       OFFLINE_ICP_READY_TIMEOUT_S: ${OFFLINE_ICP_READY_TIMEOUT_S:-30.0}
       OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S: ${OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S:-90.0}
+      OFFLINE_ICP_MAPPING_CONFIG: ${OFFLINE_ICP_MAPPING_CONFIG:-}
+      OFFLINE_ICP_FILTER_TRAILER: ${OFFLINE_ICP_FILTER_TRAILER:-true}
+      OFFLINE_ICP_MAPPING_ODOM_FRAME: ${OFFLINE_ICP_MAPPING_ODOM_FRAME:-odom}
+      OFFLINE_ICP_EXPERIMENT_NAME: ${OFFLINE_ICP_EXPERIMENT_NAME:-}
     command:
       - python3
       - -u
@@ -201,7 +216,7 @@ services:
   # cloud_merger_node tries to transform clouds (hesai_lidar → base_link).
   perception:
     <<: [*replay_base]
-    profiles: ["perception"]
+    profiles: ["perception", "mapping"]
     depends_on:
       bag_player:
         condition: service_started
@@ -213,7 +228,230 @@ services:
       - |
         echo "Waiting for /clock and TF to settle..."
         sleep 3
-        exec ros2 launch mtt_perception perception.launch.py use_sim_time:=true
+        exec ros2 launch mtt_perception perception.launch.py \
+          use_sim_time:=true \
+          publish_filtered:=true \
+          cloud_merger_max_pair_dt:=0.120 \
+          cloud_merger_tf_timeout:=0.100 \
+          cloud_merger_publish_debug_inputs:=true \
+          cloud_merger_enable_trailer_bbox_filter:=${REPLAY_FILTER_TRAILER_FROM_MAPPING:-true}
+
+  # ── ICP mapping in replay ────────────────────────────────────────────────
+  # Rebuilds /mapping/map and /mapping/icp_odom from the live merged cloud.
+  # This is intentionally separate from bag_player: generated mapping topics
+  # are excluded from replay above, so Foxglove shows the map from this run.
+  mapping:
+    <<: [*replay_base]
+    profiles: ["mapping"]
+    depends_on:
+      perception:
+        condition: service_started
+    environment:
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/merged_points_filtered}
+      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_replay_dense.yaml}
+      MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.08}
+      MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-0.5}
+      MAPPING_MAP_TF_PUBLISH_RATE: ${MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
+      MAPPING_DESKEW: ${MAPPING_DESKEW:-false}
+      MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-odom}
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /merged_points_filtered before starting ICP mapper..."
+        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
+          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
+          exit 1
+        }
+        exec ros2 launch norlab_robot mapping.launch.py \
+          use_sim_time:=true \
+          mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
+          mapping_config:=$${MAPPING_CONFIG} \
+          mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
+          mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
+          mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
+          mapping_odom_frame:=$${MAPPING_ODOM_FRAME}
+
+  # ── Post-process dataset export: ICP + lightweight enriched bag + CSV ──────
+  # Writes per session:
+  #   <session>/offline_icp/map.vtk
+  #   <session>/offline_icp/trajectory.vtk
+  #   <session>/postprocess_dataset/dataset.csv
+  #   <session>/postprocess_dataset/enriched_bag/  (trailer pose/markers/debug only)
+  #   <session>/postprocess_dataset/summary.yaml
+  # and a global ${WORKSPACE}/data/postprocess_dataset_report.yaml.
+  #
+  # Default full pass:
+  #   docker compose --profile postprocess up postprocess_dataset
+  #
+  # One session:
+  #   BAG_PATH=${WORKSPACE}/data/mtt_nominal_outside_2026-04-30_16-08-13 \
+  #     docker compose --profile postprocess up postprocess_dataset
+  postprocess_dataset:
+    <<: [*replay_base]
+    profiles: ["postprocess", "dataset"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
+      POSTPROCESS_RUN_ICP: ${POSTPROCESS_RUN_ICP:-true}
+      POSTPROCESS_RUN_PERCEPTION: ${POSTPROCESS_RUN_PERCEPTION:-true}
+      POSTPROCESS_RUN_ENRICHED_BAG: ${POSTPROCESS_RUN_ENRICHED_BAG:-true}
+      POSTPROCESS_FORCE_ICP: ${POSTPROCESS_FORCE_ICP:-false}
+      POSTPROCESS_FORCE_PERCEPTION: ${POSTPROCESS_FORCE_PERCEPTION:-false}
+      POSTPROCESS_FORCE_ENRICHED_BAG: ${POSTPROCESS_FORCE_ENRICHED_BAG:-false}
+      POSTPROCESS_QUALITY: ${POSTPROCESS_QUALITY:-max}
+      REPLAY_RATE: ${REPLAY_RATE:-1.0}
+    command:
+      - bash
+      - -lc
+      - |
+        INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
+        ARGS=("$${INPUT_PATH}" "--quality" "$${POSTPROCESS_QUALITY}" "--replay-rate" "$${REPLAY_RATE}")
+        if [ "$${POSTPROCESS_RUN_ICP}" = "true" ]; then
+          ARGS+=("--run-icp")
+        fi
+        if [ "$${POSTPROCESS_RUN_ENRICHED_BAG}" = "true" ]; then
+          ARGS+=("--run-enriched-bag")
+        fi
+        if [ "$${POSTPROCESS_FORCE_ICP}" = "true" ]; then
+          ARGS+=("--force-icp")
+        fi
+        if [ "$${POSTPROCESS_FORCE_ENRICHED_BAG}" = "true" ]; then
+          ARGS+=("--force-enriched-bag")
+        fi
+        exec python3 -u ${WORKSPACE}/scripts/build_postprocess_dataset.py "$${ARGS[@]}"
+
+  # ── Metadata-only audit: fast preflight, no ROS replay and no bag decoding ──
+  postprocess_metadata:
+    <<: [*replay_base]
+    profiles: ["postprocess", "dataset", "metadata"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
+    command:
+      - bash
+      - -lc
+      - |
+        INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
+        exec python3 -u ${WORKSPACE}/scripts/build_postprocess_dataset.py "$${INPUT_PATH}" --metadata-only
+
+  # ── Post-process audit: CSV integrity + physical consistency + plots ──────
+  # Reads existing postprocess_dataset outputs only. It does not replay bags,
+  # does not run ICP, and does not record enriched bags.
+  #
+  # Writes per session:
+  #   <session>/postprocess_dataset/audit.yaml
+  #   <session>/postprocess_dataset/plots/*.png
+  # and global:
+  #   ${WORKSPACE}/data/postprocess_dataset_audit_report.yaml
+  #   ${WORKSPACE}/data/postprocess_dataset_audit_summary.csv
+  postprocess_audit:
+    <<: [*replay_base]
+    profiles: ["postprocess", "dataset", "audit"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
+      POSTPROCESS_AUDIT_PLOTS: ${POSTPROCESS_AUDIT_PLOTS:-true}
+      POSTPROCESS_AUDIT_STRICT: ${POSTPROCESS_AUDIT_STRICT:-false}
+    command:
+      - bash
+      - -lc
+      - |
+        INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
+        ARGS=("$${INPUT_PATH}")
+        if [ "$${POSTPROCESS_AUDIT_PLOTS}" != "true" ]; then
+          ARGS+=("--no-plots")
+        fi
+        if [ "$${POSTPROCESS_AUDIT_STRICT}" = "true" ]; then
+          ARGS+=("--strict")
+        fi
+        exec python3 -u ${WORKSPACE}/scripts/audit_postprocess_dataset.py "$${ARGS[@]}"
+
+  # ── ICP/mapping investigation: cross-bag consistency + plots ─────────────
+  # Reads existing postprocess outputs only by default. It does not replay bags.
+  # Writes:
+  #   <session>/icp_investigation/report.yaml
+  #   <session>/icp_investigation/summary.md
+  #   <session>/icp_investigation/plots/*.png
+  #   ${WORKSPACE}/data/icp_investigation_report.yaml
+  #   ${WORKSPACE}/data/icp_investigation_summary.csv
+  postprocess_icp_investigation:
+    <<: [*replay_base]
+    profiles: ["postprocess", "dataset", "audit", "investigate"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
+      ICP_INVESTIGATION_PLOTS: ${ICP_INVESTIGATION_PLOTS:-true}
+      ICP_INVESTIGATION_TF: ${ICP_INVESTIGATION_TF:-false}
+      ICP_INVESTIGATION_STRICT: ${ICP_INVESTIGATION_STRICT:-false}
+    command:
+      - bash
+      - -lc
+      - |
+        INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
+        ARGS=("$${INPUT_PATH}")
+        if [ "$${ICP_INVESTIGATION_PLOTS}" != "true" ]; then
+          ARGS+=("--no-plots")
+        fi
+        if [ "$${ICP_INVESTIGATION_TF}" = "true" ]; then
+          ARGS+=("--inspect-tf")
+        fi
+        if [ "$${ICP_INVESTIGATION_STRICT}" = "true" ]; then
+          ARGS+=("--strict")
+        fi
+        exec python3 -u ${WORKSPACE}/scripts/investigate_icp_mapping.py "$${ARGS[@]}"
+
+  # ── Offline localization reference from CSV dataset ───────────────────────
+  # Converts postprocess_dataset/dataset.csv to the mtt_localization offline
+  # solver input and runs offline_reference_solver. This is the bridge from the
+  # database-style CSV exports to the factor-graph reference trajectory.
+  postprocess_reference:
+    <<: [*replay_base]
+    profiles: ["postprocess", "dataset", "reference"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+      - ${BAG_PATH:-${WORKSPACE}/data}:${BAG_PATH:-${WORKSPACE}/data}
+      - ${BAGS_ROOT:-/data/mtt_bags}:${BAGS_ROOT:-/data/mtt_bags}
+    environment:
+      BAG_PATH: ${BAG_PATH:-}
+      BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
+      DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
+      OFFLINE_REFERENCE_RUN_ICP: ${OFFLINE_REFERENCE_RUN_ICP:-false}
+      OFFLINE_REFERENCE_FORCE_ICP: ${OFFLINE_REFERENCE_FORCE_ICP:-false}
+    command:
+      - bash
+      - -lc
+      - |
+        INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
+        ARGS=("$${INPUT_PATH}" "--from-postprocess-csv")
+        if [ "$${OFFLINE_REFERENCE_RUN_ICP}" = "true" ]; then
+          ARGS+=("--run-icp")
+        fi
+        if [ "$${OFFLINE_REFERENCE_FORCE_ICP}" = "true" ]; then
+          ARGS+=("--force-icp")
+        fi
+        exec python3 -u ${WORKSPACE}/scripts/offline_reference.py "$${ARGS[@]}"
 
   # ── Sensor health check on bag output ────────────────────────────────────
   health_check:
@@ -273,6 +511,43 @@ services:
       - mtt_rviz.launch.py
       - use_sim_time:=true
       - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
+
+  # ── Teach-and-Repeat stack for offline WILN validation ───────────────────
+  #
+  # Runs wiln_node + mtt_path_follower + mtt_repeat_supervisor on top of a bag.
+  # Workflow:
+  #   1. Start:  BAG_PATH=... docker compose up bag_player description foxglove teach_repeat
+  #   2. Record: ros2 service call /start_recording std_srvs/srv/Empty '{}'
+  #              (watch bag play → poses arrive via /mapping/icp_odom)
+  #   3. Stop:   ros2 service call /stop_recording std_srvs/srv/Empty '{}'
+  #   4. Save:   ros2 service call /save_map_traj wiln/srv/SaveMapTraj '{file_name: {data: /workspace/data/route.ltr}}'
+  #   5. Load:   ros2 service call /load_map_traj wiln/srv/LoadMapTraj '{file_name: {data: /workspace/data/route.ltr}}'
+  #   6. Play:   ros2 service call /play_line std_srvs/srv/Empty '{}'
+  #              → visualise /wiln/markers + wiln/deformed_plan in Foxglove
+  #   7. Cancel: ros2 service call /cancel_trajectory std_srvs/srv/Empty '{}'
+  #
+  # Note: path follower will not actually drive the robot (no CAN bus).
+  # The goal is to validate trajectory capture, save/load round-trip,
+  # and planning/deformation visualisation in Foxglove.
+  teach_repeat:
+    <<: [*replay_base]
+    profiles: ["teach_repeat"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /clock and ICP odom to settle..."
+        sleep 4
+        exec ros2 launch norlab_robot teach_repeat.launch.py \
+          use_sim_time:=true \
+          odom_topic:=/mapping/icp_odom \
+          pose_topic:=/wiln/pose \
+          wiln_cmd_vel_topic:=/cmd_vel
 
   # ── Debug shell ───────────────────────────────────────────────────────────
   bash:

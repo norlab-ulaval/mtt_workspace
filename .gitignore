@@ -88,14 +88,30 @@ compile_commands.json
 src/external/
 src/mtt_core/
 
-# Data stays local by default
-data/raw/
-data/processed/
-data/live_robot/
-data/records/
-data/mtt_*/
+# Data and results stay local
+data/
+results/
+**/data/
+**/results/
 tmp/
 
+# Media and large binary files (videos, images, pointclouds)
+*.mp4
+*.mov
+*.avi
+*.png
+*.jpg
+*.jpeg
+*.pcd
+*.ply
+*.llc
+!mtt.jpg
+
+# ROS bags and recording metadata
+*.mcap
+*.bag
+*.db3
+metadata.yaml
 
 # Generated robot artifacts
 src/mtt_core/mtt_description/urdf/*.urdf

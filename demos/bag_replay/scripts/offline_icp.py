@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -38,6 +39,13 @@ REBUILT_PERCEPTION_TOPICS = [
     MERGED_TOPIC,
     MERGED_DEBUG_TOPIC,
     "/trailer/angle",
+    "/trailer/articulation_angle",
+    "/trailer/pose",
+    "/trailer/pose_confidence",
+    "/trailer/body_markers",
+    "/trailer/articulation_axis_marker",
+    "/trailer/trailer_roi_cloud",
+    "/trailer/articulation_roi_cloud",
 ]
 
 
@@ -97,6 +105,14 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         help="Replay rate passed to ros2 bag play.",
     )
     parser.add_argument(
+        "--offline-quality",
+        "--quality",
+        dest="offline_quality",
+        default=os.environ.get("OFFLINE_ICP_QUALITY", "standard"),
+        choices=["standard", "max"],
+        help="Offline mapper quality profile. max uses denser map compression and slower replay by default.",
+    )
+    parser.add_argument(
         "--settle-seconds",
         type=float,
         default=float(os.environ.get("OFFLINE_ICP_SETTLE_S", "4.0")),
@@ -113,6 +129,27 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         type=float,
         default=float(os.environ.get("OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S", "90.0")),
         help="Additional timeout margin added on top of bag duration / replay rate.",
+    )
+    parser.add_argument(
+        "--mapping-config",
+        default=os.environ.get("OFFLINE_ICP_MAPPING_CONFIG", ""),
+        help="Override libpointmatcher mapper YAML. Empty = profile default.",
+    )
+    parser.add_argument(
+        "--filter-trailer",
+        action=argparse.BooleanOptionalAction,
+        default=bool_env("OFFLINE_ICP_FILTER_TRAILER", True),
+        help="Remove trailer body points from /merged_points_filtered when replay builds fused clouds.",
+    )
+    parser.add_argument(
+        "--mapping-odom-frame",
+        default=os.environ.get("OFFLINE_ICP_MAPPING_ODOM_FRAME", "odom"),
+        help="TF frame used as mapper odom prior. Default matches norlab_robot mapping launch.",
+    )
+    parser.add_argument(
+        "--experiment-name",
+        default=os.environ.get("OFFLINE_ICP_EXPERIMENT_NAME", ""),
+        help="Write outputs under offline_icp_experiments/<name> and do not update compatibility map files.",
     )
     return parser.parse_args()
 
@@ -314,19 +351,29 @@ def run_pipeline(
     workspace_root: Path,
     base_result: dict,
 ) -> dict:
-    output_dir = session_dir / "offline_icp"
-    log_dir = output_dir / "logs"
+    attempt = int(base_result.get("attempt", 1))
+    log_dir = output_dir / "logs" / f"attempt_{attempt}_{pipeline.mode}"
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    map_file = session_dir / "map.vtk"
-    trajectory_file = session_dir / "trajectory.vtk"
+    map_file = output_dir / "map.vtk"
+    trajectory_file = output_dir / "trajectory.vtk"
+    compat_map_file = session_dir / "map.vtk"
+    compat_trajectory_file = session_dir / "trajectory.vtk"
     result = dict(base_result)
     result["mode"] = pipeline.mode
     result["points_topic"] = pipeline.points_topic
     result["launch_perception"] = pipeline.launch_perception
     result["reason"] = pipeline.reason
     result["bag_duration_seconds"] = duration_s
+    result["offline_quality"] = args.offline_quality
+    result["map_file"] = str(map_file)
+    result["trajectory_file"] = str(trajectory_file)
+    result["output_dir"] = str(output_dir)
+    result["experiment_name"] = args.experiment_name or None
+    if not args.experiment_name:
+        result["compat_map_file"] = str(compat_map_file)
+        result["compat_trajectory_file"] = str(compat_trajectory_file)
 
     description_proc = None
     perception_proc = None
@@ -334,7 +381,33 @@ def run_pipeline(
     bag_proc = None
 
     qos_override = workspace_root / "src" / "external" / "norlab_robot" / "config" / "rosbag_record" / "qos_replay_override.yaml"
-    play_timeout = max(60.0, duration_s / max(args.replay_rate, 1e-6) + args.play_timeout_margin_seconds)
+    standard_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config.yaml"
+    dense_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_replay_dense.yaml"
+    replay_rate = args.replay_rate
+    mapping_compression_voxel_size = "0.20"
+    mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else standard_mapping_config
+    if args.offline_quality == "max":
+        mapping_compression_voxel_size = "0.10"
+        mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
+        if replay_rate == 1.0:
+            replay_rate = 0.5
+        result["quality_profile_notes"] = [
+            "mapping_compression_voxel_size=0.10",
+            f"mapping_config={mapping_config}",
+            f"filter_trailer={args.filter_trailer}",
+            f"effective_replay_rate={replay_rate}",
+        ]
+    else:
+        result["quality_profile_notes"] = [
+            f"mapping_compression_voxel_size={mapping_compression_voxel_size}",
+            f"mapping_config={mapping_config}",
+            f"filter_trailer={args.filter_trailer}",
+            f"effective_replay_rate={replay_rate}",
+        ]
+    result["mapping_config"] = str(mapping_config)
+    result["filter_trailer"] = bool(args.filter_trailer)
+    result["mapping_odom_frame"] = args.mapping_odom_frame
+    play_timeout = max(60.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)
 
     try:
         description_proc = start_process(
@@ -354,7 +427,14 @@ def run_pipeline(
 
         if pipeline.launch_perception:
             perception_proc = start_process(
-                ["ros2", "launch", "mtt_perception", "perception.launch.py", "use_sim_time:=true"],
+                [
+                    "ros2", "launch", "mtt_perception", "perception.launch.py",
+                    "use_sim_time:=true",
+                    "publish_filtered:=true",
+                    "cloud_merger_max_pair_dt:=0.120",
+                    "cloud_merger_tf_timeout:=0.100",
+                    f"cloud_merger_enable_trailer_bbox_filter:={'true' if args.filter_trailer else 'false'}",
+                ],
                 log_dir / f"perception_{pipeline.mode}.log",
             )
 
@@ -363,6 +443,9 @@ def run_pipeline(
                 "ros2", "launch", "norlab_robot", "mapping.launch.py",
                 "use_sim_time:=true",
                 f"mapping_points_topic:={pipeline.points_topic}",
+                f"mapping_config:={mapping_config}",
+                f"mapping_compression_voxel_size:={mapping_compression_voxel_size}",
+                f"mapping_odom_frame:={args.mapping_odom_frame}",
             ],
             log_dir / f"mapping_{pipeline.mode}.log",
         )
@@ -378,7 +461,7 @@ def run_pipeline(
                 "ros2", "bag", "play",
                 "--input", str(bag_dir), "mcap",
                 "--clock",
-                "--rate", str(args.replay_rate),
+                "--rate", str(replay_rate),
                 "--disable-keyboard-controls",
                 "--qos-profile-overrides-path", str(qos_override),
             ]
@@ -418,6 +501,10 @@ def run_pipeline(
         if not map_file.exists() or not trajectory_file.exists():
             raise RuntimeError("Expected map.vtk and trajectory.vtk were not created.")
 
+        if not args.experiment_name:
+            shutil.copy2(map_file, compat_map_file)
+            shutil.copy2(trajectory_file, compat_trajectory_file)
+
         result["status"] = "ok"
         result["map_size_bytes"] = map_file.stat().st_size
         result["trajectory_size_bytes"] = trajectory_file.stat().st_size
@@ -435,6 +522,9 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
     bag_dir = session_dir / "bag"
     metadata_path = bag_dir / "metadata.yaml"
     output_dir = session_dir / "offline_icp"
+    if args.experiment_name:
+        safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in args.experiment_name)
+        output_dir = session_dir / "offline_icp_experiments" / safe_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result: dict[str, object] = {
@@ -445,8 +535,10 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         "points_topic": None,
         "launch_perception": None,
         "reason": None,
-        "map_file": str(session_dir / "map.vtk"),
-        "trajectory_file": str(session_dir / "trajectory.vtk"),
+        "map_file": str(output_dir / "map.vtk"),
+        "trajectory_file": str(output_dir / "trajectory.vtk"),
+        "output_dir": str(output_dir),
+        "experiment_name": args.experiment_name or None,
         "timestamp": datetime.now().isoformat(timespec="seconds"),
     }
 
@@ -455,8 +547,8 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         write_summary(output_dir, result)
         return result
 
-    map_file = session_dir / "map.vtk"
-    trajectory_file = session_dir / "trajectory.vtk"
+    map_file = output_dir / "map.vtk"
+    trajectory_file = output_dir / "trajectory.vtk"
     if not args.force and map_file.exists() and trajectory_file.exists():
         result["status"] = "skipped_existing"
         write_summary(output_dir, result)

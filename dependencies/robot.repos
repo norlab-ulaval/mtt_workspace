@@ -14,7 +14,7 @@ repositories:
   src/mtt_core:
     type: git
     url: git@github.com:norlab-ulaval/mtt_core.git
-    version: main
+    version: dev
 
   # Runtime integration layer
   src/external/norlab_robot:
@@ -102,7 +102,7 @@ repositories:
   src/external/wiln:
     type: git
     url: git@github.com:norlab-ulaval/wiln.git
-    version: jazzy
+    version: mohamed
 
   src/external/drive_custom_srv:
     type: git
@@ -128,4 +128,3 @@ repositories:
     type: git
     url: git@github.com:norlab-ulaval/service_caller.git
     version: master
-
