@@ -15,6 +15,7 @@ x-replay-base: &replay_base
     service: ros_runtime_base
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
+  pull_policy: never
   environment:
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
     RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
