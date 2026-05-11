@@ -132,7 +132,7 @@ COPY . .
 
 # Step 3: ensure modern pip/setuptools for editable installs
 USER root
-RUN python3 -m pip install --break-system-packages --upgrade pip setuptools wheel
+RUN python3 -m pip install --break-system-packages --upgrade pip setuptools
 
 ARG USERNAME=mtt
 USER ${USERNAME}
