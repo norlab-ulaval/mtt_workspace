@@ -20,6 +20,7 @@ x-dc-base: &dc_base
     - ./config/runtime.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
+  pull_policy: never
   privileged: true
   environment:
     ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
