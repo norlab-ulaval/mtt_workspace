@@ -46,7 +46,7 @@ repositories:
   src/external/norlab_icp_mapper_ros:
     type: git
     url: git@github.com:norlab-ulaval/norlab_icp_mapper_ros.git
-    version: 2.1.1
+    version: mohamed
 
   src/external/libpointmatcher_ros:
     type: git
