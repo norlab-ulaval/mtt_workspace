@@ -132,7 +132,10 @@ COPY . .
 
 # Step 3: ensure modern pip/setuptools for editable installs
 USER root
-RUN python3 -m pip install --break-system-packages --upgrade pip setuptools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-pip \
+    python3-setuptools && \
+    rm -rf /var/lib/apt/lists/*
 
 ARG USERNAME=mtt
 USER ${USERNAME}
