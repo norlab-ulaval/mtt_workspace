@@ -1,9 +1,21 @@
+x-base-build: &mtt_base_build
+  context: .
+  dockerfile: docker/Dockerfile.base
+  args:
+    ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
+    USERNAME: mtt
+    USER_UID: ${UID:-1000}
+    USER_GID: ${GID:-1000}
+
 x-build: &mtt_devel_build
   context: .
   dockerfile: docker/Dockerfile
   target: devel
+  additional_contexts:
+    mtt_base: service:base
   args:
-    BASE_IMAGE: ${MTT_BASE_IMAGE:-mtt_workspace:base}
+    BASE_IMAGE: ${MTT_BASE_IMAGE:-mtt_base}
     ROS_DISTRO: ${ROS_DISTRO:-jazzy}
     RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_fastrtps_cpp}
     USERNAME: mtt
@@ -11,6 +23,13 @@ x-build: &mtt_devel_build
     USER_GID: ${GID:-1000}
 
 services:
+  # Heavy base image used by docker/Dockerfile. The devel build references this
+  # service through BuildKit additional_contexts, so `compile` builds it first
+  # when the local image is missing.
+  base:
+    image: ${MTT_BASE_IMAGE:-mtt_workspace:base}
+    build: *mtt_base_build
+
   bash:
     extends:
       file: docker/common.yaml

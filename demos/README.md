@@ -28,6 +28,10 @@ docker compose run --rm compile
 docker compose run --rm bash
 ```
 
+`compile` builds the base image, devel image, and ROS workspace when needed. If
+you only want to prebuild the heavy base layer, run `docker compose -f
+compose.yaml build base` from the repository root.
+
 On the robot:
 
 ```bash

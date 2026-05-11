@@ -62,7 +62,14 @@ sudo usermod -aG docker "$USER"
 newgrp docker
 ```
 
-## Bootstrap
+## Get the workspace
+
+Clone the workspace shell:
+
+```bash
+git clone git@github.com:norlab-ulaval/mtt_workspace.git
+cd mtt_workspace
+```
 
 Create the local environment files and bind-mount directories:
 
@@ -86,16 +93,35 @@ Check the result:
 
 ### Docker build
 
-This is the standard path for this workspace.
+This is the standard path for this workspace:
 
 ```bash
 docker compose -f compose.yaml run --rm compile
+```
+
+That command builds what is needed in order:
+- `mtt_workspace:base` from `docker/Dockerfile.base` if the local base image is missing
+- `mtt_workspace:devel` from `docker/Dockerfile`
+- the ROS workspace with `colcon`
+
+You can still build the heavy base image explicitly:
+
+```bash
+docker compose -f compose.yaml build base
 ```
 
 Open a shell in the runtime image:
 
 ```bash
 docker compose -f compose.yaml run --rm bash
+```
+
+If Docker reports `pull access denied for mtt_workspace:base`, your local Compose
+file is probably stale. Pull the latest workspace and retry:
+
+```bash
+git pull
+docker compose -f compose.yaml run --rm compile
 ```
 
 ### Host build

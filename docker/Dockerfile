@@ -2,7 +2,10 @@
 # ══════════════════════════════════════════════════════════════════════════════
 # mtt_workspace:devel — fast workspace image
 #
-# Requires mtt_workspace:base to be built first (once):
+# With compose.yaml, the base image is built automatically when needed:
+#   docker compose -f compose.yaml run --rm compile
+#
+# Equivalent manual command:
 #   docker build -f docker/Dockerfile.base -t mtt_workspace:base .
 #
 # Shortcut reusing existing built image (zero cost):
