@@ -63,7 +63,6 @@ services:
         mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
         colcon build \
           --base-paths "$${workspace_paths[@]}" \
-          --symlink-install \
           --cmake-args \
             -DCMAKE_BUILD_TYPE=RelWithDebInfo \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
