@@ -4,6 +4,11 @@ x-sim-base: &sim_base
     service: bash
 
 services:
+  base:
+    extends:
+      file: ../../compose.yaml
+      service: base
+
   bash:
     <<: [*sim_base]
     profiles: ["debug"]

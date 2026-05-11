@@ -1,4 +1,9 @@
 services:
+  base:
+    extends:
+      file: ../../compose.yaml
+      service: base
+
   bash:
     extends:
       file: ../../compose.yaml

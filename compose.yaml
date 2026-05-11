@@ -29,6 +29,7 @@ services:
   base:
     image: ${MTT_BASE_IMAGE:-mtt_workspace:base}
     build: *mtt_base_build
+    pull_policy: never
 
   bash:
     extends:
@@ -36,6 +37,7 @@ services:
       service: x11_base
     image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
+    pull_policy: never
     tty: true
     stdin_open: true
     command: bash
@@ -53,6 +55,7 @@ services:
       service: base
     image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
+    pull_policy: never
     command:
       - bash
       - -lc
@@ -81,6 +84,7 @@ services:
       service: ros_runtime_base
     image: ${MTT_IMAGE:-mtt_workspace:devel}
     build: *mtt_devel_build
+    pull_policy: never
     command:
       - ros2
       - run

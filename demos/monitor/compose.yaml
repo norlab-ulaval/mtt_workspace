@@ -19,6 +19,11 @@ x-monitor-base: &monitor_base
     ZENOH_ROUTER_CHECK_ATTEMPTS: ${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}
 
 services:
+  base:
+    extends:
+      file: ../../compose.yaml
+      service: base
+
   bash:
     <<: [*monitor_base]
     profiles: ["debug"]
