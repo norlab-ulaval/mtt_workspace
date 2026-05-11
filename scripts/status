@@ -26,4 +26,9 @@ for repo_dir in "${repo_roots[@]}"; do
 
   printf '\n[%s]\n' "${label}"
   git -C "${repo_dir}" status --short --branch
+
+  # Show nested submodule status when .gitmodules is present
+  if [[ -f "${repo_dir}/.gitmodules" ]]; then
+    git -C "${repo_dir}" submodule status --recursive | sed 's/^/  submodule: /'
+  fi
 done

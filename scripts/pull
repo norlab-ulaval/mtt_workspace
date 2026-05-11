@@ -24,4 +24,17 @@ if [[ -z "$(find src/external -mindepth 1 -maxdepth 1 -type d 2>/dev/null | head
   exit 0
 fi
 
-vcs pull src/external
+# Repos pinned to a tag (e.g. norlab_icp_mapper_ros: 2.1.1,
+# libpointmatcher_ros: 2.0.1) are in detached HEAD — git pull returns 1
+# for them, which would abort the whole script. We let vcs report any
+# real failures but continue regardless.
+vcs pull src/external || true
+
+# Update nested submodules (e.g. HesaiLidar_SDK_2.0 inside HesaiLidar_ROS_2.0).
+# vcs pull only updates the top-level repo; submodules need an explicit sync.
+while IFS= read -r repo_dir; do
+  if [[ -f "${repo_dir}/.gitmodules" ]]; then
+    echo "[pull] updating submodules in ${repo_dir}"
+    git -C "${repo_dir}" submodule update --init --recursive
+  fi
+done < <(find src/external -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
