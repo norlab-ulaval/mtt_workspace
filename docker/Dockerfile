@@ -130,6 +130,10 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # Step 2: full source — busts colcon build but not rosdep above
 COPY . .
 
+# Step 3: ensure modern pip/setuptools for editable installs
+USER root
+RUN python3 -m pip install --break-system-packages --upgrade pip setuptools wheel
+
 ARG USERNAME=mtt
 USER ${USERNAME}
 
