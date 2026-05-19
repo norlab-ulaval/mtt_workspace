@@ -85,6 +85,7 @@ compile_commands.json
 .DS_Store
 
 # Bootstrapped external workspace
+src/
 src/external/
 src/mtt_core/
 
@@ -117,3 +118,8 @@ metadata.yaml
 src/mtt_core/mtt_description/urdf/*.urdf
 src/mtt_core/mtt_description/urdf/*.sdf
 .ccache/
+
+# Generated mapping / TF inspection artifacts
+*.vtk
+frames_*.gv
+frames_*.pdf
