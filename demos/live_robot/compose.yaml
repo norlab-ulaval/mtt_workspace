@@ -34,6 +34,7 @@ x-live-robot-base: &live_robot_base
     CONTROL_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_control.yaml
     FOLLOWER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_path_follower.yaml
     SUPERVISOR_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml
+    ROUTE_MANAGER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_route_manager.yaml
     WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
   volumes:
     - /dev:/dev
@@ -193,7 +194,8 @@ services:
           use_sim_time:=false \
           wiln_params_file:=$${WILN_PARAMS_FILE} \
           follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
-          supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE}
+          supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE} \
+          route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE}
 
   wiln_teach_start:
     <<: [*live_robot_base]
@@ -309,3 +311,80 @@ services:
         echo "Latched repeat state:"
         timeout 2s ros2 topic echo --once /mtt_repeat/state 2>/dev/null || echo "  /mtt_repeat/state unavailable"
         timeout 2s ros2 topic echo --once /mtt_repeat/ready 2>/dev/null || echo "  /mtt_repeat/ready unavailable"
+
+  route_list:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_route/list
+      - mtt_interfaces/srv/RouteList
+      - "{}"
+
+  route_validate:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      ROUTE: ${ROUTE:-garage_1559}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /mtt_route/validate mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+
+  route_preview:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      ROUTE: ${ROUTE:-garage_1559}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /mtt_route/preview mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+
+  route_load:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      ROUTE: ${ROUTE:-garage_1559}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /mtt_route/load mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+
+  route_replay:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      ROUTE: ${ROUTE:-garage_1559}
+    command:
+      - bash
+      - -lc
+      - |
+        ros2 service call /mtt_route/replay mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+
+  route_stop:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_route/stop
+      - std_srvs/srv/Trigger
+      - "{}"
+
+  route_status:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - ros2
+      - service
+      - call
+      - /mtt_route/status
+      - mtt_interfaces/srv/RouteStatus
+      - "{}"
