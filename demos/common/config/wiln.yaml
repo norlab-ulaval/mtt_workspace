@@ -6,7 +6,7 @@
       disable_mapping_service: /mapping/disable_mapping
       save_map_service: /mapping/save_map
       load_map_service: /mapping/load_map
-      trajectory_speed: 0.70
+      trajectory_speed: 0.40
       smoothing_window_size: 15
       robot_model: mtt
       kappa_max: 0.70

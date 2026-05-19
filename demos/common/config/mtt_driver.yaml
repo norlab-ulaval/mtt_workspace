@@ -2,9 +2,10 @@ mtt_can_node:
   ros__parameters:
     steer_control_mode: closed_loop
     cmd_angular_mode: normalized_steer
-    tachometer_mode: cmd_sim
-    invert_inferred_tachometer_direction: true
-    max_linear_speed_ms: 1.0
+    tachometer_mode: real
+    invert_inferred_tachometer_direction: false
+    max_linear_speed_ms: 3.0
+    command_timeout_seconds: 0.25
     throttle_deadband: 0.04
     steer_deadband: 0.05
     min_steer_speed_ms: 0.1
@@ -19,26 +20,11 @@ mtt_can_node:
     model_yaw_slip_articulation_gain: 0.15
     model_yaw_slip_min_scale: 0.55
     hold_assist_enabled: true
-    hold_assist_entry_speed_ms: 0.03
-    hold_assist_release_speed_ms: 0.015
-    hold_assist_exit_command_ms: 0.10
+    hold_assist_entry_speed_ms: 0.08
+    hold_assist_exit_command_ms: 0.08
+    hold_assist_exit_speed_ms: 0.15
     hold_assist_kp: 2.5
-    hold_assist_ki: 0.6
-    hold_assist_integrator_limit: 0.30
     hold_assist_output_limit: 0.40
-    hold_assist_deadband_compensation: 0.14
-    # Dither: symmetric square wave ±amplitude around PI correction.
-    # On level ground (correction≈0) this physically rocks the robot
-    # forward/backward to defeat the mechanical deadband.
-    # frequency 2 Hz gives ~0.25 s half-period — visibly slow but effective.
-    hold_assist_dither_enabled: true
-    hold_assist_dither_amplitude: 0.06
-    hold_assist_dither_frequency_hz: 2.0
-    # Active decel: proportional counter-thrust when coasting above threshold.
-    # Useful even with cmd_sim (uses synthetic speed estimate).
-    hold_assist_active_decel_enabled: true
-    hold_assist_active_decel_entry_speed_ms: 0.08
-    hold_assist_active_decel_output_limit: 0.50
     publish_can_debug: false
     can_debug_topic: mtt_can/debug_frames
 

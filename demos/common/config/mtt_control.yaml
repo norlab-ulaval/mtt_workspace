@@ -1,6 +1,6 @@
 mtt_operator_input_node:
   ros__parameters:
-    max_linear_speed: 0.4
+    max_linear_speed: 2.4
     max_angular_command: 0.4
     linear_deadband: 0.10
     angular_deadband: 0.10
@@ -19,7 +19,7 @@ mtt_operator_input_node:
     estop_left_trigger_axis: 2
     estop_right_trigger_axis: 5
     estop_trigger_threshold: -0.10
-    invert_linear_axis: true
+    invert_linear_axis: false
     invert_angular_axis: false
     enable_brake_axis: true
     brake_axis_default: 1.0
@@ -34,7 +34,7 @@ mtt_manual_cmd_filter_node:
     output_topic: cmd_vel/manual
     input_timeout_s: 0.4
     publish_rate_hz: 50.0
-    linear_rise_rate: 0.3
+    linear_rise_rate: 0.5
     linear_fall_rate: 1.2
     angular_rise_rate: 0.5
     angular_fall_rate: 1.5
