@@ -2,6 +2,8 @@ x-monitor-base: &monitor_base
   extends:
     file: ../../compose.yaml
     service: bash
+  env_file:
+    - ../../.env
   volumes:
     - ../live_robot/config:/config:ro
   environment:

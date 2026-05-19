@@ -14,6 +14,7 @@ x-live-robot-base: &live_robot_base
     file: ../../docker/common.yaml
     service: ros_runtime_base
   env_file:
+    - ../../.env
     - ./config/runtime.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
@@ -181,6 +182,7 @@ services:
         echo ""
         echo "  Diagnostics:"
         echo "    dc run --rm wiln_status"
+        echo "    dc run --rm wiln_validate"
         echo "    dc run --rm wiln_replay_stop"
         echo ""
         echo "  WILN cfg:           $${WILN_PARAMS_FILE}"
@@ -237,6 +239,17 @@ services:
       - |
         ros2 service call /load_map_traj wiln/srv/LoadMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
         ros2 service call /mtt_repeat/mark_ready std_srvs/srv/Trigger "{}"
+
+  wiln_validate:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    environment:
+      WILN_LTR_FILE: ${WILN_LTR_FILE:-${WORKSPACE}/data/route.ltr}
+    command:
+      - bash
+      - -lc
+      - |
+        python3 ${WORKSPACE}/scripts/validate_wiln_route.py "$${WILN_LTR_FILE}"
 
   wiln_replay:
     <<: [*live_robot_base]

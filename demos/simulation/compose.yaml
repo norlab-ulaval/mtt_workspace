@@ -2,6 +2,8 @@ x-sim-base: &sim_base
   extends:
     file: ../../compose.yaml
     service: bash
+  env_file:
+    - ../../.env
 
 services:
   base:

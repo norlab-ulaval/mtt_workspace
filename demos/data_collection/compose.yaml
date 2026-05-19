@@ -17,6 +17,7 @@ x-dc-base: &dc_base
     file: ../../docker/common.yaml
     service: ros_runtime_base
   env_file:
+    - ../../.env
     - ./config/runtime.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build

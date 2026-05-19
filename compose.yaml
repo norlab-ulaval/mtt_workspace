@@ -31,12 +31,21 @@ services:
     build: *mtt_base_build
     pull_policy: never
 
+  # Dedicated image build service. Use `docker compose build devel_image`
+  # or `docker compose build` to rebuild images explicitly.
+  devel_image:
+    image: ${MTT_IMAGE:-mtt_workspace:devel}
+    build: *mtt_devel_build
+    pull_policy: never
+    profiles: ["build"]
+
   bash:
     extends:
       file: docker/common.yaml
       service: x11_base
+    env_file:
+      - .env
     image: ${MTT_IMAGE:-mtt_workspace:devel}
-    build: *mtt_devel_build
     pull_policy: never
     tty: true
     stdin_open: true
@@ -54,7 +63,6 @@ services:
       file: docker/common.yaml
       service: base
     image: ${MTT_IMAGE:-mtt_workspace:devel}
-    build: *mtt_devel_build
     pull_policy: never
     command:
       - bash
@@ -82,7 +90,6 @@ services:
       file: docker/common.yaml
       service: ros_runtime_base
     image: ${MTT_IMAGE:-mtt_workspace:devel}
-    build: *mtt_devel_build
     pull_policy: never
     command:
       - ros2

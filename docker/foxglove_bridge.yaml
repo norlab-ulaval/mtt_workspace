@@ -39,4 +39,4 @@
         - assets
       include_hidden: false
       asset_uri_allowlist:
-        - "^package://(?:\\w+/)*\\w+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"
+        - "^package://(?:[\\w.-]+/)*[\\w.-]+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"
