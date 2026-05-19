@@ -961,6 +961,18 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         except Exception as exc:  # noqa: BLE001
             skipped["enriched_bag"] = str(exc)
 
+    prefer_offline_icp = getattr(args, "prefer_offline_icp", False)
+    # Prefer the high-quality icp_odom recorded during offline replay (real timestamps + SE(3))
+    # over the live bag icp_odom (lower quality, real-time config).
+    offline_icp_odom_bag = session_dir / "offline_icp" / "icp_odom_replay"
+    if prefer_offline_icp and (offline_icp_odom_bag / "metadata.yaml").exists():
+        try:
+            offline_icp_samples, _, _ = read_bag_samples(offline_icp_odom_bag, {"/mapping/icp_odom"})
+            if offline_icp_samples.get("/mapping/icp_odom"):
+                samples["/mapping/icp_odom"] = offline_icp_samples["/mapping/icp_odom"]
+                result["icp_trajectory_source"] = "offline_icp_odom_replay"
+        except Exception as exc:  # noqa: BLE001
+            pass  # fall through to VTK fallback
     if not samples.get("/mapping/icp_odom"):
         start = first_time(samples)
         vtk_rows = parse_vtk_points(session_dir / "offline_icp" / "trajectory.vtk", duration_s, start)
@@ -1017,6 +1029,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--perception-startup-seconds", type=float, default=4.0)
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any session fails.")
     parser.add_argument("--metadata-only", action="store_true", help="Only audit metadata and write summaries/report; do not read messages or run replay.")
+    parser.add_argument("--prefer-offline-icp", dest="prefer_offline_icp", action="store_true", help="Use offline_icp/trajectory.vtk as ICP ground truth even when /mapping/icp_odom is in the bag.")
     return parser.parse_args()
 
 

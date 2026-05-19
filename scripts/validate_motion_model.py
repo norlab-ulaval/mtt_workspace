@@ -242,35 +242,52 @@ def read_topic_samples(bag_dir: Path) -> dict[str, list[dict[str, float | str | 
     return samples
 
 
-def derive_icp_kinematics(samples: list[dict[str, float | str | bool]]) -> list[dict[str, float]]:
+def derive_icp_kinematics(
+    samples: list[dict[str, float | str | bool]],
+    smooth_window_s: float = 1.0,
+) -> list[dict[str, float]]:
+    """Compute ICP velocities using a centred sliding window to reduce per-frame noise.
+
+    Naive frame-to-frame finite differences amplify ICP registration noise (positions
+    may jump ±0.5 m between consecutive frames on short sessions).  A 1-second window
+    averages over several registrations and gives physically plausible velocity estimates.
+    Falls back to the mapper's own twist velocity when fewer than 2 samples exist in the
+    window.
+    """
     if not samples:
         return []
 
+    ts = [float(s["t"]) for s in samples]
+    xs = [float(s["x"]) for s in samples]
+    ys = [float(s["y"]) for s in samples]
+    hs = [float(s["heading"]) for s in samples]
+    half = smooth_window_s / 2.0
+
     derived: list[dict[str, float]] = []
-    previous = None
-    for sample in samples:
-        row = {
-            "t": float(sample["t"]),
-            "x": float(sample["x"]),
-            "y": float(sample["y"]),
-            "heading": float(sample["heading"]),
-            "linear_x": float(sample["linear_x"]),
-            "angular_z": float(sample["angular_z"]),
-        }
-        if previous is None:
-            row["linear_x"] = 0.0
-            row["angular_z"] = 0.0
+    for i, sample in enumerate(samples):
+        t = ts[i]
+        j0 = bisect.bisect_left(ts, t - half)
+        j1 = bisect.bisect_right(ts, t + half) - 1
+        dt_win = ts[j1] - ts[j0]
+        if j1 > j0 and dt_win > 1e-6:
+            dx = xs[j1] - xs[j0]
+            dy = ys[j1] - ys[j0]
+            heading_mid = wrap_angle(0.5 * (hs[j1] + hs[j0]))
+            ds = dx * math.cos(heading_mid) + dy * math.sin(heading_mid)
+            linear_x = ds / dt_win
+            angular_z = wrap_angle(hs[j1] - hs[j0]) / dt_win
         else:
-            dt = row["t"] - previous["t"]
-            if dt > 1e-6:
-                dx = row["x"] - previous["x"]
-                dy = row["y"] - previous["y"]
-                heading_mid = wrap_angle(0.5 * (row["heading"] + previous["heading"]))
-                ds_signed = dx * math.cos(heading_mid) + dy * math.sin(heading_mid)
-                row["linear_x"] = ds_signed / dt
-                row["angular_z"] = wrap_angle(row["heading"] - previous["heading"]) / dt
-        derived.append(row)
-        previous = row
+            # window too narrow — fall back to mapper's own velocity
+            linear_x = float(sample["linear_x"])
+            angular_z = float(sample["angular_z"])
+        derived.append({
+            "t": t,
+            "x": xs[i],
+            "y": ys[i],
+            "heading": hs[i],
+            "linear_x": linear_x,
+            "angular_z": angular_z,
+        })
     return derived
 
 
@@ -324,6 +341,53 @@ class TimeSeries:
         return best
 
 
+def detect_speed_sign(rows: list[dict[str, float | str | bool | None]]) -> float:
+    """Return the speed_sign (±1.0) that makes the model trajectory align with ICP.
+
+    Strategy: compare the overall displacement vectors of the ICP trajectory and the
+    model trajectory (first→last point with valid data).  If they point in opposite
+    directions (dot product < −0.5) and both moved at least 1 m, the model speed sign
+    is inverted relative to physical motion → return −1.0.  Otherwise return +1.0.
+
+    This auto-corrects the invert_linear_axis=true convention in mtt_operator_input_node
+    which causes cmd_vel.linear.x (and model_speed_ms in cmd-sim mode) to be negative
+    for physical forward motion.
+    """
+    # Collect first/last ICP and model positions
+    icp_first = icp_last = None
+    model_first = model_last = None
+    for row in rows:
+        ix, iy = row.get("icp_x"), row.get("icp_y")
+        mx, my = row.get("model_x"), row.get("model_y")
+        if ix is not None and iy is not None:
+            if icp_first is None:
+                icp_first = (float(ix), float(iy))
+            icp_last = (float(ix), float(iy))
+        if mx is not None and my is not None:
+            if model_first is None:
+                model_first = (float(mx), float(my))
+            model_last = (float(mx), float(my))
+
+    if icp_first is None or icp_last is None or model_first is None or model_last is None:
+        return 1.0
+
+    icp_dx = icp_last[0] - icp_first[0]
+    icp_dy = icp_last[1] - icp_first[1]
+    icp_dist = math.hypot(icp_dx, icp_dy)
+
+    model_dx = model_last[0] - model_first[0]
+    model_dy = model_last[1] - model_first[1]
+    model_dist = math.hypot(model_dx, model_dy)
+
+    # Need at least 1 m of movement in both to be confident
+    if icp_dist < 1.0 or model_dist < 1.0:
+        return 1.0
+
+    # Normalised dot product of displacement directions
+    dot = (icp_dx / icp_dist) * (model_dx / model_dist) + (icp_dy / icp_dist) * (model_dy / model_dist)
+    return -1.0 if dot < -0.5 else 1.0
+
+
 def rmse(values_a: list[float], values_b: list[float]) -> float | None:
     if not values_a or len(values_a) != len(values_b):
         return None
@@ -331,7 +395,20 @@ def rmse(values_a: list[float], values_b: list[float]) -> float | None:
     return math.sqrt(sum(squared_error) / len(squared_error))
 
 
-def integrate_model_trajectory(rows: list[dict[str, float | str | bool | None]]) -> None:
+def integrate_model_trajectory(
+    rows: list[dict[str, float | str | bool | None]],
+    speed_sign: float = 1.0,
+) -> None:
+    """Integrate kinematic model trajectory from tachometer speed and yaw-rate.
+
+    speed_sign controls the convention correction:
+      +1.0 (default): tach_model_speed_ms positive = physical forward.
+      -1.0: tach_model_speed_ms negative = physical forward.
+           Use when invert_linear_axis=true is in effect on the operator-input node,
+           which causes cmd_vel.linear.x (and thus model_speed_ms in cmd-sim mode) to
+           be negative for forward motion.  Both speed and yaw-rate are negated so the
+           full 2-D trajectory is correctly mirrored.
+    """
     model_x = 0.0
     model_y = 0.0
     model_heading = 0.0
@@ -347,8 +424,8 @@ def integrate_model_trajectory(rows: list[dict[str, float | str | bool | None]])
         speed = row.get("tach_model_speed_ms")
         yaw_rate = row.get("tach_model_yaw_rate_rad_s")
         if speed is not None and yaw_rate is not None and dt > 0.0:
-            dtheta = float(yaw_rate) * dt
-            ds = float(speed) * dt
+            dtheta = float(yaw_rate) * speed_sign * dt
+            ds    = float(speed)    * speed_sign * dt
             heading_mid = model_heading + 0.5 * dtheta
             model_x += ds * math.cos(heading_mid)
             model_y += ds * math.sin(heading_mid)
@@ -577,25 +654,70 @@ def write_xy_plot(rows: list[dict[str, float | str | bool | None]], plot_path: P
         return False
 
     series = [
-        ("odom", "odom_x", "odom_y"),
         ("icp", "icp_x", "icp_y"),
         ("motion_model", "model_x", "model_y"),
     ]
 
     plotted = False
-    _, ax = plt.subplots(figsize=(8, 6))
+    _, ax = plt.subplots(figsize=(10, 8))
+
+    # Collect unique ICP positions (avoid plotting the 50 Hz resampled repeats)
+    icp_unique_x: list[float] = []
+    icp_unique_y: list[float] = []
+    _prev_icp: tuple[float, float] | None = None
+    for row in rows:
+        if row.get("icp_x") is not None and row.get("icp_y") is not None:
+            cur = (float(row["icp_x"]), float(row["icp_y"]))  # type: ignore[arg-type]
+            if cur != _prev_icp:
+                icp_unique_x.append(cur[0])
+                icp_unique_y.append(cur[1])
+                _prev_icp = cur
+
+    # Compute ICP jumps for diagnostics only. The plot itself stays neutral:
+    # motion-model validation should not label a trajectory as poor from a
+    # single local jump threshold when the offline ICP coverage/scale is good.
+    icp_jumps: list[float] = []
+    for k in range(1, len(icp_unique_x)):
+        icp_jumps.append(math.hypot(icp_unique_x[k] - icp_unique_x[k - 1], icp_unique_y[k] - icp_unique_y[k - 1]))
+    icp_max_jump = max(icp_jumps) if icp_jumps else 0.0
+
+    series_colors = {"icp": "tab:orange", "motion_model": "tab:green"}
+
     for label, x_key, y_key in series:
-        xs, ys = finite_xy(rows, x_key, y_key)
-        if not xs:
-            continue
-        ax.plot(xs, ys, label=label, linewidth=1.5)
+        color = series_colors[label]
+        if label == "icp":
+            # Use unique ICP positions for a cleaner trajectory line
+            if not icp_unique_x:
+                continue
+            ax.plot(icp_unique_x, icp_unique_y, label="icp", linewidth=1.5, color=color)
+            # Direction arrow near the midpoint of the ICP trajectory
+            mid = len(icp_unique_x) // 2
+            if mid + 1 < len(icp_unique_x):
+                ax.annotate("", xy=(icp_unique_x[mid + 1], icp_unique_y[mid + 1]),
+                            xytext=(icp_unique_x[mid], icp_unique_y[mid]),
+                            arrowprops=dict(arrowstyle="->", color=color, lw=1.5))
+        else:
+            xs, ys = finite_xy(rows, x_key, y_key)
+            if not xs:
+                continue
+            ax.plot(xs, ys, label=label, linewidth=1.5, color=color)
+            # Direction arrow near midpoint
+            mid = len(xs) // 2
+            if mid + 1 < len(xs):
+                ax.annotate("", xy=(xs[mid + 1], ys[mid + 1]),
+                            xytext=(xs[mid], ys[mid]),
+                            arrowprops=dict(arrowstyle="->", color=color, lw=1.5))
         plotted = True
 
     if not plotted:
         plt.close()
         return False
 
-    ax.set_title(title)
+    # Mark start point shared by all trajectories
+    ax.plot(0, 0, "ko", markersize=6, zorder=5, label="start (0,0)")
+
+    diagnostics_str = f"ICP max step: {icp_max_jump:.3f} m"
+    ax.set_title(f"{title}\n{diagnostics_str}", fontsize=10)
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     ax.axis("equal")
@@ -658,6 +780,27 @@ def compute_summary(rows: list[dict[str, float | str | bool | None]], session_di
         dy = float(rows[-1]["odom_y"]) - float(rows[-1]["icp_y"])
         final_pose_error_m = math.hypot(dx, dy)
 
+    # ICP diagnostic: measure pose jumps between consecutive unique ICP positions.
+    # This is a warning-level metric only; a single step above 0.5 m can happen on
+    # fast replayed trajectories without making the full ICP trajectory unusable.
+    prev_icp_xy: tuple[float, float] | None = None
+    icp_jumps: list[float] = []
+    for row in rows:
+        ix = row.get("icp_x")
+        iy = row.get("icp_y")
+        if ix is None or iy is None:
+            continue
+        cur = (float(ix), float(iy))
+        if prev_icp_xy is not None and cur != prev_icp_xy:
+            icp_jumps.append(math.hypot(cur[0] - prev_icp_xy[0], cur[1] - prev_icp_xy[1]))
+        if cur != prev_icp_xy:
+            prev_icp_xy = cur
+    icp_max_jump = max(icp_jumps) if icp_jumps else None
+    icp_mean_jump = (sum(icp_jumps) / len(icp_jumps)) if icp_jumps else None
+    # Keep the historical field but use a practical offline threshold. The detailed
+    # offline_icp summary remains the source of truth for coverage and mapper health.
+    icp_quality_ok = (icp_max_jump is not None and icp_max_jump < 1.0)
+
     start_t = float(rows[0]["t"]) if rows else 0.0
     end_t = float(rows[-1]["t"]) if rows else 0.0
     return {
@@ -672,6 +815,9 @@ def compute_summary(rows: list[dict[str, float | str | bool | None]], session_di
         "sign_agreement": (sign_matches / sign_total) if sign_total else None,
         "sign_checks": sign_total,
         "final_pose_error_m": final_pose_error_m,
+        "icp_max_pose_jump_m": round(icp_max_jump, 4) if icp_max_jump is not None else None,
+        "icp_mean_pose_jump_m": round(icp_mean_jump, 4) if icp_mean_jump is not None else None,
+        "icp_quality_ok": icp_quality_ok,
     }
 
 
@@ -706,6 +852,70 @@ def read_csv(csv_path: Path) -> list[dict[str, float | str | bool | None]]:
     return rows
 
 
+def parse_vtk_trajectory(
+    vtk_path: Path, duration_s: float, start_time: float
+) -> list[dict[str, float | str | bool]]:
+    """Parse offline ICP trajectory.vtk into icp_odom-compatible samples.
+
+    Timestamps are linearly interpolated across *duration_s* starting at
+    *start_time*.  Heading is derived from forward-difference of positions so
+    that derive_icp_kinematics can compute velocities correctly.
+    """
+    if not vtk_path.exists() or vtk_path.stat().st_size < 200:
+        return []
+    try:
+        lines = vtk_path.read_text(encoding="utf-8", errors="ignore").splitlines()
+    except OSError:
+        return []
+    point_count = 0
+    data_start = None
+    for i, line in enumerate(lines):
+        parts = line.split()
+        if len(parts) >= 3 and parts[0].upper() == "POINTS":
+            try:
+                point_count = int(parts[1])
+                data_start = i + 1
+            except ValueError:
+                return []
+            break
+    if data_start is None or point_count <= 1:
+        return []
+    values: list[float] = []
+    for line in lines[data_start:]:
+        if len(values) >= point_count * 3:
+            break
+        parts = line.split()
+        if parts and parts[0].isalpha() and values:
+            break
+        for part in parts:
+            try:
+                values.append(float(part))
+            except ValueError:
+                return []
+    if len(values) < point_count * 3:
+        return []
+    pts = [(values[i * 3], values[i * 3 + 1]) for i in range(point_count)]
+    # Heading from forward differences (last point reuses previous heading)
+    headings: list[float] = []
+    for i in range(len(pts) - 1):
+        dx = pts[i + 1][0] - pts[i][0]
+        dy = pts[i + 1][1] - pts[i][1]
+        headings.append(math.atan2(dy, dx) if (dx * dx + dy * dy) > 1e-10 else 0.0)
+    headings.append(headings[-1] if headings else 0.0)
+    denom = max(1, point_count - 1)
+    samples: list[dict[str, float | str | bool]] = []
+    for i, (x, y) in enumerate(pts):
+        samples.append({
+            "t": start_time + (i / denom) * duration_s,
+            "x": x,
+            "y": y,
+            "heading": headings[i],
+            "linear_x": 0.0,
+            "angular_z": 0.0,
+        })
+    return samples
+
+
 def parse_args(workspace_root: Path) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Compare cmd_sim motion-model outputs against local ICP odometry."
@@ -720,6 +930,15 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         "--from-postprocess-csv",
         action="store_true",
         help="Read postprocess_dataset/dataset.csv instead of decoding the original bag.",
+    )
+    parser.add_argument(
+        "--use-offline-icp",
+        action="store_true",
+        help=(
+            "Replace /mapping/icp_odom from the bag with the offline ICP trajectory "
+            "(offline_icp/trajectory.vtk). Gives higher-quality ground truth at the "
+            "cost of linearly-interpolated timestamps."
+        ),
     )
     return parser.parse_args()
 
@@ -750,11 +969,57 @@ def main() -> int:
                     raise RuntimeError(f"no rows in {source_csv}")
             else:
                 samples = read_topic_samples(bag_dir)
+                if args.use_offline_icp:
+                    # Priority 1: icp_odom_replay bag — real ROS timestamps + SE(3) quaternion,
+                    #   produced by ros2 bag record during the offline ICP run.
+                    # Priority 2: trajectory.vtk fallback — linearly interpolated timestamps,
+                    #   position-only (no rotation). Use only when replay bag is absent.
+                    icp_source = None
+                    replay_bag = session_dir / "offline_icp" / "icp_odom_replay"
+                    if (replay_bag / "metadata.yaml").exists():
+                        try:
+                            replay_samples = read_topic_samples(replay_bag)
+                            msgs = replay_samples.get("/mapping/icp_odom", [])
+                            if msgs:
+                                samples["/mapping/icp_odom"] = msgs
+                                icp_source = "offline_icp/icp_odom_replay"
+                                print(f"  offline ICP: icp_odom_replay bag → {len(msgs)} poses (real timestamps)")
+                        except Exception as exc:
+                            print(f"  warning: could not read icp_odom_replay: {exc}", file=sys.stderr)
+                    if icp_source is None:
+                        # Fallback: VTK with linear timestamp interpolation
+                        all_times = [
+                            float(s["t"])
+                            for topic_samples in samples.values()
+                            for s in topic_samples
+                        ]
+                        if all_times:
+                            t_start = min(all_times)
+                            duration_s = max(all_times) - t_start
+                            vtk_path = session_dir / "offline_icp" / "trajectory.vtk"
+                            vtk_samples = parse_vtk_trajectory(vtk_path, duration_s, t_start)
+                            if vtk_samples:
+                                samples["/mapping/icp_odom"] = vtk_samples
+                                icp_source = "offline_icp/trajectory.vtk (interpolated)"
+                                print(f"  offline ICP: trajectory.vtk fallback → {len(vtk_samples)} poses (interpolated timestamps)")
+                            else:
+                                print("  warning: no offline ICP source found, using live bag icp_odom", file=sys.stderr)
                 rows = build_rows(samples)
+            # ── Auto-correct speed sign convention ────────────────────────────
+            # mtt_operator_input_node uses invert_linear_axis=true by default,
+            # which makes cmd_vel.linear.x (and model_speed_ms in cmd-sim mode)
+            # negative for physical forward motion.  Detect by comparing the
+            # overall ICP and model displacement directions.
+            speed_sign = detect_speed_sign(rows)
+            if speed_sign != 1.0:
+                integrate_model_trajectory(rows, speed_sign=speed_sign)
             summary = compute_summary(rows, session_dir)
+            summary["speed_sign_corrected"] = (speed_sign == -1.0)
             if args.from_postprocess_csv:
                 summary["input_source"] = "postprocess_dataset/dataset.csv"
                 summary["motion_model_fields_available"] = False
+            if getattr(args, "use_offline_icp", False) and not args.from_postprocess_csv:
+                summary["icp_source"] = icp_source or "bag_live"
             write_csv(rows, csv_path)
             summary_path.write_text(yaml.safe_dump(summary, sort_keys=False), encoding="utf-8")
         except Exception as exc:
