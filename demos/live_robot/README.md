@@ -99,6 +99,8 @@ Fresh route in the same live session:
 docker compose run --rm wiln_teach_start
 # drive manually
 docker compose run --rm wiln_teach_stop
+docker compose run --rm wiln_save
+docker compose run --rm wiln_validate
 docker compose run --rm wiln_replay
 ```
 
@@ -112,6 +114,7 @@ Replay an existing saved route:
 
 ```bash
 docker compose run --rm wiln_load
+docker compose run --rm wiln_validate
 docker compose run --rm wiln_replay
 ```
 
@@ -119,4 +122,15 @@ Diagnostics:
 
 ```bash
 docker compose run --rm wiln_status
+docker compose run --rm wiln_validate
 ```
+
+Before replaying a saved route on the real robot, make a preview plot from the
+workspace root:
+
+```bash
+python3 scripts/preview_wiln_route.py data/route.ltr
+```
+
+If the preview reports high curvature or steering saturation, replay slowly and
+lower the follower gains before hardware testing.

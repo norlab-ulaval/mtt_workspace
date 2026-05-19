@@ -24,7 +24,6 @@ mtt_workspace/
     robot.repos
   docker/
   demos/
-  doc/
   documentations/
   scripts/
 ```
@@ -93,21 +92,24 @@ Check the result:
 
 ### Docker build
 
-This is the standard path for this workspace:
+This is the standard path for this workspace.
+
+Build images explicitly when needed (new clone, Dockerfile change, or missing image):
 
 ```bash
-docker compose -f compose.yaml run --rm compile
+docker compose --profile build -f compose.yaml build devel_image
 ```
 
-That command builds what is needed in order:
-- `mtt_workspace:base` from `docker/Dockerfile.base` if the local base image is missing
-- `mtt_workspace:devel` from `docker/Dockerfile`
-- the ROS workspace with `colcon`
-
-You can still build the heavy base image explicitly:
+If you need the heavy base image explicitly:
 
 ```bash
 docker compose -f compose.yaml build base
+```
+
+Build the ROS workspace (no image rebuild):
+
+```bash
+docker compose -f compose.yaml run --rm compile
 ```
 
 Open a shell in the runtime image:
@@ -116,21 +118,68 @@ Open a shell in the runtime image:
 docker compose -f compose.yaml run --rm bash
 ```
 
-If Docker reports `pull access denied for mtt_workspace:base`, your local Compose
-file is probably stale. Pull the latest workspace and retry:
+If the image is missing, `compile` and `bash` will fail instead of rebuilding.
+Run the explicit build once, then continue with `compile`.
 
-```bash
-git pull
-docker compose -f compose.yaml run --rm compile
-```
+### Docker images (what they contain)
+
+- `mtt_workspace:base`
+  heavy system layer (ZED SDK, depthai, libpointmatcher, OS tools). Big and slow
+  to rebuild, so we keep it stable.
+- `mtt_workspace:devel`
+  adds ROS packages and Python deps needed by the workspace. This is the image
+  used by `compile`, `bash`, `dev`, and demo services.
+
+The container always bind-mounts the local workspace, so your local `src/` is the
+source of truth at runtime.
+
+### Platform honesty (where it works)
+
+- Works on Linux x86_64 with Docker.
+- GPU support is optional and needs the NVIDIA container runtime on the host.
+- X11 GUI works on Linux when the host allows it.
+
+Not guaranteed:
+- macOS and Windows (host networking and GPU passthrough are Linux-only)
+- ARM hosts (images are built for x86_64)
 
 ### Host build
 
 Use this only if you really want a host-side build.
 
+One-shot setup for a clean Ubuntu host:
+
+```bash
+./scripts/install_host.sh --with-ros
+```
+
+If you already have ROS 2 Jazzy installed:
+
+```bash
+./scripts/install_host.sh
+```
+
+Dry-run or check-only:
+
+```bash
+./scripts/install_host.sh --dry-run
+./scripts/install_host.sh --check
+```
+
+What the script checks (host-only path):
+- ROS 2 Jazzy setup
+- rosdep, colcon, vcs
+- ZED SDK presence under /usr/local/zed
+- depthai headers under /usr/local/include/depthai
+- libpointmatcher and libnabo in the linker cache
+
+Honest limitation: the script cannot install vendor SDKs (ZED, depthai) for you.
+It only detects them. These are provided by the Docker base image; on host you
+must install them manually if you want a full native build.
+
 ```bash
 source /opt/ros/jazzy/setup.bash
-colcon build --base-paths src/mtt_core src/external --symlink-install
+colcon build --base-paths src/mtt_core src/external
 source install/setup.bash
 ```
 
@@ -192,13 +241,7 @@ Because this workspace uses nested repositories, root-level `git status` is not 
 
 ## Documentation layout
 
-- `doc/`
-  workspace notes, setup notes, and operator-facing material
-- `documentations/`
-  technical references, architecture notes, DBC files, and vendor material
-
-Start with:
-- [doc/README.md](./doc/README.md)
+All technical notes live in:
 - [documentations/README.md](./documentations/README.md)
 
 ## Notes

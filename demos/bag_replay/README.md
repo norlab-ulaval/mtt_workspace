@@ -53,6 +53,54 @@ Rebuild one session offline with ICP mapping:
 BAG_PATH=/path/to/session docker compose --profile offline_icp up offline_icp
 ```
 
+Validate WILN teach-and-repeat on a clean ICP bag:
+
+```bash
+BAG_PATH=/path/to/session REPLAY_RATE=0.5 docker compose --profile mapping --profile teach_repeat up bag_player description perception mapping foxglove teach_repeat
+```
+
+During replay, call WILN services from another shell in the same Compose project:
+
+```bash
+docker compose --profile debug run --rm bash
+ros2 service call /start_recording std_srvs/srv/Empty "{}"
+ros2 service call /stop_recording std_srvs/srv/Empty "{}"
+ros2 service call /save_map_traj wiln/srv/SaveMapTraj "{file_name: {data: '${WORKSPACE}/data/route.ltr'}}"
+python3 ${WORKSPACE}/scripts/validate_wiln_route.py ${WORKSPACE}/data/route.ltr
+ros2 service call /load_map_traj wiln/srv/LoadMapTraj "{file_name: {data: '${WORKSPACE}/data/route.ltr'}}"
+ros2 service call /play_line std_srvs/srv/Empty "{}"
+```
+
+The route is usable only if `/mapping/icp_odom` is continuous and the route validator does not reject the `.ltr`.
+
+Score the existing bag results before choosing a WILN test route:
+
+```bash
+python3 ${WORKSPACE}/scripts/evaluate_wiln_readiness.py ${WORKSPACE}/data
+cat ${WORKSPACE}/data/wiln_readiness_summary.csv
+```
+
+Export a WILN route directly from a trusted ICP CSV:
+
+```bash
+SESSION=${WORKSPACE}/data/mtt_calibration_test_garage_2026-04-29_15-59-38
+python3 ${WORKSPACE}/scripts/export_icp_route_to_ltr.py \
+  ${SESSION}/motion_model_validation/model_dataset.csv \
+  ${SESSION}/wiln_routes/icp_route.ltr
+python3 ${WORKSPACE}/scripts/validate_wiln_route.py \
+  ${SESSION}/wiln_routes/icp_route.ltr
+python3 ${WORKSPACE}/scripts/preview_wiln_route.py \
+  ${SESSION}/wiln_routes/icp_route.ltr \
+  --dataset-csv ${SESSION}/motion_model_validation/model_dataset.csv
+```
+
+The preview writes:
+- `wiln_routes/preview/wiln_route_preview.png`
+- `wiln_routes/preview/wiln_route_preview.yaml`
+
+Check the preview before any real replay. If it reports `steering_near_saturation`
+or `high_curvature`, keep WILN slow and reduce follower gains before hardware.
+
 Rebuild every `mtt_*` session under `data/`:
 
 ```bash

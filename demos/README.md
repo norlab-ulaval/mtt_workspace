@@ -23,14 +23,20 @@ Use the demo that matches the machine you are on:
 From the repository root:
 
 ```bash
-xhost +local:docker
+xhost +si:localuser:$USER
+docker compose --profile build -f compose.yaml build devel_image
 docker compose run --rm compile
 docker compose run --rm bash
 ```
 
-`compile` builds the base image, devel image, and ROS workspace when needed. If
-you only want to prebuild the heavy base layer, run `docker compose -f
-compose.yaml build base` from the repository root.
+`compile` only builds the ROS workspace. It does not rebuild images. If the
+image is missing, build it explicitly with the `devel_image` profile first.
+
+If you only want the heavy base layer:
+
+```bash
+docker compose -f compose.yaml build base
+```
 
 On the robot:
 
