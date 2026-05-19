@@ -4,15 +4,19 @@
 from __future__ import annotations
 
 import argparse
+import math
 import os
+import re
 import shutil
 import signal
 import subprocess
 import sys
+import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -26,6 +30,7 @@ HESAI_TOPIC = "/hesai_lidar/points"
 RSAIRY_TOPIC = "/rsairy_ns/points"
 MERGED_TOPIC = "/merged_points_filtered"
 MERGED_DEBUG_TOPIC = "/merged_points"
+MERGED_RELIABLE_TOPIC = "/merged_points_reliable"
 
 REBUILT_MAPPING_TOPICS = [
     "/mapping/icp_odom",
@@ -38,6 +43,7 @@ REBUILT_MAPPING_TOPICS = [
 REBUILT_PERCEPTION_TOPICS = [
     MERGED_TOPIC,
     MERGED_DEBUG_TOPIC,
+    MERGED_RELIABLE_TOPIC,
     "/trailer/angle",
     "/trailer/articulation_angle",
     "/trailer/pose",
@@ -89,8 +95,11 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
     parser.add_argument(
         "--mode",
         default=os.environ.get("OFFLINE_ICP_MODE", "auto"),
-        choices=["auto", "fused", "hesai"],
-        help="Mapping input policy. auto = fused if possible, otherwise fallback.",
+        choices=["auto", "hesai_imu", "fused", "hesai"],
+        help=(
+            "Mapping input policy. auto = Hesai + IMU prior first, then documented "
+            "fallbacks. hesai = raw Hesai with replayed TF/odom for comparison only."
+        ),
     )
     parser.add_argument(
         "--force",
@@ -147,6 +156,64 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         help="TF frame used as mapper odom prior. Default matches norlab_robot mapping launch.",
     )
     parser.add_argument(
+        "--imu-frame",
+        default=os.environ.get("OFFLINE_ICP_IMU_FRAME", "imu_link"),
+        help=(
+            "IMU frame used by imu_odom when rebuilding the odom prior. "
+            "MTT bags publish /mti100/data with frame_id=imu_link."
+        ),
+    )
+    parser.add_argument(
+        "--imu-topic",
+        default=os.environ.get("OFFLINE_ICP_IMU_TOPIC", "/mti100/data"),
+        help="IMU topic used by the hesai_imu offline ICP profile.",
+    )
+    parser.add_argument(
+        "--fused-points-topic",
+        default=os.environ.get("OFFLINE_ICP_FUSED_POINTS_TOPIC", MERGED_RELIABLE_TOPIC),
+        choices=[MERGED_TOPIC, MERGED_DEBUG_TOPIC, MERGED_RELIABLE_TOPIC],
+        help=(
+            "Point cloud consumed by fused mode. /merged_points_reliable is raw "
+            "fused cloud with reliable QoS for the mapper; /merged_points is "
+            "best-effort debug; /merged_points_filtered can be cloud-merger filtered."
+        ),
+    )
+    parser.add_argument(
+        "--fused-filter-owner",
+        default=os.environ.get("OFFLINE_ICP_FUSED_FILTER_OWNER", "mapper"),
+        choices=["mapper", "cloud_merger"],
+        help=(
+            "Where fused mode applies chassis/cage/trailer bbox filtering. "
+            "mapper = raw reliable fused cloud with cloud_merger bbox disabled; "
+            "cloud_merger = cloud_merger publishes already-filtered clouds."
+        ),
+    )
+    parser.add_argument(
+        "--fused-hesai-stride",
+        type=int,
+        default=int(os.environ.get("OFFLINE_ICP_FUSED_HESAI_STRIDE", "1")),
+        help="Fused mode only: keep one out of N Hesai points before merging.",
+    )
+    parser.add_argument(
+        "--fused-rsairy-stride",
+        type=int,
+        default=int(os.environ.get("OFFLINE_ICP_FUSED_RSAIRY_STRIDE", "1")),
+        help=(
+            "Fused mode only: keep one out of N RS-Airy points before merging. "
+            "Use together with --fused-rsairy-inject-every-n for rear-lidar downweighting."
+        ),
+    )
+    parser.add_argument(
+        "--fused-rsairy-inject-every-n",
+        type=int,
+        default=int(os.environ.get("OFFLINE_ICP_FUSED_RSAIRY_INJECT_EVERY_N", "10")),
+        help=(
+            "Fused mode only: publish Hesai at every frame and inject RS-Airy "
+            "only once every N Hesai frames. Default keeps ICP near 20 Hz while "
+            "adding rear details occasionally."
+        ),
+    )
+    parser.add_argument(
         "--experiment-name",
         default=os.environ.get("OFFLINE_ICP_EXPERIMENT_NAME", ""),
         help="Write outputs under offline_icp_experiments/<name> and do not update compatibility map files.",
@@ -196,6 +263,16 @@ def choose_pipeline(counts: dict[str, int], requested_mode: str) -> PipelineChoi
     has_rsairy = counts.get(RSAIRY_TOPIC, 0) > 0
     has_merged = counts.get(MERGED_TOPIC, 0) > 0
 
+    if requested_mode == "hesai_imu":
+        if not has_hesai:
+            raise RuntimeError("Hesai point cloud is not available in this session.")
+        return PipelineChoice(
+            "hesai_imu",
+            HESAI_TOPIC,
+            False,
+            "Hesai raw cloud with MTi-100 IMU odom prior and replay TF excluded",
+        )
+
     if requested_mode == "hesai":
         if not has_hesai:
             raise RuntimeError("Hesai point cloud is not available in this session.")
@@ -208,12 +285,15 @@ def choose_pipeline(counts: dict[str, int], requested_mode: str) -> PipelineChoi
             return PipelineChoice("merged_recorded", MERGED_TOPIC, False, "Recorded merged cloud available")
         raise RuntimeError("Requested fused mapping but the session does not contain both raw LiDAR clouds.")
 
-    if has_hesai and has_rsairy:
-        return PipelineChoice("fused", MERGED_TOPIC, True, "Both raw LiDAR clouds available")
+    if has_hesai:
+        return PipelineChoice(
+            "hesai_imu",
+            HESAI_TOPIC,
+            False,
+            "Default baseline: Hesai raw cloud with MTi-100 IMU odom prior",
+        )
     if has_merged:
         return PipelineChoice("merged_recorded", MERGED_TOPIC, False, "Recorded merged cloud available")
-    if has_hesai:
-        return PipelineChoice("hesai", HESAI_TOPIC, False, "Falling back to Hesai only")
     raise RuntimeError("No usable LiDAR point cloud is available for ICP mapping.")
 
 
@@ -222,15 +302,18 @@ def candidate_pipelines(counts: dict[str, int], requested_mode: str) -> list[Pip
     candidates = [primary]
 
     has_hesai = counts.get(HESAI_TOPIC, 0) > 0
+    has_rsairy = counts.get(RSAIRY_TOPIC, 0) > 0
     has_merged = counts.get(MERGED_TOPIC, 0) > 0
 
     if requested_mode != "auto":
         return candidates
 
-    if primary.mode == "fused" and has_merged:
+    if has_merged and primary.mode != "merged_recorded":
         candidates.append(PipelineChoice("merged_recorded", MERGED_TOPIC, False, "Fallback to recorded merged cloud"))
-    if has_hesai and primary.mode != "hesai":
-        candidates.append(PipelineChoice("hesai", HESAI_TOPIC, False, "Fallback to Hesai only"))
+    if has_hesai and has_rsairy and primary.mode != "fused":
+        candidates.append(PipelineChoice("fused", MERGED_TOPIC, True, "Fallback to rebuilt fused cloud"))
+    if has_hesai and primary.mode not in {"hesai", "hesai_imu"}:
+        candidates.append(PipelineChoice("hesai", HESAI_TOPIC, False, "Fallback to Hesai with replayed TF"))
 
     deduped: list[PipelineChoice] = []
     seen: set[tuple[str, str, bool]] = set()
@@ -259,7 +342,7 @@ def terminate_process(process: subprocess.Popen | None, grace_s: float = 10.0) -
         return
 
     try:
-        process.send_signal(signal.SIGINT)
+        os.killpg(process.pid, signal.SIGINT)
     except ProcessLookupError:
         return
 
@@ -270,7 +353,7 @@ def terminate_process(process: subprocess.Popen | None, grace_s: float = 10.0) -
         time.sleep(0.2)
 
     try:
-        process.send_signal(signal.SIGTERM)
+        os.killpg(process.pid, signal.SIGTERM)
     except ProcessLookupError:
         return
 
@@ -317,11 +400,17 @@ def wait_for_service(service_name: str, timeout_s: float, log_dir: Path) -> bool
     return False
 
 
-def call_save_service(service_name: str, service_type: str, request: str, log_path: Path) -> bool:
+def call_save_service(
+    service_name: str,
+    service_type: str,
+    request: str,
+    log_path: Path,
+    timeout_s: float = 300.0,
+) -> bool:
     result = run_capture(
         ["ros2", "service", "call", service_name, service_type, request],
         log_path,
-        timeout_s=30.0,
+        timeout_s=timeout_s,
     )
     return result.returncode == 0
 
@@ -330,7 +419,148 @@ def excluded_topics_for_pipeline(pipeline: PipelineChoice) -> list[str]:
     topics = list(REBUILT_MAPPING_TOPICS)
     if pipeline.launch_perception:
         topics.extend(REBUILT_PERCEPTION_TOPICS)
+    if pipeline.mode in {"hesai_imu", "fused"}:
+        topics.append("/tf")
     return topics
+
+
+def validate_icp_odom_replay(bag_dir: Path, expected_duration_s: float) -> dict[str, Any]:
+    """Read the recorded icp_odom_replay bag and check quality.
+
+    Checks:
+    - message count vs expected ICP rate (~2-10 Hz for a moving robot)
+    - temporal coverage vs bag duration
+    - max timestamp gap (ICP stall / mapper crash)
+    - max 2-D pose jump (divergence detection — BoundTransformationChecker should cap at 2 m)
+    """
+    result: dict[str, Any] = {
+        "status": "not_checked",
+        "message_count": 0,
+        "coverage_s": 0.0,
+        "coverage_ratio": 0.0,
+        "max_timestamp_gap_s": 0.0,
+        "max_pose_jump_m": 0.0,
+        "warnings": [],
+    }
+
+    mcap = next(bag_dir.glob("*.mcap"), None) if bag_dir.exists() else None
+    if not mcap or mcap.stat().st_size < 512:
+        result["status"] = "empty_or_missing"
+        return result
+
+    try:
+        import rosbag2_py  # type: ignore[import]
+        from rclpy.serialization import deserialize_message  # type: ignore[import]
+        from rosidl_runtime_py.utilities import get_message  # type: ignore[import]
+    except ImportError:
+        result["status"] = "rosbag2_py_unavailable"
+        result["message_count"] = -1
+        return result
+
+    try:
+        reader = rosbag2_py.SequentialReader()
+        reader.open(
+            rosbag2_py.StorageOptions(uri=str(bag_dir), storage_id="mcap"),
+            rosbag2_py.ConverterOptions("cdr", "cdr"),
+        )
+        reader.set_filter(rosbag2_py.StorageFilter(topics=["/mapping/icp_odom"]))
+        msg_type = get_message("nav_msgs/msg/Odometry")
+
+        poses: list[tuple[float, float, float]] = []  # (t_s, x, y)
+        prev_t: float | None = None
+        max_gap = 0.0
+
+        while reader.has_next():
+            _, data, ts_ns = reader.read_next()
+            msg = deserialize_message(data, msg_type)
+            t = float(msg.header.stamp.sec) + float(msg.header.stamp.nanosec) * 1e-9
+            x = float(msg.pose.pose.position.x)
+            y = float(msg.pose.pose.position.y)
+            if prev_t is not None and t > prev_t:
+                max_gap = max(max_gap, t - prev_t)
+            prev_t = t
+            poses.append((t, x, y))
+
+    except Exception as exc:
+        result["status"] = f"read_error: {exc}"
+        return result
+
+    if not poses:
+        result["status"] = "empty"
+        return result
+
+    count = len(poses)
+    coverage = poses[-1][0] - poses[0][0]
+    coverage_ratio = coverage / max(expected_duration_s, 1.0)
+
+    max_jump = 0.0
+    for i in range(1, count):
+        dx = poses[i][1] - poses[i - 1][1]
+        dy = poses[i][2] - poses[i - 1][2]
+        max_jump = max(max_jump, math.sqrt(dx * dx + dy * dy))
+
+    warnings: list[str] = []
+    # Coverage below 60 %: ICP stalled or crashed for most of the session
+    if coverage_ratio < 0.60:
+        warnings.append(f"low_coverage:{coverage_ratio:.0%}_of_{expected_duration_s:.0f}s")
+    # Gap > 10 s: ICP was blocked or mapper restarted
+    if max_gap > 10.0:
+        warnings.append(f"timestamp_gap:{max_gap:.1f}s")
+    # Pose jump > 1.5 m: BoundTransformationChecker set to 2 m, so >1.5 m is suspicious
+    if max_jump > 1.5:
+        warnings.append(f"pose_jump:{max_jump:.2f}m")
+    # Fewer than 10 messages: essentially empty
+    if count < 10:
+        warnings.append(f"too_few_messages:{count}")
+
+    result.update({
+        "status": "ok" if not warnings else "ok_with_warnings",
+        "message_count": count,
+        "coverage_s": round(coverage, 2),
+        "coverage_ratio": round(coverage_ratio, 3),
+        "max_timestamp_gap_s": round(max_gap, 3),
+        "max_pose_jump_m": round(max_jump, 4),
+        "warnings": warnings,
+    })
+    return result
+
+
+class RecordWatchdog:
+    """Background thread: monitors record_proc during bag play, logs if it dies early."""
+
+    def __init__(self, proc: subprocess.Popen, log_path: Path, bag_duration_s: float):
+        self._proc = proc
+        self._log_path = log_path
+        self._bag_duration_s = bag_duration_s
+        self._died_at: float | None = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        start = time.time()
+        while not self._stop.is_set():
+            if self._proc.poll() is not None:
+                elapsed = time.time() - start
+                self._died_at = elapsed
+                msg = (
+                    f"[watchdog] icp_odom recorder exited after {elapsed:.1f}s "
+                    f"(expected ~{self._bag_duration_s:.0f}s). "
+                    f"returncode={self._proc.returncode}\n"
+                )
+                try:
+                    with self._log_path.open("a") as f:
+                        f.write(msg)
+                except OSError:
+                    pass
+                return
+            time.sleep(2.0)
+
+    def stop(self) -> float | None:
+        """Stop the watchdog and return elapsed time when recorder died (None = still alive)."""
+        self._stop.set()
+        self._thread.join(timeout=5.0)
+        return self._died_at
 
 
 def write_summary(output_dir: Path, result: dict) -> None:
@@ -339,6 +569,48 @@ def write_summary(output_dir: Path, result: dict) -> None:
         yaml.safe_dump(result, sort_keys=False),
         encoding="utf-8",
     )
+
+
+def parse_cloud_merger_stats(log_path: Path) -> dict[str, Any]:
+    stats: dict[str, Any] = {
+        "status": "missing",
+        "published_count": 0,
+        "no_pair_drops": 0,
+        "tf_drops": 0,
+        "reuse_count": 0,
+        "avg_pair_dt_s": None,
+        "max_pair_dt_s": None,
+        "last_hesai_points": None,
+        "last_rsairy_points": None,
+        "last_merged_points": None,
+    }
+    if not log_path.exists():
+        return stats
+
+    pattern = re.compile(
+        r"H=(?P<hesai>\d+)\s+R=(?P<rsairy>\d+)\s+merged=(?P<merged>\d+).*"
+        r"pub=(?P<pub>\d+)\s+no_pair=(?P<no_pair>\d+)\s+tf_drop=(?P<tf_drop>\d+)"
+        r"\s+reuse=(?P<reuse>\d+)\s+avg_dt=(?P<avg>[0-9.]+)s\s+max_dt=(?P<max>[0-9.]+)s"
+    )
+    for line in log_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        match = pattern.search(line)
+        if not match:
+            continue
+        stats.update({
+            "status": "ok",
+            "published_count": int(match.group("pub")),
+            "no_pair_drops": int(match.group("no_pair")),
+            "tf_drops": int(match.group("tf_drop")),
+            "reuse_count": int(match.group("reuse")),
+            "avg_pair_dt_s": float(match.group("avg")),
+            "max_pair_dt_s": float(match.group("max")),
+            "last_hesai_points": int(match.group("hesai")),
+            "last_rsairy_points": int(match.group("rsairy")),
+            "last_merged_points": int(match.group("merged")),
+        })
+    if stats["status"] == "missing":
+        stats["status"] = "no_stats_found"
+    return stats
 
 
 def run_pipeline(
@@ -362,9 +634,11 @@ def run_pipeline(
     compat_trajectory_file = session_dir / "trajectory.vtk"
     result = dict(base_result)
     result["mode"] = pipeline.mode
-    result["points_topic"] = pipeline.points_topic
+    points_topic = args.fused_points_topic if pipeline.mode == "fused" else pipeline.points_topic
+    result["points_topic"] = points_topic
     result["launch_perception"] = pipeline.launch_perception
     result["reason"] = pipeline.reason
+    result["fused_filter_owner"] = args.fused_filter_owner if pipeline.mode == "fused" else None
     result["bag_duration_seconds"] = duration_s
     result["offline_quality"] = args.offline_quality
     result["map_file"] = str(map_file)
@@ -377,15 +651,24 @@ def run_pipeline(
 
     description_proc = None
     perception_proc = None
+    imu_odom_proc = None
     mapping_proc = None
     bag_proc = None
+    record_proc = None
 
     qos_override = workspace_root / "src" / "external" / "norlab_robot" / "config" / "rosbag_record" / "qos_replay_override.yaml"
     standard_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config.yaml"
     dense_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_replay_dense.yaml"
+    hesai_imu_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_hesai_imu_replay.yaml"
+    fused_imu_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_fused_imu_replay.yaml"
+    fused_simple_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_fused_simple_replay.yaml"
     replay_rate = args.replay_rate
     mapping_compression_voxel_size = "0.20"
     mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else standard_mapping_config
+    mapping_robot_frame = "base_footprint"
+    mapping_initial_robot_pose = ""
+    mapping_is_online = "true"
+    use_imu_odom_prior = pipeline.mode in {"hesai_imu", "fused"}
     if args.offline_quality == "max":
         mapping_compression_voxel_size = "0.10"
         mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
@@ -404,26 +687,74 @@ def run_pipeline(
             f"filter_trailer={args.filter_trailer}",
             f"effective_replay_rate={replay_rate}",
         ]
+
+    if use_imu_odom_prior:
+        mapping_robot_frame = "base_link"
+        mapping_initial_robot_pose = "[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]"
+        mapping_is_online = "false"
+        if pipeline.mode == "hesai_imu":
+            mapping_compression_voxel_size = "0.50"
+            mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else hesai_imu_mapping_config
+        elif pipeline.mode == "fused":
+            if args.fused_filter_owner == "mapper":
+                mapping_compression_voxel_size = "0.10"
+                mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
+            elif points_topic == MERGED_DEBUG_TOPIC:
+                mapping_compression_voxel_size = "0.10"
+                mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
+            else:
+                mapping_compression_voxel_size = "0.20"
+                mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else fused_imu_mapping_config
+        result["quality_profile_notes"] = [
+            f"pipeline={pipeline.mode}",
+            f"source={points_topic}",
+            "imu_odom_topic=/mti100/data",
+            "imu_odom_rotation_only=true",
+            "exclude_replayed_tf=true",
+            "use_recorded_tf_static=true",
+            "mapping_robot_frame=base_link",
+            "mapping_initial_robot_pose=identity",
+            "mapping_is_online=false",
+            f"mapping_compression_voxel_size={mapping_compression_voxel_size}",
+            f"mapping_config={mapping_config}",
+            f"effective_replay_rate={replay_rate}",
+            f"fused_hesai_stride={args.fused_hesai_stride if pipeline.mode == 'fused' else None}",
+            f"fused_rsairy_stride={args.fused_rsairy_stride if pipeline.mode == 'fused' else None}",
+            f"fused_rsairy_inject_every_n={args.fused_rsairy_inject_every_n if pipeline.mode == 'fused' else None}",
+        ]
     result["mapping_config"] = str(mapping_config)
     result["filter_trailer"] = bool(args.filter_trailer)
     result["mapping_odom_frame"] = args.mapping_odom_frame
+    result["mapping_robot_frame"] = mapping_robot_frame
+    result["mapping_initial_robot_pose"] = "identity" if mapping_initial_robot_pose else None
+    result["mapping_is_online"] = mapping_is_online == "true"
+    result["use_imu_odom_prior"] = use_imu_odom_prior
+    result["fused_hesai_stride"] = args.fused_hesai_stride if pipeline.mode == "fused" else None
+    result["fused_rsairy_stride"] = args.fused_rsairy_stride if pipeline.mode == "fused" else None
+    result["fused_rsairy_inject_every_n"] = args.fused_rsairy_inject_every_n if pipeline.mode == "fused" else None
+    result["imu_topic"] = args.imu_topic if use_imu_odom_prior else None
+    result["imu_frame"] = args.imu_frame if use_imu_odom_prior else None
+    result["exclude_replayed_tf"] = use_imu_odom_prior
+    result["use_recorded_tf_static"] = use_imu_odom_prior
     play_timeout = max(60.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)
+    icp_odom_bag_dir = output_dir / "icp_odom_replay"
 
     try:
-        description_proc = start_process(
-            [
-                "ros2", "launch", "norlab_robot", "live_robot.launch.py",
-                "enable_description:=true",
-                "enable_sensors:=false",
-                "enable_mapping:=false",
-                "enable_perception:=false",
-                "enable_localization:=false",
-                "setup_real_can:=false",
-                "publish_runtime_joint_states:=false",
-                "use_sim_time:=true",
-            ],
-            log_dir / f"description_{pipeline.mode}.log",
-        )
+        if not use_imu_odom_prior:
+            description_proc = start_process(
+                [
+                    "ros2", "launch", "norlab_robot", "live_robot.launch.py",
+                    "enable_description:=true",
+                    "enable_sensors:=false",
+                    "enable_mapping:=false",
+                    "enable_perception:=false",
+                    "enable_localization:=false",
+                    "setup_real_can:=false",
+                    "publish_runtime_joint_states:=false",
+                    "use_sim_time:=true",
+                ],
+                log_dir / f"description_{pipeline.mode}.log",
+            )
 
         if pipeline.launch_perception:
             perception_proc = start_process(
@@ -431,6 +762,12 @@ def run_pipeline(
                     "ros2", "launch", "mtt_perception", "perception.launch.py",
                     "use_sim_time:=true",
                     "publish_filtered:=true",
+                    f"cloud_merger_publish_reliable_raw:={'true' if pipeline.mode == 'fused' and points_topic == MERGED_RELIABLE_TOPIC else 'false'}",
+                    "cloud_merger_publish_debug_inputs:=true",
+                    f"cloud_merger_hesai_stride:={args.fused_hesai_stride if pipeline.mode == 'fused' else 1}",
+                    f"cloud_merger_rsairy_stride:={args.fused_rsairy_stride if pipeline.mode == 'fused' else 1}",
+                    f"cloud_merger_rsairy_inject_every_n:={args.fused_rsairy_inject_every_n if pipeline.mode == 'fused' else 1}",
+                    f"cloud_merger_enable_self_bbox_filter:={'false' if pipeline.mode == 'fused' and args.fused_filter_owner == 'mapper' else 'true'}",
                     "cloud_merger_max_pair_dt:=0.120",
                     "cloud_merger_tf_timeout:=0.100",
                     f"cloud_merger_enable_trailer_bbox_filter:={'true' if args.filter_trailer else 'false'}",
@@ -438,15 +775,37 @@ def run_pipeline(
                 log_dir / f"perception_{pipeline.mode}.log",
             )
 
+        if use_imu_odom_prior:
+            imu_odom_proc = start_process(
+                [
+                    "ros2", "run", "imu_odom", "imu_odom_node",
+                    "--ros-args",
+                    "-p", "use_sim_time:=true",
+                    "-p", f"odom_frame:={args.mapping_odom_frame}",
+                    "-p", "robot_frame:=base_footprint",
+                    "-p", f"imu_frame:={args.imu_frame}",
+                    "-p", "rotation_only:=true",
+                    "-p", "real_time:=false",
+                    "-r", f"imu_topic:={args.imu_topic}",
+                ],
+                log_dir / f"imu_odom_{pipeline.mode}.log",
+            )
+
+        mapping_command = [
+            "ros2", "launch", "norlab_robot", "mapping.launch.py",
+            "use_sim_time:=true",
+            f"mapping_points_topic:={points_topic}",
+            f"mapping_config:={mapping_config}",
+            f"mapping_compression_voxel_size:={mapping_compression_voxel_size}",
+            f"mapping_odom_frame:={args.mapping_odom_frame}",
+            f"mapping_robot_frame:={mapping_robot_frame}",
+            f"mapping_is_online:={mapping_is_online}",
+        ]
+        if mapping_initial_robot_pose:
+            mapping_command.append(f"mapping_initial_robot_pose:={mapping_initial_robot_pose}")
+
         mapping_proc = start_process(
-            [
-                "ros2", "launch", "norlab_robot", "mapping.launch.py",
-                "use_sim_time:=true",
-                f"mapping_points_topic:={pipeline.points_topic}",
-                f"mapping_config:={mapping_config}",
-                f"mapping_compression_voxel_size:={mapping_compression_voxel_size}",
-                f"mapping_odom_frame:={args.mapping_odom_frame}",
-            ],
+            mapping_command,
             log_dir / f"mapping_{pipeline.mode}.log",
         )
 
@@ -455,6 +814,40 @@ def run_pipeline(
 
         if not wait_for_service(SAVE_MAP_SERVICE, args.ready_timeout_seconds, pipeline_log_dir):
             raise RuntimeError("Mapper services did not appear before timeout.")
+
+        run_capture(
+            ["ros2", "param", "dump", "/mapping/icp_mapper"],
+            log_dir / f"mapping_params_{pipeline.mode}.yaml",
+            timeout_s=10.0,
+        )
+        if use_imu_odom_prior:
+            run_capture(
+                ["ros2", "param", "dump", "/imu_odom_node"],
+                log_dir / f"imu_odom_params_{pipeline.mode}.yaml",
+                timeout_s=10.0,
+            )
+
+        # Record high-quality icp_odom during replay → real sim-time timestamps + SE(3).
+        # /mapping/icp_odom is excluded from bag play (REBUILT_MAPPING_TOPICS) so only
+        # the fresh offline mapper output lands here.
+        # ros2 bag record requires the output dir to NOT exist — it creates it itself.
+        shutil.rmtree(icp_odom_bag_dir, ignore_errors=True)  # clean stale data before re-run
+        record_proc = start_process(
+            [
+                "ros2", "bag", "record",
+                "--output", str(icp_odom_bag_dir),
+                "--storage", "mcap",
+                "--topics", "/mapping/icp_odom",
+            ],
+            log_dir / f"record_icp_odom_{pipeline.mode}.log",
+        )
+
+        # Watchdog: alerts if the recorder dies unexpectedly during bag play
+        record_watchdog = RecordWatchdog(
+            record_proc,
+            log_dir / f"record_icp_odom_{pipeline.mode}.log",
+            duration_s / replay_rate,
+        )
 
         bag_proc = start_process(
             [
@@ -474,19 +867,34 @@ def run_pipeline(
         except subprocess.TimeoutExpired as exc:
             raise RuntimeError(f"Bag playback timed out after {play_timeout:.1f}s") from exc
 
+        died_at = record_watchdog.stop()
+        if died_at is not None:
+            raise RuntimeError(
+                f"icp_odom recorder died after {died_at:.1f}s "
+                f"(bag replay was {duration_s / replay_rate:.0f}s) — "
+                "icp_odom_replay bag is incomplete."
+            )
+
         if bag_returncode != 0:
             raise RuntimeError(f"ros2 bag play exited with code {bag_returncode}")
 
-        time.sleep(args.settle_seconds)
+        # Adaptive settle: give the mapper time to flush last ICP updates.
+        # 1 % of bag duration, bounded between 4 s and 15 s.
+        effective_settle = max(4.0, min(15.0, duration_s * 0.01))
+        time.sleep(effective_settle)
 
         map_request = f'{{map_file_name: {{data: "{map_file}"}}}}'
         trajectory_request = f'{{trajectory_file_name: {{data: "{trajectory_file}"}}}}'
+
+        # Adaptive save timeout: 60 s base + 1 s per second of bag (large sessions → large maps)
+        save_timeout_s = max(120.0, 60.0 + duration_s)
 
         if not call_save_service(
             SAVE_MAP_SERVICE,
             SAVE_MAP_TYPE,
             map_request,
             log_dir / f"save_map_{pipeline.mode}.txt",
+            timeout_s=save_timeout_s,
         ):
             raise RuntimeError("Failed to save map via /mapping/save_map")
 
@@ -495,6 +903,7 @@ def run_pipeline(
             SAVE_TRAJECTORY_TYPE,
             trajectory_request,
             log_dir / f"save_trajectory_{pipeline.mode}.txt",
+            timeout_s=60.0,
         ):
             raise RuntimeError("Failed to save trajectory via /mapping/save_trajectory")
 
@@ -512,7 +921,22 @@ def run_pipeline(
 
     finally:
         terminate_process(bag_proc)
+        terminate_process(record_proc)  # SIGINT → closes mcap cleanly before killing mapper
+        icp_odom_mcap = next(icp_odom_bag_dir.glob("*.mcap"), None)
+        result["icp_odom_replay_size_bytes"] = icp_odom_mcap.stat().st_size if icp_odom_mcap else 0
+        # Validate the recorded icp_odom bag now that it is finalized
+        try:
+            result["icp_odom_replay_validation"] = validate_icp_odom_replay(
+                icp_odom_bag_dir, duration_s
+            )
+        except Exception as exc:  # noqa: BLE001
+            result["icp_odom_replay_validation"] = {"status": f"validation_error:{exc}"}
+        if pipeline.launch_perception:
+            result["cloud_merger_stats"] = parse_cloud_merger_stats(
+                log_dir / f"perception_{pipeline.mode}.log"
+            )
         terminate_process(mapping_proc)
+        terminate_process(imu_odom_proc)
         terminate_process(perception_proc)
         terminate_process(description_proc)
         write_summary(output_dir, result)

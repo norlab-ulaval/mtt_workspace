@@ -13,6 +13,8 @@ x-replay-base: &replay_base
   extends:
     file: ../../docker/common.yaml
     service: ros_runtime_base
+  env_file:
+    - ../../.env
   image: ${MTT_IMAGE:-mtt_workspace:devel}
   build: *mtt_devel_build
   pull_policy: never
@@ -81,7 +83,7 @@ services:
             /trailer/angle /trailer/articulation_angle /trailer/pose \
             /trailer/body_markers /trailer/trailer_roi_cloud \
             /planned_trajectory /real_trajectory /wiln/pose /wiln/markers \
-            /localization/articulation_angle \
+            /localization/articulation_angle /localization/articulation_pitch \
             /trailer/odom /trailer/pose_in_map \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
@@ -551,6 +553,19 @@ services:
           odom_topic:=/mapping/icp_odom \
           pose_topic:=/wiln/pose \
           wiln_cmd_vel_topic:=/cmd_vel
+
+  wiln_validate_route:
+    <<: [*replay_base]
+    profiles: ["teach_repeat"]
+    volumes:
+      - ${WORKSPACE}/data:${WORKSPACE}/data
+    environment:
+      WILN_LTR_FILE: ${WILN_LTR_FILE:-${WORKSPACE}/data/route.ltr}
+    command:
+      - bash
+      - -lc
+      - |
+        python3 ${WORKSPACE}/scripts/validate_wiln_route.py "$${WILN_LTR_FILE}"
 
   # ── Debug shell ───────────────────────────────────────────────────────────
   bash:
