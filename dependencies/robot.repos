@@ -128,3 +128,8 @@ repositories:
     type: git
     url: git@github.com:norlab-ulaval/service_caller.git
     version: master
+
+  src/external/hri-safe-remote-control-system:
+    type: git
+    url: git@github.com:norlab-ulaval/hri-safe-remote-control-system.git
+    version: ros2
