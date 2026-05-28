@@ -168,10 +168,10 @@ def save_runtime_artifacts(record_dir: Path) -> None:
     )
     run_capture(
         [
-            "ros2", "service", "call",
-            "/save_map_traj",
-            "wiln/srv/SaveMapTraj",
-            f'{{file_name: {{data: "{route_path}"}}}}',
+            "ros2", "topic", "pub", "--once",
+            "/wiln/command",
+            "std_msgs/msg/String",
+            f'{{data: "save:{route_path}"}}',
         ],
         artifact_dir / "save_wiln_route_call.txt",
         timeout_s=20,

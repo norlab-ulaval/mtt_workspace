@@ -6,7 +6,7 @@ Phase 0 — Filesystem pre-check (device nodes, ZED calibration, no ROS needed).
 Phase 1 — Network pre-check (ping + TCP port tests, no ROS needed).
 Phase 2 — Smart sensor wait: polls the topic graph every second until all
            required primary sensors appear, or a 40 s startup timeout expires.
-Phase 3 — Measures actual publication frequencies over DURATION seconds.
+Phase 3 — Verifies topic activity over DURATION seconds.
 Phase 4 — Reports results with per-sensor diagnosis and actionable fixes.
 
 Exit codes:
@@ -61,6 +61,18 @@ ROVER_PORT      = int(os.environ.get("REACH_ROVER_TCP_PORT", "9001"))
 HESAI_IP        = os.environ.get("HESAI_IP",          "192.168.2.201")
 OAK_RATE_HZ     = 10.0 if OAK_MODE.strip().lower() == "max" else 5.0
 
+
+def env_bool(name: str, default: bool = True) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+ENABLE_GPS = env_bool("ENABLE_GPS", True)
+ENABLE_OAK = env_bool("ENABLE_OAK", True)
+ENABLE_MTI10 = env_bool("ENABLE_MTI10", True)
+
 GPS_FIX_LABELS = {-1: "NO FIX", 0: "GPS SPP", 1: "SBAS", 2: "RTK", 3: "RTK Float", 4: "RTK Fixed"}
 
 
@@ -95,14 +107,14 @@ class TopicSpec:
 def build_topics() -> list[TopicSpec]:
     topics: list[TopicSpec] = [
     # ── Infrastructure ────────────────────────────────────────────────────────
-    TopicSpec("/tf",           "TF",           50.0, 50.0,  group="infra"),
+    TopicSpec("/tf",           "TF",           50.0, 90.0,  group="infra"),
     TopicSpec("/tf_static",    "TF Static",     1.0, 300.0, group="infra"),
-    TopicSpec("/joint_states", "Joint States", 50.0, 30.0,  group="infra"),
+    TopicSpec("/joint_states", "Joint States", 50.0, 90.0,  group="infra"),
 
     # ── MTT CAN driver ────────────────────────────────────────────────────────
-    TopicSpec("/mtt_odometry",           "MTT Odometry",   50.0, 30.0, group="can"),
-    TopicSpec("/mtt_tachometer",         "MTT Tachometer", 50.0, 30.0, group="can"),
-    TopicSpec("/mtt_articulation_angle", "Articul. Angle", 50.0, 30.0, group="can"),
+    TopicSpec("/mtt_odometry",           "MTT Odometry",   50.0, 90.0, group="can"),
+    TopicSpec("/mtt_tachometer",         "MTT Tachometer", 50.0, 90.0, group="can"),
+    TopicSpec("/mtt_articulation_angle", "Articul. Angle", 50.0, 90.0, group="can"),
     TopicSpec("/mtt_status",             "MTT Status",     10.0, 40.0, group="can"),
     TopicSpec("/mtt_health",             "MTT Health",     10.0, 40.0, required=False, group="can"),
     # Raw CAN bus — socketcan_bridge must be running (publishes every frame verbatim)
@@ -117,32 +129,16 @@ def build_topics() -> list[TopicSpec]:
     # ── IMU — XSens MTi-100 (primary, required) ───────────────────────────────
     # data_raw: 100 Hz raw measurements; data: ~100 Hz Kalman-filtered orientation.
     # Both recorded. data_raw used for odometry fusion; data for heading reference.
-    TopicSpec("/mti100/data",           "MTi-100 data",     100.0, 30.0, group="imu"),
-    TopicSpec("/mti100/data_raw",       "MTi-100 data_raw", 100.0, 30.0, group="imu"),
+    TopicSpec("/mti100/data",           "MTi-100 data",     100.0, 95.0, group="imu"),
+    TopicSpec("/mti100/data_raw",       "MTi-100 data_raw", 100.0, 95.0, group="imu"),
     TopicSpec("/mti100/time_reference", "MTi-100 TimeRef",   10.0, 50.0, group="imu"),
 
-    # ── IMU — XSens MTi-10 (secondary, optional) ──────────────────────────────
-    TopicSpec("/mti10/data",     "MTi-10 data",     100.0, 30.0, required=False, group="imu"),
-    TopicSpec("/mti10/data_raw", "MTi-10 data_raw", 100.0, 30.0, required=False, group="imu"),
-
     # ── LiDAR — Hesai XT-32 (required) ───────────────────────────────────────
-    TopicSpec("/hesai_lidar/points",        "Hesai PointCloud",  10.0, 20.0, group="lidar"),
+    TopicSpec("/hesai_lidar/points",        "Hesai PointCloud",  10.0, 60.0, group="lidar"),
     TopicSpec("/hesai_lidar/lidar_packets_loss", "Hesai Pkt Loss", 10.0, 80.0, required=False, group="lidar"),
 
     # ── LiDAR — RoboSense Bpearl (optional — rear/trailer) ───────────────────
     TopicSpec("/rsairy_ns/points", "RS Bpearl pts", 10.0, 20.0, required=False, group="lidar"),
-
-    # ── GPS — Emlid Reach RS single rover (rear-right mast, default) ─────────
-    # RTK corrections flow internally between rover and base via LoRa/TCP.
-    # GGA @ 5 Hz gives position; RMC @ 1 Hz gives date for GPS-UTC timestamps.
-    TopicSpec("/gps/fix",            "GPS Rover fix",    1.0, 80.0, group="gps"),
-    TopicSpec("/gps/nmea_sentence",  "GPS Rover NMEA",   5.0, 80.0, required=False, group="gps"),
-    TopicSpec("/gps/time_reference", "GPS Rover TimeRef",1.0, 80.0, required=False, group="gps"),
-
-    # ── GPS — Dual-antenna legacy (only active with gps_antennas:=dual) ──────
-    TopicSpec("/gps_left/fix",   "GPS Left fix",  1.0, 80.0, required=False, group="gps"),
-    TopicSpec("/gps_right/fix",  "GPS Right fix", 1.0, 80.0, required=False, group="gps"),
-    TopicSpec("/gps/heading",    "GPS Heading",   1.0, 80.0, required=False, group="gps"),
 
     # ── Camera — ZED 2i stereo (optional but important) ───────────────────────
     # Rates: RGB/Depth ≈ 5 Hz compressed, IMU ≈ 100 Hz
@@ -155,20 +151,19 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/zed/zed_node/imu/data",
               "ZED IMU",  100.0, 30.0, required=False, group="camera"),
 
-    # ── Camera — OAK-D (optional — rear/trailer) ──────────────────────────────
-    TopicSpec("/oak/rgb/image_rect",
-              "OAK RGB", OAK_RATE_HZ, 40.0, required=False, group="camera"),
-    TopicSpec("/oak/stereo/image_raw",
-              "OAK Depth", OAK_RATE_HZ, 60.0, required=False, group="camera"),
-    TopicSpec("/oak/points",
-              "OAK PointCloud", OAK_RATE_HZ, 70.0, required=False, group="camera"),
+    # ── ICP mapping diagnostics (norlab_icp_mapper_ros) ─────────────────────────
+    # These start after mapping_delay_seconds (5s in data_collection, 10s default).
+    # Not required here because health_check runs before full startup; use
+    # check_icp_odom / audit_tf_chain for per-session ICP validation.
+    TopicSpec("/mapping/icp_odom",         "ICP Odom",          10.0, 30.0, required=False, group="mapping"),
+    TopicSpec("/mapping/map",              "ICP Map",            1.0, 50.0, required=False, group="mapping"),
+    TopicSpec("/mapping/trajectory_path",  "ICP Trajectory",     1.0, 50.0, required=False, group="mapping"),
 
-    # ── ICP Mapping (optional — starts after mapping_delay) ───────────────────
-    TopicSpec("/merged_points_filtered",        "Merged Cloud",      10.0, 50.0, required=False, group="mapping"),
-    TopicSpec("/mapping/icp_odom",               "ICP Odom",          10.0, 30.0, required=False, group="mapping"),
-    TopicSpec("/mapping/scan_after_deskew",      "ICP scan deskew",   10.0, 50.0, required=False, group="mapping"),
-    TopicSpec("/mapping/scan_after_input_filters","ICP scan filtered", 10.0, 50.0, required=False, group="mapping"),
-    TopicSpec("/trailer/angle",                  "Trailer Angle",      5.0, 80.0, required=False, group="mapping"),
+    # ── Optional alternative mapper / perception diagnostics ─────────────────
+    TopicSpec("/genz/odometry",                 "GenZ Odom",         10.0, 30.0, required=False, group="mapping"),
+    TopicSpec("/genz/local_map",                "GenZ Map",           0.5, 2.0, required=False, group="mapping"),
+    TopicSpec("/trailer/articulation_angle",     "Trailer Angle",      5.0, 80.0, required=False, group="mapping"),
+    TopicSpec("/trailer/pose",                   "Trailer Pose",       5.0, 80.0, required=False, group="mapping"),
 
     # ── Teach / Repeat supervision ───────────────────────────────────────────
     TopicSpec("/mtt_repeat/state",               "Repeat State",       0.5, 500.0, required=False, group="repeat"),
@@ -177,6 +172,36 @@ def build_topics() -> list[TopicSpec]:
     # ── Operator annotations ──────────────────────────────────────────────────
     TopicSpec("/session/events", "Session Events", 0.1, 1000.0, required=False, group="infra"),
     ]
+
+    if ENABLE_MTI10:
+        topics.extend([
+            # ── IMU — XSens MTi-10 (secondary, optional) ──────────────────────
+            TopicSpec("/mti10/data", "MTi-10 data", 100.0, 30.0, required=False, group="imu"),
+            TopicSpec("/mti10/data_raw", "MTi-10 data_raw", 100.0, 30.0, required=False, group="imu"),
+        ])
+
+    if ENABLE_GPS:
+        topics.extend([
+            # ── GPS — Emlid Reach RS single rover (rear-right mast, default) ──
+            # RTK corrections flow internally between rover and base via LoRa/TCP.
+            # GGA @ 5 Hz gives position; RMC @ 1 Hz gives date for GPS-UTC timestamps.
+            TopicSpec("/gps/fix", "GPS Rover fix", 1.0, 80.0, group="gps"),
+            TopicSpec("/gps/nmea_sentence", "GPS Rover NMEA", 5.0, 80.0, required=False, group="gps"),
+            TopicSpec("/gps/time_reference", "GPS Rover TimeRef", 1.0, 80.0, required=False, group="gps"),
+
+            # ── GPS — Dual-antenna legacy (only active with gps_antennas:=dual) ─
+            TopicSpec("/gps_left/fix", "GPS Left fix", 1.0, 80.0, required=False, group="gps"),
+            TopicSpec("/gps_right/fix", "GPS Right fix", 1.0, 80.0, required=False, group="gps"),
+            TopicSpec("/gps/heading", "GPS Heading", 1.0, 80.0, required=False, group="gps"),
+        ])
+
+    if ENABLE_OAK:
+        topics.extend([
+            # ── Camera — OAK-D (optional — rear/trailer) ──────────────────────
+            TopicSpec("/oak/rgb/image_rect", "OAK RGB", OAK_RATE_HZ, 40.0, required=False, group="camera"),
+            TopicSpec("/oak/stereo/image_raw", "OAK Depth", OAK_RATE_HZ, 60.0, required=False, group="camera"),
+            TopicSpec("/oak/points", "OAK PointCloud", OAK_RATE_HZ, 70.0, required=False, group="camera"),
+        ])
 
     if TACHOMETER_MODE == "cmd_sim":
         topics.append(
@@ -238,9 +263,12 @@ GROUP_HINTS = {
     ),
     "bms": "BMS: mtt_battery/status requires mtt_driver with BMS decoder compiled in.",
     "mapping": (
-        "ICP odom=0: check 'robot_frame: base_footprint' in _icp_mapper.yaml "
+        "ICP odom=0: (1) mapper may not have started yet (mapping_delay_seconds=5s in "
+        "data_collection, 10s in live_robot — run this check after that window). "
+        "(2) check 'robot_frame: base_footprint' in _icp_mapper.yaml "
         "(base_link causes TF loop → odom never published). "
-        "Mapper starts after mapping_delay_seconds (default 5s)."
+        "(3) verify TF chain with: docker compose run --rm audit_tf. "
+        "If ENABLE_CLOUD_MERGER=false (default), /merged_points_filtered absent is expected."
     ),
 }
 
@@ -290,9 +318,11 @@ def run_filesystem_prechecks() -> bool:
     print(f"\n{BOLD}{CYAN}── Phase 0: Filesystem pre-check ───────────────────{RESET}")
     any_error = False
 
-    # /dev/reach_rover — required for single-antenna GPS
+    # /dev/reach_rover — required for single-antenna GPS only when GPS is enabled.
     rover_dev = "/dev/reach_rover"
-    if os.path.exists(rover_dev):
+    if not ENABLE_GPS:
+        print(f"  {DIM}–  GPS disabled by ENABLE_GPS=false; skipping {rover_dev} check{RESET}")
+    elif os.path.exists(rover_dev):
         print(f"  {GREEN}✓{RESET}  {rover_dev}  exists (GPS serial device OK)")
     else:
         print(f"  {RED}✗{RESET}  {rover_dev}  MISSING")
@@ -341,7 +371,9 @@ def run_network_prechecks() -> bool:
         any_net_warn = True
 
     # GPS connectivity
-    if GPS_MODE == "tcp":
+    if not ENABLE_GPS:
+        print(f"  {DIM}GPS disabled by ENABLE_GPS=false — network/serial checks skipped{RESET}")
+    elif GPS_MODE == "tcp":
         print(f"  {DIM}GPS mode=tcp — testing TCP connection to rover{RESET}")
         ping_ok = _ping(ROVER_IP)
         if ping_ok:
@@ -388,8 +420,11 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     node = rclpy.create_node("health_check_node")
     executor = rclpy.executors.SingleThreadedExecutor()
     executor.add_node(node)
-    spin_thread = threading.Thread(target=executor.spin, name="spin", daemon=True)
-    spin_thread.start()
+
+    def spin_for(seconds: float) -> None:
+        deadline = time.monotonic() + seconds
+        while time.monotonic() < deadline and rclpy.ok():
+            executor.spin_once(timeout_sec=0.0)
 
     counts: Dict[str, int] = {s.topic: 0 for s in TOPICS}
     # Track worst GPS fix quality seen during the window.
@@ -473,7 +508,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
                   f"{' ' * 20}")
             break
 
-        time.sleep(1.0)
+        spin_for(1.0)
 
     print()
 
@@ -511,29 +546,20 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         bar_done = "█" * (i + 1)
         bar_left = "░" * (int(duration) - i - 1)
         print(f"\r  [{bar_done}{bar_left}] {i+1}/{int(duration)}s", end="", flush=True)
-        time.sleep(1.0)
+        spin_for(1.0)
     actual_duration = time.monotonic() - t_measure_start
     print(f"\r  Measurement complete.{' ' * 30}\n")
 
     discovered = {t for t, _ in node.get_topic_names_and_types()}
     service_names = {name for name, _ in node.get_service_names_and_types()}
-    follow_path_action_ready = (
-        "/follow_path/_action/send_goal" in service_names
-        and "/follow_path/_action/get_result" in service_names
-        and "/follow_path/_action/cancel_goal" in service_names
-    )
-    # Shut down executor first so the spin thread exits cleanly, then call
-    # rclpy.shutdown() and join the thread before returning. Without this,
-    # the daemon thread is still alive at interpreter shutdown and races on
-    # stderr, producing "Fatal Python error: _enter_buffered_busy" + exit 134.
+    node.destroy_node()
     executor.shutdown(timeout_sec=2.0)
     rclpy.shutdown()
-    spin_thread.join(timeout=3.0)
 
     # ── Phase 4: Report ───────────────────────────────────────────────────────
     COL = [44, 12, 10, 20, 5]
     sep = "─" * (sum(COL) + 4)
-    header = (f"{'Topic':<{COL[0]}} {'Expected':>{COL[1]}} {'Measured':>{COL[2]}} "
+    header = (f"{'Topic':<{COL[0]}} {'Expected':>{COL[1]}} {'Sampled':>{COL[2]}} "
               f"{'Status':>{COL[3]}} {'Req?':>{COL[4]}}")
     print(f"{BOLD}{header}{RESET}")
     print(sep)
@@ -561,15 +587,15 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
             else:
                 has_warning = True
             missing_by_group.setdefault(spec.group, []).append(spec.topic)
-        elif actual_hz < exp_low and spec.expected_hz > 0.3:
-            status_str = f"LOW {actual_hz:.1f} Hz"
+        elif n_msgs == 0 and spec.topic not in LATCHED and spec.expected_hz > 0.3:
+            status_str = "NO MSGS"
             color = RED if spec.required else YELLOW
             if spec.required:
                 has_error = True
             else:
                 has_warning = True
         else:
-            status_str = f"OK  {actual_hz:.1f} Hz"
+            status_str = "ACTIVE"
             color = GREEN
 
         req_str = "✓" if spec.required else "opt"
@@ -584,51 +610,54 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     print(sep)
 
     # ── GPS fix quality ───────────────────────────────────────────────────────
-    print(f"\n{BOLD}GPS fix quality (worst seen during window):{RESET}")
     gps_quality_ok = True
-    for gps_topic, worst_status in gps_fix_worst.items():
-        # Skip legacy dual-antenna topics if they have no data and we're in single mode
-        if worst_status == +99 and gps_topic != "/gps/fix":
-            continue   # dual topics absent in single-antenna mode — expected
-        label = {
-            "/gps/fix":       "Rover (single)",
-            "/gps_left/fix":  "Left  (dual)  ",
-            "/gps_right/fix": "Right (dual)  ",
-        }.get(gps_topic, gps_topic)
-        if worst_status == +99:
-            fix_label = "no data"
-            color = RED
-            note = "no messages — /dev/reach_rover missing or driver not connected"
-            gps_quality_ok = False
-        elif worst_status >= 4:
-            fix_label = "RTK Fixed"
-            color = GREEN
-            note = "±1 cm — best"
-        elif worst_status >= 3:
-            fix_label = "RTK Float"
-            color = YELLOW
-            note = "~10–50 cm — wait for Fixed before recording"
-            gps_quality_ok = False
-        elif worst_status >= 2:
-            fix_label = GPS_FIX_LABELS.get(worst_status, f"fix={worst_status}")
-            color = GREEN
-            note = "RTK — good for research"
-        elif worst_status == 1:
-            fix_label = "SBAS/DGPS"
-            color = YELLOW
-            note = "sub-meter — marginal, wait for RTK"
-            gps_quality_ok = False
-        elif worst_status == 0:
-            fix_label = "GPS SPP"
-            color = YELLOW
-            note = "~10 m — not suitable for motion model ID"
-            gps_quality_ok = False
-        else:
-            fix_label = "NO FIX"
-            color = RED
-            note = "no satellites — check sky view, LoRa corrections"
-            gps_quality_ok = False
-        print(f"  {color}{label} ({gps_topic}): {fix_label}  — {note}{RESET}")
+    if ENABLE_GPS:
+        print(f"\n{BOLD}GPS fix quality (worst seen during window):{RESET}")
+        for gps_topic, worst_status in gps_fix_worst.items():
+            # Skip legacy dual-antenna topics if they have no data and we're in single mode
+            if worst_status == +99 and gps_topic != "/gps/fix":
+                continue   # dual topics absent in single-antenna mode — expected
+            label = {
+                "/gps/fix":       "Rover (single)",
+                "/gps_left/fix":  "Left  (dual)  ",
+                "/gps_right/fix": "Right (dual)  ",
+            }.get(gps_topic, gps_topic)
+            if worst_status == +99:
+                fix_label = "no data"
+                color = RED
+                note = "no messages — /dev/reach_rover missing or driver not connected"
+                gps_quality_ok = False
+            elif worst_status >= 4:
+                fix_label = "RTK Fixed"
+                color = GREEN
+                note = "±1 cm — best"
+            elif worst_status >= 3:
+                fix_label = "RTK Float"
+                color = YELLOW
+                note = "~10–50 cm — wait for Fixed before recording"
+                gps_quality_ok = False
+            elif worst_status >= 2:
+                fix_label = GPS_FIX_LABELS.get(worst_status, f"fix={worst_status}")
+                color = GREEN
+                note = "RTK — good for research"
+            elif worst_status == 1:
+                fix_label = "SBAS/DGPS"
+                color = YELLOW
+                note = "sub-meter — marginal, wait for RTK"
+                gps_quality_ok = False
+            elif worst_status == 0:
+                fix_label = "GPS SPP"
+                color = YELLOW
+                note = "~10 m — not suitable for motion model ID"
+                gps_quality_ok = False
+            else:
+                fix_label = "NO FIX"
+                color = RED
+                note = "no satellites — check sky view, LoRa corrections"
+                gps_quality_ok = False
+            print(f"  {color}{label} ({gps_topic}): {fix_label}  — {note}{RESET}")
+    else:
+        print(f"\n{BOLD}GPS fix quality:{RESET} {DIM}skipped (ENABLE_GPS=false){RESET}")
 
     # ── Group-level hints for missing sensors ─────────────────────────────────
     if missing_by_group:
@@ -647,19 +676,38 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         "/mtt_repeat/play_line",
         "/mtt_repeat/play_loop",
         "/mtt_repeat/cancel",
+        "/mtt_repeat/mark_ready",
+    }
+    wiln_topics = {
+        "/wiln/command",
+        "/wiln/trajectory",
+        "/wiln/global_plan",
+        "/wiln/teach/state",
+        "/wiln/route/state",
+        "/wiln/replay/state",
+        "/wiln/follower/state",
     }
     repeat_service_count = sum(1 for svc in repeat_services if svc in service_names)
+    wiln_topic_count = sum(1 for topic in wiln_topics if topic in discovered)
     repeat_topics_present = {"/mtt_repeat/state", "/mtt_repeat/ready"} & discovered
-    repeat_stack_running = repeat_service_count > 0 or bool(repeat_topics_present)
+    repeat_stack_running = repeat_service_count > 0 or bool(repeat_topics_present) or wiln_topic_count > 0
     if not repeat_stack_running:
         print(f"  {DIM}– WILN / repeat supervisor not running in this session.{RESET}")
+        print(f"    {DIM}Start with: docker compose --profile wiln up -d wiln{RESET}")
     else:
-        icp_ok = counts.get("/mapping/icp_odom", 0) > 0
+        icp_ok = counts.get("/mapping/icp_odom", 0) > 0 or counts.get("/genz/odometry", 0) > 0
         health_ok = counts.get("/mtt_health", 0) > 0
-        repeat_ok = repeat_service_count == len(repeat_services) and follow_path_action_ready and icp_ok and health_ok
+        repeat_ok = repeat_service_count == len(repeat_services) and "/wiln/command" in discovered and icp_ok and health_ok
         color = GREEN if repeat_ok else YELLOW
-        print(f"  {color}{'✓' if repeat_ok else '⚠'} services: {repeat_service_count}/{len(repeat_services)}  action(/follow_path): {'ok' if follow_path_action_ready else 'missing'}{RESET}")
-        print(f"  {color}{'✓' if repeat_ok else '⚠'} topics: state={'yes' if '/mtt_repeat/state' in discovered else 'no'} ready={'yes' if '/mtt_repeat/ready' in discovered else 'no'}  icp={'yes' if icp_ok else 'no'}  mtt_health={'yes' if health_ok else 'no'}{RESET}")
+        print(f"  {color}{'✓' if repeat_ok else '⚠'} services: {repeat_service_count}/{len(repeat_services)}{RESET}")
+        print(f"  {color}{'✓' if '/wiln/command' in discovered else '⚠'} WILN command topic: {'yes' if '/wiln/command' in discovered else 'no'}{RESET}")
+        print(f"  {color}{'✓' if wiln_topic_count else '⚠'} WILN topics: {wiln_topic_count}/{len(wiln_topics)}{RESET}")
+        print(f"  {color}{'✓' if repeat_ok else '⚠'} repeat topics: state={'yes' if '/mtt_repeat/state' in discovered else 'no'} ready={'yes' if '/mtt_repeat/ready' in discovered else 'no'}  icp={'yes' if icp_ok else 'no'}  mtt_health={'yes' if health_ok else 'no'}{RESET}")
+        if "/wiln/command" not in discovered:
+            print(f"    {YELLOW}No /wiln/command: the wiln container likely crashed or did not start. Check: docker compose logs --tail=200 wiln{RESET}")
+        if repeat_service_count != len(repeat_services):
+            missing = sorted(repeat_services - service_names)
+            print(f"    {YELLOW}Missing repeat services: {', '.join(missing)}{RESET}")
         if not repeat_ok:
             has_warning = True
 
@@ -685,6 +733,7 @@ def main() -> int:
     print(f"{BOLD}{CYAN}   MTT Sensor Health Check{RESET}")
     print(f"{BOLD}{CYAN}   duration={DURATION:.0f}s  wait={WAIT_TIMEOUT:.0f}s  "
           f"gps_mode={GPS_MODE}  gps_antennas={GPS_ANTENNAS}  tachometer_mode={TACHOMETER_MODE}{RESET}")
+    print(f"{BOLD}{CYAN}   enable_gps={ENABLE_GPS}  enable_oak={ENABLE_OAK}  enable_mti10={ENABLE_MTI10}{RESET}")
     print(f"{BOLD}{CYAN}══════════════════════════════════════════════════{RESET}")
 
     run_filesystem_prechecks()

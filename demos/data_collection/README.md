@@ -137,6 +137,8 @@ Start the base robot stack first:
 docker compose up robot
 ```
 
+The field profile records the live ICP map topic and the raw Hesai/RS-Airy/ZED/OAK streams needed for replay. It does not start or record `/merged_points*` by default; mapping uses `/hesai_lidar/points`.
+
 Start WILN in a second terminal:
 
 ```bash
@@ -151,31 +153,45 @@ Fresh route in the same live session:
 docker compose run --rm wiln_teach_start
 # drive manually
 docker compose run --rm wiln_teach_stop
-docker compose run --rm wiln_replay
+docker compose run --rm wiln_save
+docker compose run --rm route_check
+docker compose run --rm route_replay
 ```
 
-Save is optional if you want to reuse the route later:
+When `ROUTE` is not set, `wiln_save` creates a timestamped route under
+`data/wiln_routes/` and updates `data/wiln_routes/latest`. To name a route
+explicitly:
 
 ```bash
-docker compose run --rm wiln_save
+ROUTE=garage_1559 docker compose run --rm wiln_teach_start
+# drive manually
+ROUTE=garage_1559 docker compose run --rm wiln_teach_stop
+ROUTE=garage_1559 docker compose run --rm wiln_save
+ROUTE=garage_1559 docker compose run --rm route_validate
+ROUTE=garage_1559 docker compose run --rm route_preview
+ROUTE=garage_1559 docker compose run --rm route_check
 ```
 
 Replay an existing saved route:
 
 ```bash
-docker compose run --rm wiln_load
-docker compose run --rm wiln_replay
+docker compose run --rm route_list
+docker compose run --rm route_load      # uses latest if ROUTE is not set
+docker compose run --rm route_replay
 ```
 
 Diagnostic helper:
 
 ```bash
 docker compose run --rm wiln_status
+docker compose run --rm field_ready
+docker compose run --rm icp_check
 ```
 
 Important:
 - you do not need a saved map file before `teach_start`
 - you do need live `/mapping/icp_odom`
+- `icp_check` must pass before autonomous repeat
 - `teach_stop` already arms the route in memory, so `load` is only for replaying an older saved route
 
 ## Command chain
@@ -184,7 +200,7 @@ The current command chain is:
 
 ```text
 joy -> cmd_vel/manual_raw -> cmd_vel/manual
-WILN -> /follow_path -> controller/cmd_vel
+WILN (/wiln/command + /wiln/trajectory) -> /wiln/control/local_plan -> controller/cmd_vel
 mode manager + arbiter -> cmd_vel
 driver -> mtt_can_node
 ```
