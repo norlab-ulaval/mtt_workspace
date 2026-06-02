@@ -216,7 +216,38 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
     parser.add_argument(
         "--experiment-name",
         default=os.environ.get("OFFLINE_ICP_EXPERIMENT_NAME", ""),
-        help="Write outputs under offline_icp_experiments/<name> and do not update compatibility map files.",
+        help="Write outputs under offline_icp_runs/<name> and do not update compatibility map files.",
+    )
+    parser.add_argument(
+        "--playback-policy",
+        default=os.environ.get("OFFLINE_ICP_PLAYBACK_POLICY", "auto"),
+        choices=["auto", "step", "bag_play"],
+        help=(
+            "How to feed the mapper. step publishes one cloud and waits for ICP odom "
+            "before continuing; bag_play uses ros2 bag play. auto uses step for direct "
+            "single-cloud pipelines and bag_play for perception/fused pipelines."
+        ),
+    )
+    parser.add_argument(
+        "--step-icp-timeout-s",
+        type=float,
+        default=float(os.environ.get("OFFLINE_ICP_STEP_TIMEOUT_S", "120.0")),
+        help="Per-cloud ICP timeout used by --playback-policy step.",
+    )
+    parser.add_argument(
+        "--step-max-consecutive-timeouts",
+        type=int,
+        default=int(os.environ.get("OFFLINE_ICP_STEP_MAX_CONSECUTIVE_TIMEOUTS", "20")),
+        help="Abort step replay after this many consecutive cloud/ICP timeouts.",
+    )
+    parser.add_argument(
+        "--checkpoint-interval-s",
+        type=float,
+        default=float(os.environ.get("OFFLINE_ICP_CHECKPOINT_INTERVAL_S", "600.0")),
+        help=(
+            "Save map_checkpoint_latest.vtk and trajectory_checkpoint_latest.vtk "
+            "periodically while the mapper is alive. Set <=0 to disable."
+        ),
     )
     return parser.parse_args()
 
@@ -350,7 +381,12 @@ def terminate_process(process: subprocess.Popen | None, grace_s: float = 10.0) -
     while time.time() < deadline:
         if process.poll() is not None:
             return
-        time.sleep(0.2)
+        try:
+            time.sleep(0.2)
+        except KeyboardInterrupt:
+            # Finish cleanup before propagating interruption. Leaving ros2 bag
+            # record alive creates stale process false positives on the next run.
+            continue
 
     try:
         os.killpg(process.pid, signal.SIGTERM)
@@ -361,7 +397,10 @@ def terminate_process(process: subprocess.Popen | None, grace_s: float = 10.0) -
     while time.time() < deadline:
         if process.poll() is not None:
             return
-        time.sleep(0.2)
+        try:
+            time.sleep(0.2)
+        except KeyboardInterrupt:
+            continue
 
     try:
         os.killpg(process.pid, signal.SIGKILL)
@@ -415,13 +454,71 @@ def call_save_service(
     return result.returncode == 0
 
 
+def save_mapping_outputs(
+    map_file: Path,
+    trajectory_file: Path,
+    log_dir: Path,
+    pipeline_mode: str,
+    duration_s: float,
+    *,
+    label: str = "",
+) -> tuple[bool, list[str]]:
+    """Save mapper outputs while the mapper is still alive.
+
+    Step replay can legitimately finish with long rejection bursts: the mapper
+    processed clouds and built a map, but no /mapping/icp_odom was published for
+    rejected scans.  In that case we still want map.vtk/trajectory.vtk for audit
+    instead of losing hours of CPU work.
+    """
+    suffix = f"_{label}" if label else ""
+    map_request = f'{{map_file_name: {{data: "{map_file}"}}}}'
+    trajectory_request = f'{{trajectory_file_name: {{data: "{trajectory_file}"}}}}'
+    save_timeout_s = max(120.0, 60.0 + duration_s)
+    errors: list[str] = []
+
+    if not call_save_service(
+        SAVE_MAP_SERVICE,
+        SAVE_MAP_TYPE,
+        map_request,
+        log_dir / f"save_map_{pipeline_mode}{suffix}.txt",
+        timeout_s=save_timeout_s,
+    ):
+        errors.append("save_map_service_failed")
+
+    if not call_save_service(
+        SAVE_TRAJECTORY_SERVICE,
+        SAVE_TRAJECTORY_TYPE,
+        trajectory_request,
+        log_dir / f"save_trajectory_{pipeline_mode}{suffix}.txt",
+        timeout_s=60.0,
+    ):
+        errors.append("save_trajectory_service_failed")
+
+    if not map_file.exists():
+        errors.append("map_file_missing_after_save")
+    if not trajectory_file.exists():
+        errors.append("trajectory_file_missing_after_save")
+
+    return not errors, errors
+
+
 def excluded_topics_for_pipeline(pipeline: PipelineChoice) -> list[str]:
     topics = list(REBUILT_MAPPING_TOPICS)
     if pipeline.launch_perception:
         topics.extend(REBUILT_PERCEPTION_TOPICS)
-    if pipeline.mode in {"hesai_imu", "fused"}:
+    if pipeline.mode in {"hesai_imu", "fused", "hesai"}:
         topics.append("/tf")
     return topics
+
+
+def playback_policy_for_pipeline(args: argparse.Namespace, pipeline: PipelineChoice) -> str:
+    if args.playback_policy != "auto":
+        return args.playback_policy
+    if pipeline.launch_perception:
+        return "bag_play"
+    if pipeline.points_topic in {HESAI_TOPIC, RSAIRY_TOPIC, MERGED_TOPIC}:
+        return "step"
+    return "bag_play"
 
 
 def validate_icp_odom_replay(bag_dir: Path, expected_duration_s: float) -> dict[str, Any]:
@@ -563,6 +660,54 @@ class RecordWatchdog:
         return self._died_at
 
 
+class MappingCheckpointSaver:
+    """Periodically snapshots mapper outputs without stopping the offline run."""
+
+    def __init__(
+        self,
+        map_file: Path,
+        trajectory_file: Path,
+        log_dir: Path,
+        pipeline_mode: str,
+        interval_s: float,
+    ):
+        self._map_file = map_file
+        self._trajectory_file = trajectory_file
+        self._log_dir = log_dir
+        self._pipeline_mode = pipeline_mode
+        self._interval_s = interval_s
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._thread.start()
+
+    def _run(self) -> None:
+        checkpoint_log = self._log_dir / f"checkpoint_{self._pipeline_mode}.log"
+        checkpoint_log.parent.mkdir(parents=True, exist_ok=True)
+        while not self._stop.wait(self._interval_s):
+            started = datetime.now().isoformat(timespec="seconds")
+            try:
+                saved, errors = save_mapping_outputs(
+                    self._map_file,
+                    self._trajectory_file,
+                    self._log_dir,
+                    self._pipeline_mode,
+                    duration_s=60.0,
+                    label="checkpoint_latest",
+                )
+                status = "saved" if saved else "failed:" + ",".join(errors)
+            except Exception as exc:  # noqa: BLE001
+                status = f"exception:{exc}"
+            try:
+                with checkpoint_log.open("a", encoding="utf-8") as f:
+                    f.write(f"{started} {status}\n")
+            except OSError:
+                pass
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._thread.join(timeout=30.0)
+
+
 def write_summary(output_dir: Path, result: dict) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "summary.yaml").write_text(
@@ -649,16 +794,26 @@ def run_pipeline(
         result["compat_map_file"] = str(compat_map_file)
         result["compat_trajectory_file"] = str(compat_trajectory_file)
 
+    print(
+        f"  RUN     mode={pipeline.mode} points={pipeline.points_topic} "
+        f"duration={duration_s:.1f}s output={output_dir}",
+        flush=True,
+    )
+
     description_proc = None
+    runtime_odom_proc = None
     perception_proc = None
     imu_odom_proc = None
     mapping_proc = None
     bag_proc = None
     record_proc = None
+    record_watchdog = None
+    checkpoint_saver = None
 
     qos_override = workspace_root / "src" / "external" / "norlab_robot" / "config" / "rosbag_record" / "qos_replay_override.yaml"
     standard_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config.yaml"
     dense_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_replay_dense.yaml"
+    hesai_wheel_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_hesai_wheel_replay.yaml"
     hesai_imu_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_hesai_imu_replay.yaml"
     fused_imu_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_fused_imu_replay.yaml"
     fused_simple_mapping_config = workspace_root / "src" / "external" / "norlab_robot" / "config" / "mapping" / "_config_fused_simple_replay.yaml"
@@ -669,11 +824,15 @@ def run_pipeline(
     mapping_initial_robot_pose = ""
     mapping_is_online = "true"
     use_imu_odom_prior = pipeline.mode in {"hesai_imu", "fused"}
+    use_rebuilt_wheel_odom_prior = pipeline.mode == "hesai"
+    if use_rebuilt_wheel_odom_prior:
+        mapping_is_online = "false"
     if args.offline_quality == "max":
         mapping_compression_voxel_size = "0.10"
         mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
-        if replay_rate == 1.0:
-            replay_rate = 0.5
+        max_replay_rate = float(os.environ.get("OFFLINE_ICP_MAX_REPLAY_RATE", "0.05"))
+        if replay_rate > max_replay_rate:
+            replay_rate = max_replay_rate
         result["quality_profile_notes"] = [
             "mapping_compression_voxel_size=0.10",
             f"mapping_config={mapping_config}",
@@ -688,8 +847,27 @@ def run_pipeline(
             f"effective_replay_rate={replay_rate}",
         ]
 
+    if use_rebuilt_wheel_odom_prior:
+        mapping_compression_voxel_size = "0.15"
+        mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else hesai_wheel_mapping_config
+        result["quality_profile_notes"] = [
+            "pipeline=hesai_wheel",
+            "odom_prior=rebuilt_tachometer_articulation",
+            "exclude_replayed_tf=true",
+            "mapping_robot_frame=base_footprint",
+            "mapping_is_online=false",
+            "mapping_compression_voxel_size=0.15",
+            f"mapping_config={mapping_config}",
+            f"effective_replay_rate={replay_rate}",
+            "gt_matcher_maxDist=1.10",
+            "bounded_icp=0.55rad_1.50m",
+            "map_update_distance=0.10m",
+            "deterministic_minDistNewPoint=0.05m",
+            "sensorMaxRange=60m",
+        ]
+
     if use_imu_odom_prior:
-        mapping_robot_frame = "base_link"
+        mapping_robot_frame = "base_footprint"  # consistent avec live mapper (base_link = +10cm Z)
         mapping_initial_robot_pose = "[[1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]"
         mapping_is_online = "false"
         if pipeline.mode == "hesai_imu":
@@ -712,7 +890,7 @@ def run_pipeline(
             "imu_odom_rotation_only=true",
             "exclude_replayed_tf=true",
             "use_recorded_tf_static=true",
-            "mapping_robot_frame=base_link",
+            "mapping_robot_frame=base_footprint",
             "mapping_initial_robot_pose=identity",
             "mapping_is_online=false",
             f"mapping_compression_voxel_size={mapping_compression_voxel_size}",
@@ -734,23 +912,54 @@ def run_pipeline(
     result["fused_rsairy_inject_every_n"] = args.fused_rsairy_inject_every_n if pipeline.mode == "fused" else None
     result["imu_topic"] = args.imu_topic if use_imu_odom_prior else None
     result["imu_frame"] = args.imu_frame if use_imu_odom_prior else None
-    result["exclude_replayed_tf"] = use_imu_odom_prior
+    result["exclude_replayed_tf"] = use_imu_odom_prior or use_rebuilt_wheel_odom_prior
     result["use_recorded_tf_static"] = use_imu_odom_prior
+    playback_policy = playback_policy_for_pipeline(args, pipeline)
+    result["playback_policy"] = playback_policy
     play_timeout = max(60.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)
+    # Step replay is CPU-bound by ICP/map insertion, not by bag duration. Dense
+    # ground-truth runs often process around 0.5 clouds/s from 20 Hz bags, so a
+    # duration*30 guard can kill a healthy run before it reaches the save phase.
+    # The outer canonical builder still has a stale-log watchdog to catch real
+    # hangs; this timeout is only a hard upper bound.
+    step_timeout = max(3600.0, duration_s * 80.0 + args.play_timeout_margin_seconds)
     icp_odom_bag_dir = output_dir / "icp_odom_replay"
 
     try:
-        if not use_imu_odom_prior:
+        if use_rebuilt_wheel_odom_prior:
             description_proc = start_process(
                 [
-                    "ros2", "launch", "norlab_robot", "live_robot.launch.py",
-                    "enable_description:=true",
-                    "enable_sensors:=false",
-                    "enable_mapping:=false",
-                    "enable_perception:=false",
-                    "enable_localization:=false",
-                    "setup_real_can:=false",
-                    "publish_runtime_joint_states:=false",
+                    "ros2", "launch",
+                    str(workspace_root / "src/external/norlab_robot/launch/include/description.launch.py"),
+                    "use_joint_state_publisher:=false",
+                    "use_sim_time:=true",
+                ],
+                log_dir / f"description_{pipeline.mode}.log",
+            )
+            runtime_odom_proc = start_process(
+                [
+                    "ros2", "run", "mtt_driver", "mtt_odometry_node_exe",
+                    "--ros-args",
+                    "--params-file", str(workspace_root / "demos/common/config/mtt_driver.yaml"),
+                    "-p", "use_sim_time:=true",
+                    "-p", "broadcast_tf:=true",
+                    "-p", "cmd_vel_topic:=cmd_vel",
+                    "-p", "hardware_articulation_topic:=/mtt_articulation_angle",
+                    "-p", "articulation_state_topic:=/unused/articulation_state",
+                    "-p", "articulation_state_output_topic:=mtt/articulation_state/runtime",
+                    "-p", "use_articulation_state_lidar:=false",
+                    "-p", "imu_yaw_rate_topic:=/unused/imu",
+                    "-r", "mtt_odometry:=mtt_odometry/runtime",
+                    "-r", "mtt_articulation_angle:=mtt_articulation_angle/runtime",
+                ],
+                log_dir / f"runtime_odometry_{pipeline.mode}.log",
+            )
+        elif not use_imu_odom_prior:
+            description_proc = start_process(
+                [
+                    "ros2", "launch",
+                    str(workspace_root / "src/external/norlab_robot/launch/include/description.launch.py"),
+                    "use_joint_state_publisher:=false",
                     "use_sim_time:=true",
                 ],
                 log_dir / f"description_{pipeline.mode}.log",
@@ -800,7 +1009,23 @@ def run_pipeline(
             f"mapping_odom_frame:={args.mapping_odom_frame}",
             f"mapping_robot_frame:={mapping_robot_frame}",
             f"mapping_is_online:={mapping_is_online}",
+            "mapping_input_qos_reliable:=true",
+            "mapping_enable_global_output_map:=true",
+            "mapping_global_output_map_min_dist_new_point:=0.05",
+            "mapping_enable_map_trimming:=true",
+            "mapping_map_trim_interval_scans:=10",
+            "mapping_map_trim_radius_m:=60.0",
+            "mapping_max_map_points_before_trim:=250000",
+            f"mapping_max_idle_time:={max(300.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)}",
         ]
+        if use_rebuilt_wheel_odom_prior:
+            mapping_command.extend([
+                "deterministic_map_update_distance_m:=0.10",
+                "deterministic_map_update_yaw_deg:=1.0",
+                "deterministic_map_min_dist_new_point:=0.05",
+                "mapping_max_registration_time_ms:=8000.0",
+                "mapping_tf_lookup_timeout_ms:=1",
+            ])
         if mapping_initial_robot_pose:
             mapping_command.append(f"mapping_initial_robot_pose:={mapping_initial_robot_pose}")
 
@@ -827,6 +1052,15 @@ def run_pipeline(
                 timeout_s=10.0,
             )
 
+        if args.checkpoint_interval_s > 0.0:
+            checkpoint_saver = MappingCheckpointSaver(
+                output_dir / "map_checkpoint_latest.vtk",
+                output_dir / "trajectory_checkpoint_latest.vtk",
+                log_dir,
+                pipeline.mode,
+                args.checkpoint_interval_s,
+            )
+
         # Record high-quality icp_odom during replay → real sim-time timestamps + SE(3).
         # /mapping/icp_odom is excluded from bag play (REBUILT_MAPPING_TOPICS) so only
         # the fresh offline mapper output lands here.
@@ -849,66 +1083,106 @@ def run_pipeline(
             duration_s / replay_rate,
         )
 
-        bag_proc = start_process(
-            [
-                "ros2", "bag", "play",
-                "--input", str(bag_dir), "mcap",
-                "--clock",
-                "--rate", str(replay_rate),
-                "--disable-keyboard-controls",
-                "--qos-profile-overrides-path", str(qos_override),
+        playback_error: str | None = None
+        bag_returncode = 0
+        if playback_policy == "step":
+            step_script = workspace_root / "demos/bag_replay/scripts/step_replay.py"
+            step_command = [
+                sys.executable,
+                str(step_script),
+                "--bag",
+                str(bag_dir),
+                "--points-topic",
+                points_topic,
+                "--icp-topic",
+                "/mapping/icp_odom",
+                "--icp-timeout-s",
+                str(args.step_icp_timeout_s),
+                "--max-consecutive-timeouts",
+                str(args.step_max_consecutive_timeouts),
+                "--mapper-log",
+                str(log_dir / f"mapping_{pipeline.mode}.log"),
             ]
-            + (["--exclude-topics"] + excluded_topics_for_pipeline(pipeline)),
-            log_dir / f"bag_play_{pipeline.mode}.log",
-        )
-
-        try:
-            bag_returncode = bag_proc.wait(timeout=play_timeout)
-        except subprocess.TimeoutExpired as exc:
-            raise RuntimeError(f"Bag playback timed out after {play_timeout:.1f}s") from exc
+            if use_rebuilt_wheel_odom_prior:
+                step_command.extend(["--required-prior-topic", "/mtt_tachometer"])
+            elif use_imu_odom_prior:
+                step_command.extend(["--required-prior-topic", args.imu_topic])
+            for topic in excluded_topics_for_pipeline(pipeline):
+                step_command.extend(["--exclude-topic", topic])
+            bag_proc = start_process(
+                step_command,
+                log_dir / f"step_replay_{pipeline.mode}.log",
+            )
+            try:
+                bag_returncode = bag_proc.wait(timeout=step_timeout)
+            except subprocess.TimeoutExpired as exc:
+                playback_error = f"Step replay timed out after {step_timeout:.1f}s"
+                terminate_process(bag_proc, grace_s=5.0)
+                bag_returncode = bag_proc.returncode if bag_proc.returncode is not None else 124
+        else:
+            bag_proc = start_process(
+                [
+                    "ros2", "bag", "play",
+                    "--input", str(bag_dir), "mcap",
+                    "--clock",
+                    "--rate", str(replay_rate),
+                    "--disable-keyboard-controls",
+                    "--qos-profile-overrides-path", str(qos_override),
+                ]
+                + (["--exclude-topics"] + excluded_topics_for_pipeline(pipeline)),
+                log_dir / f"bag_play_{pipeline.mode}.log",
+            )
+            try:
+                bag_returncode = bag_proc.wait(timeout=play_timeout)
+            except subprocess.TimeoutExpired as exc:
+                playback_error = f"Bag playback timed out after {play_timeout:.1f}s"
+                terminate_process(bag_proc, grace_s=5.0)
+                bag_returncode = bag_proc.returncode if bag_proc.returncode is not None else 124
 
         died_at = record_watchdog.stop()
         if died_at is not None:
-            raise RuntimeError(
+            recorder_error = (
                 f"icp_odom recorder died after {died_at:.1f}s "
-                f"(bag replay was {duration_s / replay_rate:.0f}s) — "
+                f"(playback_policy={playback_policy}) — "
                 "icp_odom_replay bag is incomplete."
             )
+            if playback_error is None:
+                raise RuntimeError(recorder_error)
+            result["recorder_error"] = recorder_error
 
-        if bag_returncode != 0:
-            raise RuntimeError(f"ros2 bag play exited with code {bag_returncode}")
+        if bag_returncode != 0 and playback_error is None:
+            playback_error = f"{playback_policy} playback exited with code {bag_returncode}"
 
         # Adaptive settle: give the mapper time to flush last ICP updates.
         # 1 % of bag duration, bounded between 4 s and 15 s.
         effective_settle = max(4.0, min(15.0, duration_s * 0.01))
         time.sleep(effective_settle)
 
-        map_request = f'{{map_file_name: {{data: "{map_file}"}}}}'
-        trajectory_request = f'{{trajectory_file_name: {{data: "{trajectory_file}"}}}}'
+        if checkpoint_saver is not None:
+            checkpoint_saver.stop()
+            checkpoint_saver = None
 
-        # Adaptive save timeout: 60 s base + 1 s per second of bag (large sessions → large maps)
-        save_timeout_s = max(120.0, 60.0 + duration_s)
+        saved, save_errors = save_mapping_outputs(
+            map_file,
+            trajectory_file,
+            log_dir,
+            pipeline.mode,
+            duration_s,
+        )
+        if not saved:
+            playback_note = f"; playback_error={playback_error}" if playback_error else ""
+            raise RuntimeError(
+                "Failed to save mapper outputs: "
+                + ", ".join(save_errors)
+                + playback_note
+            )
 
-        if not call_save_service(
-            SAVE_MAP_SERVICE,
-            SAVE_MAP_TYPE,
-            map_request,
-            log_dir / f"save_map_{pipeline.mode}.txt",
-            timeout_s=save_timeout_s,
-        ):
-            raise RuntimeError("Failed to save map via /mapping/save_map")
-
-        if not call_save_service(
-            SAVE_TRAJECTORY_SERVICE,
-            SAVE_TRAJECTORY_TYPE,
-            trajectory_request,
-            log_dir / f"save_trajectory_{pipeline.mode}.txt",
-            timeout_s=60.0,
-        ):
-            raise RuntimeError("Failed to save trajectory via /mapping/save_trajectory")
-
-        if not map_file.exists() or not trajectory_file.exists():
-            raise RuntimeError("Expected map.vtk and trajectory.vtk were not created.")
+        if playback_error is not None:
+            result["status"] = "partial_saved"
+            result["playback_error"] = playback_error
+            result["map_size_bytes"] = map_file.stat().st_size
+            result["trajectory_size_bytes"] = trajectory_file.stat().st_size
+            return result
 
         if not args.experiment_name:
             shutil.copy2(map_file, compat_map_file)
@@ -920,6 +1194,8 @@ def run_pipeline(
         return result
 
     finally:
+        if checkpoint_saver is not None:
+            checkpoint_saver.stop()
         terminate_process(bag_proc)
         terminate_process(record_proc)  # SIGINT → closes mcap cleanly before killing mapper
         icp_odom_mcap = next(icp_odom_bag_dir.glob("*.mcap"), None)
@@ -937,6 +1213,7 @@ def run_pipeline(
             )
         terminate_process(mapping_proc)
         terminate_process(imu_odom_proc)
+        terminate_process(runtime_odom_proc)
         terminate_process(perception_proc)
         terminate_process(description_proc)
         write_summary(output_dir, result)
@@ -948,7 +1225,7 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
     output_dir = session_dir / "offline_icp"
     if args.experiment_name:
         safe_name = "".join(c if c.isalnum() or c in ("-", "_", ".") else "_" for c in args.experiment_name)
-        output_dir = session_dir / "offline_icp_experiments" / safe_name
+        output_dir = session_dir / "offline_icp_runs" / safe_name
     output_dir.mkdir(parents=True, exist_ok=True)
 
     result: dict[str, object] = {
@@ -1017,17 +1294,17 @@ def main() -> int:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
 
-    print(f"Offline ICP input: {args.input_path}")
-    print(f"Sessions found: {len(sessions)}")
-    print(f"Mode: {args.mode}")
-    print(f"Replay rate: {args.replay_rate}x")
-    print("")
+    print(f"Offline ICP input: {args.input_path}", flush=True)
+    print(f"Sessions found: {len(sessions)}", flush=True)
+    print(f"Mode: {args.mode}", flush=True)
+    print(f"Replay rate: {args.replay_rate}x", flush=True)
+    print("", flush=True)
 
     results = []
     failures = 0
 
     for index, session_dir in enumerate(sessions, start=1):
-        print(f"[{index}/{len(sessions)}] {session_dir.name}")
+        print(f"[{index}/{len(sessions)}] {session_dir.name}", flush=True)
         try:
             result = process_session(session_dir, args, workspace_root)
         except Exception as exc:  # noqa: BLE001
@@ -1047,24 +1324,24 @@ def main() -> int:
         results.append(result)
         status = result["status"]
         if status == "ok":
-            print(f"  OK      {result['mode']} -> {session_dir / 'map.vtk'}")
+            print(f"  OK      {result['mode']} -> {session_dir / 'map.vtk'}", flush=True)
         elif status.startswith("skipped"):
-            print(f"  SKIPPED {status}")
+            print(f"  SKIPPED {status}", flush=True)
         else:
             failures += 1
-            print(f"  FAILED  {result.get('error', status)}")
-        print("")
+            print(f"  FAILED  {result.get('error', status)}", flush=True)
+        print("", flush=True)
 
     report_path = workspace_root / "data" / f"offline_icp_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
     report_path.write_text(yaml.safe_dump(results, sort_keys=False), encoding="utf-8")
 
     ok_count = sum(1 for item in results if item["status"] == "ok")
     skipped_count = sum(1 for item in results if str(item["status"]).startswith("skipped"))
-    print("Offline ICP summary")
-    print(f"  OK:       {ok_count}")
-    print(f"  Skipped:  {skipped_count}")
-    print(f"  Failed:   {failures}")
-    print(f"  Report:   {report_path}")
+    print("Offline ICP summary", flush=True)
+    print(f"  OK:       {ok_count}", flush=True)
+    print(f"  Skipped:  {skipped_count}", flush=True)
+    print(f"  Failed:   {failures}", flush=True)
+    print(f"  Report:   {report_path}", flush=True)
 
     return 1 if failures else 0
 

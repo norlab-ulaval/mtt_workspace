@@ -71,20 +71,36 @@ services:
           cat "$$(dirname "$${PLAY_PATH}")/session_info.yaml"
           echo "---"
         fi
+        EXCLUDE_TOPICS=(
+          /robot_description /joint_states /runtime_joint_states /tf /tf_static
+          /merged_points /merged_points_raw /merged_points_filtered /hesai_in_base /rsairy_in_base
+          /trailer/angle /trailer/pose
+          /trailer/body_markers /trailer/trailer_roi_cloud
+          /planned_trajectory /real_trajectory
+          /wiln/pose /wiln/markers /wiln/obstacles
+          /wiln/trajectory /wiln/global_plan /wiln/control/local_plan
+          /wiln/debug/deformed_plan /wiln/debug/horizon /wiln/replay/diagnostics
+          /mtt_route/active_path /mtt_route/closest_pose /mtt_route/error_marker
+          /mtt_route/start_pose /mtt_route/status_text /mtt_route/safety_status
+          /localization/articulation_angle /localization/articulation_pitch
+          /trailer/odom /trailer/pose_in_map
+          /zed/zed_node/pose /zed/zed_node/odom
+        )
+        if [ "$${REPLAY_USE_RECORDED_MAPPING:-false}" != "true" ]; then
+          EXCLUDE_TOPICS+=(
+            /mapping/icp_odom /mapping/map /mapping/pose_in
+            /mapping/scan_after_deskew /mapping/scan_after_input_filters
+            /mapping/trajectory_path /mapping/aligned_scan
+          )
+        else
+          echo "Replay mode: keeping recorded /mapping/* topics from the bag."
+          echo "Do not run this together with the 'mapping' profile."
+        fi
         exec ros2 bag play \
           --clock \
           --rate ${REPLAY_RATE:-1.0} \
           --storage mcap \
-          --exclude-topics \
-            /robot_description /joint_states /runtime_joint_states /tf /tf_static \
-            /merged_points /merged_points_raw /merged_points_filtered /hesai_in_base /rsairy_in_base \
-            /mapping/icp_odom /mapping/map /mapping/pose_in \
-            /mapping/scan_after_deskew /mapping/scan_after_input_filters \
-            /trailer/angle /trailer/articulation_angle /trailer/pose \
-            /trailer/body_markers /trailer/trailer_roi_cloud \
-            /planned_trajectory /real_trajectory /wiln/pose /wiln/markers \
-            /localization/articulation_angle /localization/articulation_pitch \
-            /trailer/odom /trailer/pose_in_map \
+          --exclude-topics "$${EXCLUDE_TOPICS[@]}" \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
@@ -110,6 +126,21 @@ services:
       - use_joint_state_publisher:=false
       - use_sim_time:=true
 
+  # ── ZED detections → Foxglove markers ────────────────────────────────────
+  # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray so
+  # Foxglove can show detected people/objects in the 3D panel.
+  zed_markers:
+    <<: [*replay_base]
+    profiles: ["zed"]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/zed_objects_to_markers.py
+      - --only-person
+
   # ── Runtime odometry rebuild for replay ──────────────────────────────────
   # Older bags do not always carry a usable articulated body state for the
   # current URDF. Re-run the current odometry node on top of the recorded
@@ -125,12 +156,28 @@ services:
       - mtt_driver
       - mtt_odometry_node_exe
       - --ros-args
+      - --params-file
+      - ${WORKSPACE}/demos/common/config/mtt_driver.yaml
       - -p
       - use_sim_time:=true
       - -p
       - broadcast_tf:=true
       - -p
       - cmd_vel_topic:=cmd_vel
+      - -p
+      - hardware_articulation_topic:=${REPLAY_ODOM_ARTICULATION_TOPIC:-/mtt_articulation_angle}
+      - -p
+      - articulation_state_topic:=${REPLAY_ODOM_ARTICULATION_STATE_TOPIC:-/unused/articulation_state}
+      - -p
+      - articulation_state_output_topic:=mtt/articulation_state/runtime
+      - -p
+      - use_articulation_state_lidar:=false
+      - -p
+      - imu_yaw_rate_topic:=${REPLAY_ODOM_IMU_TOPIC:-/unused/imu}
+      - -p
+      - imu_yaw_rate_sign:=${REPLAY_ODOM_IMU_YAW_SIGN:--1.0}
+      - -p
+      - imu_yaw_rate_timeout_seconds:=0.2
       - -r
       - mtt_odometry:=mtt_odometry/runtime
       - -r
@@ -214,11 +261,28 @@ services:
       - -u
       - ${WORKSPACE}/demos/bag_replay/scripts/offline_icp.py
 
-  # ── Perception in replay (cloud_merger_node + trailer_detector_node) ────────
-  # cloud_merger_node: fuses Hesai + RS-Airy → base_link frame → /merged_points_filtered
-  # trailer_detector_node: RANSAC articulation angle on the same filtered merged cloud
+  # ── Perception in replay ─────────────────────────────────────────────────────
+  # Launches the full perception stack via perception.launch.py:
+  #
+  #   cloud_merger_node       — fuses Hesai + RS-Airy into /merged_points_filtered
+  #                             (base_link frame, bbox-filtered, ~20 Hz)
+  #   trailer_detector_node   — 2D PCA + 1D KF on raw RS-Airy cloud
+  #                             → /trailer/articulation_angle (always launched)
+  #   mtt_trailer_estimator_node — 10-DOF EKF in map frame, fuses:
+  #                             - kinematic prior from /mtt_odometry + articulation angle
+  #                             - /mapping/icp_odom when available (mapping profile)
+  #                             - RS-Airy ICP on oriented ROI (10 Hz)
+  #                             - Hesai ICP supplement (10 Hz, if enable_hesai=true)
+  #                             → /trailer/pose, /trailer/odom, /trailer/pose_in_map,
+  #                               /trailer/body_markers, /trailer/trailer_roi_cloud,
+  #                               /trailer/articulation_angle (back-computed), TF map→trailer_body
+  #
+  # Set REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR=false to use the legacy trailer_pose_node
+  # (V4.0) instead — useful for A/B comparison.
+  #
   # Depends on description so robot_state_publisher has published TF before
   # cloud_merger_node tries to transform clouds (hesai_lidar → base_link).
+  # Depends on runtime_odometry for /mtt_odometry kinematic prior.
   perception:
     <<: [*replay_base]
     profiles: ["perception", "mapping"]
@@ -226,6 +290,8 @@ services:
       bag_player:
         condition: service_started
       description:
+        condition: service_started
+      runtime_odometry:
         condition: service_started
     command:
       - bash
@@ -235,6 +301,7 @@ services:
         sleep 3
         exec ros2 launch mtt_perception perception.launch.py \
           use_sim_time:=true \
+          enable_new_trailer_estimator:=${REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR:-true} \
           publish_filtered:=true \
           cloud_merger_max_pair_dt:=0.120 \
           cloud_merger_tf_timeout:=0.100 \
@@ -242,32 +309,58 @@ services:
           cloud_merger_enable_trailer_bbox_filter:=${REPLAY_FILTER_TRAILER_FROM_MAPPING:-true}
 
   # ── ICP mapping in replay ────────────────────────────────────────────────
-  # Rebuilds /mapping/map and /mapping/icp_odom from the live merged cloud.
-  # This is intentionally separate from bag_player: generated mapping topics
-  # are excluded from replay above, so Foxglove shows the map from this run.
+  # Baseline: single LiDAR /hesai_lidar/points — pas de cloud fusionné.
+  # Le cloud fusionné (/merged_points_filtered) cumule deux problemes :
+  #   1. ObservationDirectionDataPointsFilter sur nuage multi-origine = directions fausses.
+  #   2. Dependance sur perception (cloud_merger_node) qui peut demarrer apres.
+  # Pour activer le dual LiDAR dense: MAPPING_POINTS_TOPIC=/merged_points_filtered
+  #   et MAPPING_CONFIG=.../config/mapping/_config_replay_dense.yaml
   mapping:
     <<: [*replay_base]
-    profiles: ["mapping"]
+    profiles: ["mapping", "teach_repeat", "wiln_obstacles"]
     depends_on:
-      perception:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+      runtime_odometry:
         condition: service_started
     environment:
-      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/merged_points_filtered}
-      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_replay_dense.yaml}
-      MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.08}
-      MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-0.5}
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml}
+      MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.50}
+      MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-0.05}
       MAPPING_MAP_TF_PUBLISH_RATE: ${MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
-      MAPPING_DESKEW: ${MAPPING_DESKEW:-false}
+      MAPPING_MIN_INPUT_POINTS: ${MAPPING_MIN_INPUT_POINTS:-200}
+      MAPPING_MAX_TRANSLATION_CORRECTION: ${MAPPING_MAX_TRANSLATION_CORRECTION:-2.50}
+      MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_ROTATION_CORRECTION_DEG:-35.0}
+      MAPPING_MAX_VELOCITY_MS: ${MAPPING_MAX_VELOCITY_MS:-8.0}
+      MAPPING_MAX_YAW_RATE_DEG_S: ${MAPPING_MAX_YAW_RATE_DEG_S:-80.0}
+      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-4.0}
+      MAPPING_MAX_Z_JUMP_M: ${MAPPING_MAX_Z_JUMP_M:-0.75}
+      MAPPING_MAX_REGISTRATION_TIME_MS: ${MAPPING_MAX_REGISTRATION_TIME_MS:-3000.0}
+      MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-10.0}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5}
+      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03}
+      MAPPING_DESKEW: ${MAPPING_DESKEW:-true}
+      MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-true}
       MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-odom}
+      MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-base_footprint}
     command:
       - bash
       - -lc
       - |
-        echo "Waiting for /merged_points_filtered before starting ICP mapper..."
+        echo "Waiting for $${MAPPING_POINTS_TOPIC} before starting ICP mapper..."
         timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
           echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
           exit 1
         }
+        echo "Waiting for replay odometry TF before starting ICP mapper..."
+        timeout 45 bash -lc 'until ros2 topic info /mtt_odometry/runtime 2>/dev/null | grep -qE "Publisher count: [1-9]"; do sleep 1; done' || {
+          echo "WARN: /mtt_odometry/runtime not visible yet; starting mapper anyway."
+        }
+        sleep 2
         exec ros2 launch norlab_robot mapping.launch.py \
           use_sim_time:=true \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
@@ -276,7 +369,190 @@ services:
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
-          mapping_odom_frame:=$${MAPPING_ODOM_FRAME}
+          mapping_min_input_points:=$${MAPPING_MIN_INPUT_POINTS} \
+          mapping_max_translation_correction:=$${MAPPING_MAX_TRANSLATION_CORRECTION} \
+          mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
+          mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
+          mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
+          mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
+          mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
+          mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
+          mapping_max_idle_time:=$${MAPPING_MAX_IDLE_TIME} \
+          deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M} \
+          deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG} \
+          deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT} \
+          mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE} \
+          mapping_odom_frame:=$${MAPPING_ODOM_FRAME} \
+          mapping_robot_frame:=$${MAPPING_ROBOT_FRAME}
+
+  # ── WILN obstacle cloud regenerated in replay map frame ─────────────────
+  # The bag may contain /wiln/obstacles from the live run, but those points
+  # were published in the old recorded map frame. Rebuild them from LiDAR +
+  # the current replay TF/ICP map so Foxglove's fixed "map" frame is coherent.
+  wiln_obstacles:
+    <<: [*replay_base]
+    profiles: ["mapping", "teach_repeat", "wiln_obstacles"]
+    depends_on:
+      mapping:
+        condition: service_started
+    environment:
+      WILN_PARAMS_FILE: ${WILN_PARAMS_FILE:-${WORKSPACE}/demos/common/config/wiln.yaml}
+    command:
+      - bash
+      - -lc
+      - |
+        wait_for_topic() {
+          topic="$1"
+          timeout_s="$2"
+          label="$3"
+          echo "Waiting for $$label ($$topic)..."
+          for i in $$(seq 1 "$$timeout_s"); do
+            ros2 topic info "$$topic" 2>/dev/null | grep -qE "Publisher count: [1-9]" && return 0
+            sleep 1
+          done
+          echo "ERROR: $$label ($$topic) not available after $${timeout_s}s"
+          return 1
+        }
+        wait_for_topic /mapping/icp_odom 120 "Norlab ICP odom" || \
+          echo "WARN: starting WILN obstacles anyway; replay timing may make ICP appear later."
+        wait_for_topic /hesai_lidar/points 120 "Hesai cloud" || \
+          echo "WARN: starting WILN obstacles anyway; replay timing may make the cloud appear later."
+        wait_for_topic /mapping/map 120 "Norlab map" || \
+          echo "WARN: starting WILN obstacles anyway; map TF may appear after the node starts."
+        echo "Starting WILN obstacles with params: $${WILN_PARAMS_FILE}"
+        exec ros2 run wiln wiln_obstacle_node \
+          --ros-args \
+          --params-file "$${WILN_PARAMS_FILE}" \
+          -p use_sim_time:=true
+
+  # ── Lightweight cloud for Foxglove/debug in replay ───────────────────────
+  # Use this instead of visualizing raw /hesai_lidar/points when debugging
+  # mapping/obstacles. It publishes a cropped, voxelized cloud.
+  lidar_debug_cloud:
+    <<: [*replay_base]
+    profiles: ["mapping", "teach_repeat", "wiln_obstacles", "debug"]
+    depends_on:
+      bag_player:
+        condition: service_started
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/pointcloud_voxel_debug.py
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - input_topic:=${LIDAR_DEBUG_INPUT_TOPIC:-/hesai_lidar/points}
+      - -p
+      - output_topic:=${LIDAR_DEBUG_OUTPUT_TOPIC:-/debug/hesai_points_voxel}
+      - -p
+      - voxel_size:=${LIDAR_DEBUG_VOXEL_SIZE:-0.30}
+      - -p
+      - max_rate_hz:=${LIDAR_DEBUG_MAX_RATE_HZ:-2.0}
+      - -p
+      - max_points:=${LIDAR_DEBUG_MAX_POINTS:-25000}
+
+  audit_topics:
+    <<: [*replay_base]
+    profiles: ["debug", "mapping", "wiln_obstacles"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/audit_live_topics.py
+      - --duration
+      - ${AUDIT_DURATION:-30}
+
+  audit_tf:
+    <<: [*replay_base]
+    profiles: ["debug", "mapping", "wiln_obstacles"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/audit_tf_chain.py
+      - --duration
+      - ${AUDIT_DURATION:-60}
+
+  map_quality:
+    <<: [*replay_base]
+    profiles: ["debug", "mapping", "wiln_obstacles"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/icp_map_quality_check.py
+      - --duration
+      - ${AUDIT_DURATION:-120}
+
+  # ── GenZ-ICP mapping in replay (Experimental) ─────────────────────────────
+  # Alternative to Norlab ICP for robust mapping in degenerate environments.
+  # Listens to /hesai_lidar/points and provides odometry + pointcloud map.
+  mapping_genz:
+    <<: [*replay_base]
+    profiles: ["mapping_genz"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    environment:
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-map}
+      MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-odom}
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for $${MAPPING_POINTS_TOPIC} before starting GenZ-ICP..."
+        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
+          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
+          exit 1
+        }
+        echo "Starting GenZ-ICP (Global Mapper Mode) with:"
+        echo "  points: $${MAPPING_POINTS_TOPIC}"
+        echo "  odom_frame: $${MAPPING_ODOM_FRAME}"
+        echo "  base_frame: $${MAPPING_ROBOT_FRAME}"
+        exec ros2 launch genz_icp odometry.launch.py \
+          use_sim_time:=true \
+          topic:=$${MAPPING_POINTS_TOPIC} \
+          odom_frame:=$${MAPPING_ODOM_FRAME} \
+          base_frame:=$${MAPPING_ROBOT_FRAME} \
+          deskew:=true \
+          max_range:=60.0 \
+          voxel_size:=0.3 \
+          visualize:=true
+
+  # ── KISS-ICP mapping in replay (Simple & Robust) ─────────────────────────
+  # Alternative to Norlab/GenZ for fast and robust LiDAR odometry.
+  # Listens to /hesai_lidar/points by default.
+  mapping_kiss:
+    <<: [*replay_base]
+    profiles: ["mapping_kiss"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    environment:
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-odom_lidar}
+      MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-base_footprint}
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for $${MAPPING_POINTS_TOPIC}..."
+        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
+          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
+          exit 1
+        }
+        echo "Starting KISS-ICP..."
+        sleep 2
+        exec ros2 launch kiss_icp odometry.launch.py \
+          use_sim_time:=true \
+          topic:=$${MAPPING_POINTS_TOPIC} \
+          lidar_odom_frame:=$${MAPPING_ODOM_FRAME} \
+          base_frame:=$${MAPPING_ROBOT_FRAME} \
+          publish_odom_tf:=true \
+          invert_odom_tf:=false \
+          visualize:=true \
+          voxel_size:=0.25 \
+          max_range:=75.0 \
+          deskew:=true
 
   # ── Post-process dataset export: ICP + lightweight enriched bag + CSV ──────
   # Writes per session:
@@ -475,6 +751,28 @@ services:
         sleep 5
         python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
 
+  # ── LiDAR-Camera colorizer for replay visualization ─────────────────────
+  # Projects ZED2i RGB onto the Hesai PointCloud2 and publishes
+  # /hesai_lidar/points_colored (keeps intensity + adds rgb field).
+  # Usage: BAG_PATH=... docker compose --profile colorizer up bag_player description colorizer foxglove
+  colorizer:
+    <<: [*replay_base]
+    profiles: ["colorizer"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /clock and TF to settle..."
+        sleep 3
+        exec ros2 launch mtt_lidar_camera_colorizer colorizer.launch.py \
+          use_sim_time:=true \
+          image_transport:=compressed
+
   # ── Foxglove for replay visualization ────────────────────────────────────
   # Connect Foxglove Studio → "Open connection" → "Foxglove WebSocket" → ws://localhost:8765
   foxglove:
@@ -542,6 +840,8 @@ services:
         condition: service_started
       description:
         condition: service_started
+      wiln_obstacles:
+        condition: service_started
     command:
       - bash
       - -lc
@@ -552,7 +852,13 @@ services:
           use_sim_time:=true \
           odom_topic:=/mapping/icp_odom \
           pose_topic:=/wiln/pose \
-          wiln_cmd_vel_topic:=/cmd_vel
+          wiln_cmd_vel_topic:=/cmd_vel \
+          wiln_params_file:=${WORKSPACE}/demos/common/config/wiln.yaml \
+          follower_params_file:=${WORKSPACE}/demos/common/config/mtt_path_follower.yaml \
+          supervisor_params_file:=${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml \
+          route_manager_params_file:=${WORKSPACE}/demos/common/config/mtt_route_manager.yaml \
+          front_obstacle_params_file:=${WORKSPACE}/demos/common/config/mtt_front_obstacle_monitor.yaml \
+          start_obstacle_node:=false
 
   wiln_validate_route:
     <<: [*replay_base]
