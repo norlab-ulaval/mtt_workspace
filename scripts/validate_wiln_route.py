@@ -110,8 +110,6 @@ def grade(stats: dict, max_step_warn_m: float, max_yaw_step_warn_rad: float) -> 
 
     if not warnings:
         return "good", warnings
-    if warnings == ["large_xy_jump"] or warnings == ["large_yaw_jump"]:
-        return "usable_with_caution", warnings
     return "reject_for_replay", warnings
 
 
@@ -130,8 +128,8 @@ def print_yaml(data: dict) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("route", type=Path, help="WILN .ltr route file")
-    parser.add_argument("--max-step-warn-m", type=float, default=0.75)
-    parser.add_argument("--max-yaw-step-warn-rad", type=float, default=0.50)
+    parser.add_argument("--max-step-warn-m", type=float, default=1.0)
+    parser.add_argument("--max-yaw-step-warn-rad", type=float, default=0.80)  # matches wiln_route_node C++ threshold
     args = parser.parse_args()
 
     try:

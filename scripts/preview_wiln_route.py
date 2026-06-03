@@ -288,7 +288,7 @@ def main() -> int:
     parser.add_argument("--max-speed-ms", type=float, default=0.50)
     parser.add_argument("--min-speed-ms", type=float, default=0.25)
     parser.add_argument("--slowdown-alpha", type=float, default=2.0)
-    parser.add_argument("--max-step-warn-m", type=float, default=0.75)
+    parser.add_argument("--max-step-warn-m", type=float, default=1.0)
     parser.add_argument("--max-yaw-step-warn-rad", type=float, default=0.50)
     parser.add_argument("--kappa-max-warn", type=float, default=0.70)
     args = parser.parse_args()
@@ -307,15 +307,19 @@ def main() -> int:
     summary = build_summary(args.route, frame_id, poses, commands, args)
     dataset = read_dataset_csv(args.dataset_csv)
 
-    output_dir = args.output_dir or args.route.parent / "preview"
+    output_dir = args.output_dir or args.route.parent
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_png = output_dir / "wiln_route_preview.png"
-    output_yaml = output_dir / "wiln_route_preview.yaml"
+    output_png = output_dir / "preview.png"
+    output_yaml = output_dir / "preview.yaml"
+    output_metadata = output_dir / "metadata.yaml"
     plot_preview(args.route, output_png, poses, commands, dataset, summary)
-    output_yaml.write_text(yaml.safe_dump(summary, sort_keys=False), encoding="utf-8")
+    summary_yaml = yaml.safe_dump(summary, sort_keys=False)
+    output_yaml.write_text(summary_yaml, encoding="utf-8")
+    output_metadata.write_text(summary_yaml, encoding="utf-8")
 
     print(f"preview_plot: {output_png}")
     print(f"preview_summary: {output_yaml}")
+    print(f"metadata: {output_metadata}")
     print(f"grade: {summary['grade']}")
     if summary["warnings"]:
         print("warnings:")

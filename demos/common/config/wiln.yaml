@@ -1,14 +1,108 @@
-/**:
-  wiln_node:
-    ros__parameters:
-      follow_path_topic: /follow_path
-      enable_mapping_service: /mapping/enable_mapping
-      disable_mapping_service: /mapping/disable_mapping
-      save_map_service: /mapping/save_map
-      load_map_service: /mapping/load_map
-      trajectory_speed: 0.40
-      smoothing_window_size: 15
-      robot_model: mtt
-      kappa_max: 0.70
-      # Must match mtt_path_follower psi_max_rad (60° = 1.047 rad)
-      articulation_limit_rad: 1.047
+wiln_teach_node:
+  ros__parameters:
+    smoothing_window_size: 15
+    min_dist_between_poses: 0.10
+    min_angle_between_poses: 0.05
+    max_record_jump_m: 1.0
+    max_record_yaw_jump_rad: 0.8
+
+wiln_route_node:
+  ros__parameters:
+    save_map_service: /mapping/save_map
+    load_map_service: /mapping/load_map
+    create_parent_dirs: true
+    max_route_step_m: 1.0
+    max_route_yaw_step_rad: 0.8
+    max_route_z_span_m: 2.0
+
+wiln_replay_node:
+  ros__parameters:
+    trajectory_speed: 1.50
+    control_local_plan_topic: /wiln/control/local_plan
+    robot_model: mtt
+    kappa_max: 0.70
+    articulation_limit_rad: 1.047
+    enable_mapping_service: /mapping/enable_mapping
+    disable_mapping_service: /mapping/disable_mapping
+
+wiln_path_follower:
+  ros__parameters:
+    odom_topic: /mapping/icp_odom
+    local_plan_topic: /wiln/control/local_plan
+    trajectory_topic: /wiln/trajectory
+    command_topic: /wiln/command
+    replay_state_topic: /wiln/replay/state
+    state_topic: /wiln/follower/state
+    cmd_vel_topic: controller/cmd_vel
+    obstacle_stop_topic: /mtt_obstacle/stop_requested
+    obstacle_slowdown_topic: /mtt_obstacle/slowdown_scale
+    obstacle_gate_timeout_s: 0.5
+    default_speed_ms: 1.20
+    max_speed_ms: 1.60
+    min_speed_ms: 0.70
+    slowdown_alpha: 0.80
+    robot_model: mtt
+    kappa_max: 0.70
+    l_eq_m: 2.40
+    psi_max_rad: 1.047
+    model_use_slip_heuristic: true
+    model_yaw_slip_base: 0.10
+    model_yaw_slip_speed_gain: 0.05
+    model_yaw_slip_articulation_gain: 0.15
+    model_yaw_slip_min_scale: 0.55
+    # Servo activation — PHASE 5, do NOT enable before ICP is deterministic.
+    # Prerequisites before enabling either servo:
+    #   1. audit_tf shows zero TF-missing scans over 10+ cold starts (Phase 3 done)
+    #   2. audit_live_topics shows /mtt_tachometer and /hardware/articulation_angle stable
+    #   3. icp_map_quality_check shows zero ICP jumps over a complete run
+    #
+    # Phase 5A: speed servo
+    #   - Set mode: "characterize" in speed_servo.yaml, drive forward, collect LUT from logs
+    #   - Paste LUT into speed_servo.yaml, set feedforward_gain: 1.0
+    #   - Start with ki: 0.0 in speed_servo.yaml (P-only), tune toward ki: 0.8
+    #   - Set use_speed_servo: true here, rebuild, test at 1.0 m/s
+    #
+    # Phase 5B: articulation servo (after 5A is stable)
+    #   - Start with kp: 1.0, kd: 0.02 in articulation_servo.yaml (half defaults)
+    #   - Test stationary articulation commands before driving
+    #   - Set use_articulation_servo: true here, rebuild, test at 0.5 m/s
+    use_articulation_servo: false
+    use_speed_servo: false
+
+wiln_obstacle_node:
+  ros__parameters:
+    odom_topic: /mapping/icp_odom
+    obstacles_topic: /wiln/obstacles
+    lidar_topics:
+      - /hesai_lidar/points
+    target_frame: map
+    publish_rate_hz: 10.0
+    obstacle_max_age_s: 0.5
+
+    # Robot-local crop. Keep front and immediate side hazards; ignore the
+    # trailer/backfield so WILN does not deform paths around the robot itself.
+    crop_x_min: -0.75
+    crop_x_max: 7.00
+    crop_y_abs: 2.00
+    crop_z_min: -0.20
+    crop_z_max: 1.80
+
+    min_range: 0.45
+    max_range: 8.0
+    voxel_size: 0.15
+
+    # Self filters are evaluated in the robot-local frame before the selected
+    # points are published back in map frame.
+    enable_self_filter: true
+    self_filter_chassis_box: [-1.00, 0.80, -0.50, 0.50, -0.30, 0.90]
+    self_filter_lidar_cage_box: [-0.35, 0.25, -0.30, 0.30, 0.50, 1.20]
+    self_filter_rsairy_box: [-0.30, 0.25, 0.55, 1.05, 0.50, 1.20]
+    self_filter_trailer_box: [-4.20, -0.75, -1.35, 1.35, -0.40, 2.50]
+
+wiln_safety_monitor:
+  ros__parameters:
+    odom_topic: /mapping/icp_odom
+    # 5.0s last-resort kill — mtt_repeat_supervisor (2.0s) fires first.
+    # Robot already stops at PathFollower odom_timeout_s=2.5s (PathFollower.cpp:41).
+    odom_timeout_s: 5.0
+    check_rate_hz: 5.0

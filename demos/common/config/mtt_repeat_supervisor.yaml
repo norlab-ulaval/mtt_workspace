@@ -7,18 +7,19 @@
       deadman_topic: mtt_control/teleop_deadman
       controller_cmd_vel_topic: controller/cmd_vel
       selected_mode_topic: mtt_control/selected_mode
+      selected_source_topic: mtt_control/selected_source
+      auto_enabled_topic: mtt_control/auto_mode_enabled
       state_topic: mtt_repeat/state
       ready_topic: mtt_repeat/ready
-      follow_path_action_name: /follow_path
-      teach_start_service: /start_recording
-      teach_stop_service: /stop_recording
-      play_line_service: /play_line
-      play_loop_service: /play_loop
-      cancel_service: /cancel_trajectory
+      wiln_command_topic: /wiln/command
       request_auto_service: mtt_control/request_auto
       request_manual_service: mtt_control/request_manual
       health_timeout_s: 1.0
-      icp_timeout_s: 0.75
+      # 2.0s gives the mapper time to recover from a short rejection burst
+      # (2-3 scans at 10 Hz = 0.2-0.3s). The path follower still stops at
+      # odom_timeout_s=2.5s (PathFollower.cpp) — robot halts; only replay
+      # cancel is delayed to avoid killing the mission prematurely.
+      icp_timeout_s: 2.0
       teleop_override_linear_threshold: 0.05
       teleop_override_angular_threshold: 0.05
       replay_idle_timeout_s: 1.0
