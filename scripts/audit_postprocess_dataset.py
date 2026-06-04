@@ -137,6 +137,36 @@ def wrap_angle(angle: float) -> float:
     return math.atan2(math.sin(angle), math.cos(angle))
 
 
+def direction_sign(value: Any) -> float:
+    text = str(value or "").strip().lower()
+    if text in {"backward", "reverse", "rear", "rev", "-1"}:
+        return -1.0
+    return 1.0
+
+
+def align_trajectory_se2(
+    reference: list[dict[str, float]],
+    trajectory: list[dict[str, float]],
+) -> list[dict[str, float]]:
+    if not reference or not trajectory:
+        return trajectory
+    ref0 = reference[0]
+    src0 = trajectory[0]
+    d_yaw = wrap_angle(ref0["yaw"] - src0["yaw"])
+    c = math.cos(d_yaw)
+    s = math.sin(d_yaw)
+    out = []
+    for row in trajectory:
+        dx = row["x"] - src0["x"]
+        dy = row["y"] - src0["y"]
+        aligned = dict(row)
+        aligned["x"] = ref0["x"] + c * dx - s * dy
+        aligned["y"] = ref0["y"] + s * dx + c * dy
+        aligned["yaw"] = wrap_angle(row["yaw"] + d_yaw)
+        out.append(aligned)
+    return out
+
+
 def percentile(values: list[float], pct: float) -> float | None:
     if not values:
         return None
@@ -168,9 +198,9 @@ def derive_xy_kinematics(
     x_key: str,
     y_key: str,
     yaw_key: str | None,
+    smooth_window_s: float = 1.0,
 ) -> list[dict[str, float]]:
-    out: list[dict[str, float]] = []
-    previous: dict[str, float] | None = None
+    samples: list[dict[str, float]] = []
     for row in rows:
         t = parse_float(row.get("t"))
         x = parse_float(row.get(x_key))
@@ -179,16 +209,47 @@ def derive_xy_kinematics(
         if None in (t, x, y, yaw):
             continue
         assert t is not None and x is not None and y is not None and yaw is not None
-        sample = {"t": t, "x": x, "y": y, "yaw": yaw, "speed": 0.0, "yaw_rate": 0.0}
-        if previous is not None:
-            dt = t - previous["t"]
+        samples.append({"t": t, "x": x, "y": y, "yaw": yaw, "speed": 0.0, "yaw_rate": 0.0})
+
+    if not samples:
+        return []
+
+    times = [row["t"] for row in samples]
+    half_window = max(0.0, smooth_window_s) * 0.5
+    out: list[dict[str, float]] = []
+    previous: dict[str, float] | None = None
+    for i, sample in enumerate(samples):
+        smoothed = dict(sample)
+        left = 0
+        right = len(samples) - 1
+        if half_window > 0.0:
+            while left < len(times) and times[left] < sample["t"] - half_window:
+                left += 1
+            while right > 0 and times[right] > sample["t"] + half_window:
+                right -= 1
+        else:
+            left = max(0, i - 1)
+            right = i
+        if right > left and times[right] > times[left]:
+            a = samples[left]
+            b = samples[right]
+            dt = b["t"] - a["t"]
+            heading_mid = wrap_angle(0.5 * (a["yaw"] + b["yaw"]))
+            smoothed["speed"] = (
+                (b["x"] - a["x"]) * math.cos(heading_mid)
+                + (b["y"] - a["y"]) * math.sin(heading_mid)
+            ) / dt
+            smoothed["yaw_rate"] = wrap_angle(b["yaw"] - a["yaw"]) / dt
+        elif previous is not None:
+            dt = sample["t"] - previous["t"]
             if dt > 1e-6:
-                dx = x - previous["x"]
-                dy = y - previous["y"]
-                heading_mid = wrap_angle(0.5 * (yaw + previous["yaw"]))
-                sample["speed"] = (dx * math.cos(heading_mid) + dy * math.sin(heading_mid)) / dt
-                sample["yaw_rate"] = wrap_angle(yaw - previous["yaw"]) / dt
-        out.append(sample)
+                heading_mid = wrap_angle(0.5 * (sample["yaw"] + previous["yaw"]))
+                smoothed["speed"] = (
+                    (sample["x"] - previous["x"]) * math.cos(heading_mid)
+                    + (sample["y"] - previous["y"]) * math.sin(heading_mid)
+                ) / dt
+                smoothed["yaw_rate"] = wrap_angle(sample["yaw"] - previous["yaw"]) / dt
+        out.append(smoothed)
         previous = sample
     return out
 
@@ -226,7 +287,9 @@ def coverage(rows: list[dict[str, Any]], key: str) -> float:
 
 def compute_audit(session_dir: Path, rows: list[dict[str, Any]], columns: list[str]) -> dict[str, Any]:
     summary = load_yaml(session_dir / "postprocess_dataset" / "summary.yaml")
-    icp_summary = load_yaml(session_dir / "offline_icp" / "summary.yaml")
+    icp_summary = load_yaml(session_dir / "offline_icp_canonical" / "summary.yaml")
+    if not icp_summary:
+        icp_summary = load_yaml(session_dir / "offline_icp" / "summary.yaml")
     enriched_meta = load_yaml(session_dir / "postprocess_dataset" / "enriched_bag" / "metadata.yaml")
 
     times = [parse_float(row.get("t")) for row in rows]
@@ -239,7 +302,7 @@ def compute_audit(session_dir: Path, rows: list[dict[str, Any]], columns: list[s
     icp_kin = derive_xy_kinematics(rows, "icp_x", "icp_y", None)
     odom_kin = derive_xy_kinematics(rows, "odom_x", "odom_y", "odom_yaw")
     icp_series = Series(icp_kin)
-    odom_series = Series(odom_kin)
+    odom_series = Series(align_trajectory_se2(icp_kin, odom_kin))
 
     xy_errors: list[float] = []
     yaw_errors: list[float] = []
@@ -269,10 +332,13 @@ def compute_audit(session_dir: Path, rows: list[dict[str, Any]], columns: list[s
             if imu_yaw is not None:
                 imu_yaw_rate_errors.append(imu_yaw - icp["yaw_rate"])
             if tach_speed is not None:
-                tach_speed_errors.append(tach_speed - icp["speed"])
-                if abs(tach_speed) > 0.05 and abs(icp["speed"]) > 0.05:
+                signed_tach_speed = tach_speed * direction_sign(row.get("tach_direction"))
+                tach_speed_errors.append(signed_tach_speed - icp["speed"])
+                if abs(signed_tach_speed) > 0.05 and abs(icp["speed"]) > 0.05:
                     sign_total += 1
-                    sign_matches += int(math.copysign(1.0, tach_speed) == math.copysign(1.0, icp["speed"]))
+                    sign_matches += int(
+                        math.copysign(1.0, signed_tach_speed) == math.copysign(1.0, icp["speed"])
+                    )
             if cmd_speed is not None:
                 cmd_speed_errors.append(cmd_speed - icp["speed"])
 
@@ -451,6 +517,10 @@ def finite_xy(rows: list[dict[str, Any]], x_key: str, y_key: str) -> tuple[list[
     return xs, ys
 
 
+def finite_xy_from_samples(samples: list[dict[str, float]]) -> tuple[list[float], list[float]]:
+    return [row["x"] for row in samples], [row["y"] for row in samples]
+
+
 def write_plots(session_dir: Path, rows: list[dict[str, Any]]) -> dict[str, str]:
     try:
         import matplotlib
@@ -467,14 +537,22 @@ def write_plots(session_dir: Path, rows: list[dict[str, Any]]) -> dict[str, str]
 
     icp_kin = derive_xy_kinematics(rows, "icp_x", "icp_y", None)
     odom_kin = derive_xy_kinematics(rows, "odom_x", "odom_y", "odom_yaw")
+    odom_kin_aligned = align_trajectory_se2(icp_kin, odom_kin)
 
     fig, ax = plt.subplots(figsize=(8, 6))
     plotted = False
-    for label, x_key, y_key in (("icp", "icp_x", "icp_y"), ("odom", "odom_x", "odom_y"), ("trailer", "trailer_pose_x", "trailer_pose_y")):
-        xs, ys = finite_xy(rows, x_key, y_key)
-        if xs:
-            ax.plot(xs, ys, label=label, linewidth=1.2)
-            plotted = True
+    xs, ys = finite_xy(rows, "icp_x", "icp_y")
+    if xs:
+        ax.plot(xs, ys, label="icp", linewidth=1.2)
+        plotted = True
+    xs, ys = finite_xy_from_samples(odom_kin_aligned)
+    if xs:
+        ax.plot(xs, ys, label="odom_aligned", linewidth=1.2)
+        plotted = True
+    xs, ys = finite_xy(rows, "trailer_pose_x", "trailer_pose_y")
+    if xs:
+        ax.plot(xs, ys, label="trailer", linewidth=1.2)
+        plotted = True
     if plotted:
         ax.set_title(session_dir.name)
         ax.set_xlabel("x [m]")

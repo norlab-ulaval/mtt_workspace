@@ -43,7 +43,11 @@ ORIGINAL_TOPICS = {
     "/imu/data",
     "/cmd_vel",
     "/cmd_vel/teleop",
+    "/cmd_vel/teleop_raw",
+    "/cmd_vel/manual",
+    "/cmd_vel/manual_raw",
     "/controller/cmd_vel",
+    "/hardware/articulation_angle",
 }
 
 TELEMETRY_SUMMARY_TOPICS = {
@@ -76,7 +80,14 @@ METADATA_GROUPS = {
     "lidar": ["/hesai_lidar/points", "/rsairy_ns/points", "/merged_points_filtered"],
     "icp": ["/mapping/icp_odom", "/mapping/map"],
     "robot_motion": ["/mtt_odometry", "/mtt_tachometer", "/mtt_articulation_angle"],
-    "commands": ["/cmd_vel", "/cmd_vel/teleop", "/controller/cmd_vel"],
+    "commands": [
+        "/cmd_vel",
+        "/cmd_vel/teleop",
+        "/cmd_vel/teleop_raw",
+        "/cmd_vel/manual",
+        "/cmd_vel/manual_raw",
+        "/controller/cmd_vel",
+    ],
     "imu": ["/mti100/data", "/mti10/data", "/imu/data", "/zed/zed_node/imu/data"],
     "perception": ["/trailer/angle", "/trailer/articulation_angle", "/trailer/pose", "/trailer/pose_confidence"],
     "telemetry_summary": ["/mtt_status", "/mtt_health", "/mtt_battery/status"],
@@ -125,6 +136,12 @@ CSV_FIELDS = [
     "icp_qy",
     "icp_qz",
     "icp_qw",
+    "icp_yaw",
+    "icp_gap_s",
+    "icp_step_m",
+    "icp_yaw_rate_rad_s",
+    "icp_quality_ok",
+    "sample_valid_for_motion_model",
     "odom_x",
     "odom_y",
     "odom_yaw",
@@ -246,6 +263,16 @@ def yaw_from_quaternion(q: Any) -> float:
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+def yaw_from_values(x: Any, y: Any, z: Any, w: Any) -> float:
+    qx = float(x or 0.0)
+    qy = float(y or 0.0)
+    qz = float(z or 0.0)
+    qw = float(w or 1.0)
+    siny_cosp = 2.0 * (qw * qz + qx * qy)
+    cosy_cosp = 1.0 - 2.0 * (qy * qy + qz * qz)
+    return math.atan2(siny_cosp, cosy_cosp)
+
+
 def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
     if topic in {"/mapping/icp_odom", "/mtt_odometry"}:
         pose = msg.pose.pose
@@ -261,7 +288,14 @@ def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
             "yaw": yaw_from_quaternion(pose.orientation),
         }
 
-    if topic in {"/cmd_vel", "/cmd_vel/teleop", "/controller/cmd_vel"}:
+    if topic in {
+        "/cmd_vel",
+        "/cmd_vel/teleop",
+        "/cmd_vel/teleop_raw",
+        "/cmd_vel/manual",
+        "/cmd_vel/manual_raw",
+        "/controller/cmd_vel",
+    }:
         if hasattr(msg, "twist") and hasattr(msg.twist, "twist"):
             twist = msg.twist.twist
         elif hasattr(msg, "twist"):
@@ -340,7 +374,13 @@ def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
             "mosfet_temp_c": float(getattr(msg, "mosfet_temp_c", math.nan)),
         }
 
-    if topic in {"/mtt_articulation_angle", "/trailer/angle", "/trailer/articulation_angle", "/trailer/pose_confidence"}:
+    if topic in {
+        "/mtt_articulation_angle",
+        "/hardware/articulation_angle",
+        "/trailer/angle",
+        "/trailer/articulation_angle",
+        "/trailer/pose_confidence",
+    }:
         return {"t": bag_time_s, "value": float(msg.data)}
 
     if topic == "/trailer/pose":
@@ -394,17 +434,17 @@ def read_bag_samples(bag_dir: Path, wanted_topics: set[str]) -> tuple[dict[str, 
     msg_types = {topic: get_message(topic_types[topic]) for topic in selected}
     samples = {topic: [] for topic in selected}
     skipped: dict[str, str] = {}
+    bad_messages: dict[str, int] = {}
 
     while reader.has_next():
         topic, data, timestamp_ns = reader.read_next()
-        if topic in skipped:
-            continue
         try:
             msg = deserialize_message(data, msg_types[topic])
             samples[topic].append(extract_sample(topic, msg, timestamp_ns / 1e9))
         except Exception as exc:  # noqa: BLE001
-            skipped[topic] = str(exc)
-            samples.pop(topic, None)
+            bad_messages[topic] = bad_messages.get(topic, 0) + 1
+            skipped[topic] = f"{bad_messages[topic]} bad message(s); last error: {exc}"
+            continue
 
     for rows in samples.values():
         rows.sort(key=lambda row: float(row["t"]))
@@ -646,14 +686,29 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
     tacho = Series(samples.get("/mtt_tachometer", []))
     imu_topic = next((topic for topic in ("/mti100/data", "/mti10/data", "/imu/data") if samples.get(topic)), "")
     imu = Series(samples.get(imu_topic, []))
-    cmd_topic = next((topic for topic in ("/cmd_vel", "/controller/cmd_vel", "/cmd_vel/teleop") if samples.get(topic)), "")
+    cmd_topic = next(
+        (
+            topic
+            for topic in (
+                "/cmd_vel",
+                "/controller/cmd_vel",
+                "/cmd_vel/teleop",
+                "/cmd_vel/teleop_raw",
+                "/cmd_vel/manual",
+                "/cmd_vel/manual_raw",
+            )
+            if samples.get(topic)
+        ),
+        "",
+    )
     cmd = Series(samples.get(cmd_topic, []))
-    mtt_angle = Series(samples.get("/mtt_articulation_angle", []))
+    mtt_angle = Series(samples.get("/mtt_articulation_angle") or samples.get("/hardware/articulation_angle", []))
     trailer_angle = Series(samples.get("/trailer/articulation_angle") or samples.get("/trailer/angle", []))
     trailer_pose = Series(samples.get("/trailer/pose", []))
     confidence = Series(samples.get("/trailer/pose_confidence", []))
 
     rows: list[dict[str, Any]] = []
+    last_icp_row: dict[str, Any] | None = None
     for t in times:
         icp_row = icp.nearest(t, 0.20)
         odom_row = odom.nearest(t, 0.10)
@@ -685,6 +740,33 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
         )
         if icp_row:
             row.update({f"icp_{key}": icp_row.get(key, "") for key in ("x", "y", "z", "qx", "qy", "qz", "qw")})
+            yaw = yaw_from_values(
+                icp_row.get("qx", 0.0),
+                icp_row.get("qy", 0.0),
+                icp_row.get("qz", 0.0),
+                icp_row.get("qw", 1.0),
+            )
+            row["icp_yaw"] = yaw
+            if last_icp_row is not None:
+                dt = max(0.0, float(icp_row["t"]) - float(last_icp_row["t"]))
+                dx = float(icp_row["x"]) - float(last_icp_row["x"])
+                dy = float(icp_row["y"]) - float(last_icp_row["y"])
+                step = math.hypot(dx, dy)
+                prev_yaw = yaw_from_values(
+                    last_icp_row.get("qx", 0.0),
+                    last_icp_row.get("qy", 0.0),
+                    last_icp_row.get("qz", 0.0),
+                    last_icp_row.get("qw", 1.0),
+                )
+                row["icp_gap_s"] = dt
+                row["icp_step_m"] = step
+                row["icp_yaw_rate_rad_s"] = math.atan2(math.sin(yaw - prev_yaw), math.cos(yaw - prev_yaw)) / max(dt, 1e-6)
+            else:
+                row["icp_gap_s"] = 0.0
+                row["icp_step_m"] = 0.0
+                row["icp_yaw_rate_rad_s"] = 0.0
+            row["icp_quality_ok"] = truth(float(row["icp_gap_s"]) <= 0.5 and float(row["icp_step_m"]) <= 0.75)
+            last_icp_row = icp_row
         if odom_row:
             row.update({"odom_x": odom_row["x"], "odom_y": odom_row["y"], "odom_yaw": odom_row["yaw"]})
         if imu_row:
@@ -720,6 +802,13 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
             row.update({f"trailer_pose_{key}": trailer_pose_row.get(key, "") for key in ("x", "y", "z", "qx", "qy", "qz", "qw")})
         if confidence_row:
             row["trailer_confidence"] = confidence_row["value"]
+        row["sample_valid_for_motion_model"] = truth(
+            bool(row["has_icp"])
+            and bool(row["has_tacho"])
+            and bool(row["has_odom"])
+            and str(row.get("icp_quality_ok", "0")) == "1"
+            and row.get("mtt_articulation_angle", "") != ""
+        )
         rows.append(row)
 
     stats = {
@@ -736,6 +825,7 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
         "imu_rows": sum(int(row["has_imu"]) for row in rows),
         "trailer_pose_rows": sum(int(row["has_trailer_pose"]) for row in rows),
         "trailer_angle_rows": sum(int(row["has_trailer_angle"]) for row in rows),
+        "motion_model_valid_rows": sum(int(row["sample_valid_for_motion_model"]) for row in rows),
     }
     conf_values = [float(row["trailer_confidence"]) for row in rows if row["trailer_confidence"] != ""]
     stats["trailer_confidence_mean"] = sum(conf_values) / len(conf_values) if conf_values else None
@@ -748,6 +838,10 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
         writer = csv.DictWriter(stream, fieldnames=CSV_FIELDS)
         writer.writeheader()
         writer.writerows(rows)
+
+
+def write_motion_model_csv(rows: list[dict[str, Any]], path: Path) -> None:
+    write_csv(rows, path)
 
 
 def start_process(command: list[str], log_path: Path) -> ProcessHandle:
@@ -938,7 +1032,9 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
 
     if args.run_icp:
         result["offline_icp_returncode"] = run_offline_icp(session_dir, args, workspace_root, log_dir)
-    icp_summary = load_yaml(session_dir / "offline_icp" / "summary.yaml")
+    canonical_icp_summary = load_yaml(session_dir / "offline_icp_canonical" / "summary.yaml")
+    legacy_icp_summary = load_yaml(session_dir / "offline_icp" / "summary.yaml")
+    icp_summary = canonical_icp_summary if getattr(args, "canonical_icp", False) and canonical_icp_summary else legacy_icp_summary
     result["icp"] = icp_summary
 
     if args.run_perception:
@@ -964,18 +1060,24 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
     prefer_offline_icp = getattr(args, "prefer_offline_icp", False)
     # Prefer the high-quality icp_odom recorded during offline replay (real timestamps + SE(3))
     # over the live bag icp_odom (lower quality, real-time config).
-    offline_icp_odom_bag = session_dir / "offline_icp" / "icp_odom_replay"
+    canonical_icp_odom_bag = session_dir / "offline_icp_canonical" / "icp_odom_replay"
+    offline_icp_odom_bag = canonical_icp_odom_bag if getattr(args, "canonical_icp", False) else session_dir / "offline_icp" / "icp_odom_replay"
     if prefer_offline_icp and (offline_icp_odom_bag / "metadata.yaml").exists():
         try:
             offline_icp_samples, _, _ = read_bag_samples(offline_icp_odom_bag, {"/mapping/icp_odom"})
             if offline_icp_samples.get("/mapping/icp_odom"):
                 samples["/mapping/icp_odom"] = offline_icp_samples["/mapping/icp_odom"]
-                result["icp_trajectory_source"] = "offline_icp_odom_replay"
+                result["icp_trajectory_source"] = (
+                    "offline_icp_canonical/icp_odom_replay"
+                    if offline_icp_odom_bag == canonical_icp_odom_bag
+                    else "offline_icp/icp_odom_replay"
+                )
         except Exception as exc:  # noqa: BLE001
             pass  # fall through to VTK fallback
     if not samples.get("/mapping/icp_odom"):
         start = first_time(samples)
-        vtk_rows = parse_vtk_points(session_dir / "offline_icp" / "trajectory.vtk", duration_s, start)
+        vtk_base = session_dir / "offline_icp_canonical" if getattr(args, "canonical_icp", False) else session_dir / "offline_icp"
+        vtk_rows = parse_vtk_points(vtk_base / "trajectory.vtk", duration_s, start)
         if not vtk_rows:
             vtk_rows = parse_vtk_points(session_dir / "trajectory.vtk", duration_s, start)
         if vtk_rows:
@@ -984,10 +1086,13 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
 
     rows, stats = build_dataset_rows(samples, duration_s)
     dataset_csv = output_dir / "dataset.csv"
+    motion_model_csv = output_dir / "motion_model_dataset.csv"
     write_csv(rows, dataset_csv)
+    write_motion_model_csv(rows, motion_model_csv)
 
     result["status"] = "ok" if rows else "skipped_no_rows"
     result["dataset_csv"] = str(dataset_csv)
+    result["motion_model_dataset_csv"] = str(motion_model_csv)
     result["skipped_topics"] = skipped
     result["stats"] = stats
     result["telemetry_summary"] = telemetry_summary(samples)
@@ -1030,6 +1135,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any session fails.")
     parser.add_argument("--metadata-only", action="store_true", help="Only audit metadata and write summaries/report; do not read messages or run replay.")
     parser.add_argument("--prefer-offline-icp", dest="prefer_offline_icp", action="store_true", help="Use offline_icp/trajectory.vtk as ICP ground truth even when /mapping/icp_odom is in the bag.")
+    parser.add_argument("--canonical-icp", dest="canonical_icp", action="store_true", help="Prefer offline_icp_canonical over legacy offline_icp outputs.")
     return parser.parse_args()
 
 
