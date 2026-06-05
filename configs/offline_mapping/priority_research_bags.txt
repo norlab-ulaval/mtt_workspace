@@ -1,0 +1,15 @@
+# High-value research bags first: recent garage/data-collection sessions with usable
+# lidar, commands, tachometer/odom, and often ZED.
+data/mtt_calibration_test_garage_2026-05-22_09-44-52
+data/mtt_calibration_test_garage_2026-05-27_12-40-03
+data/mtt_calibration_test_garage_2026-05-28_09-56-29
+data/mtt_calibration_test_garage_2026-05-29_11-36-38
+data/mtt_calibration_test_garage_2026-05-29_12-12-44
+data/mtt_calibration_test_garage_2026-06-02_09-01-53
+
+# Second wave: useful May/calibration bags with real motion and enough lidar.
+data/mtt_calibration_test_garage_2026-05-15_11-14-19
+data/mtt_calibration_test_garage_2026-05-20_13-54-09
+data/mtt_calibration_test_garage_2026-05-21_16-04-27
+data/mtt_calibration_test_garage_2026-05-22_16-45-03
+data/mtt_calibration_test_garage_2026-05-22_17-12-26
