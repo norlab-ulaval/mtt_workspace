@@ -1,0 +1,58 @@
+/**:
+  foxglove_bridge:
+    ros__parameters:
+      port: 8766
+      address: "127.0.0.1"
+      tls: false
+      certfile: ""
+      keyfile: ""
+      topic_whitelist:
+        - "^/tf$"
+        - "^/tf_static$"
+        - "^/robot_description$"
+        - "^/joint_states$"
+        - "^/runtime_joint_states$"
+        - "^/cmd_vel(?:/.*)?$"
+        - "^/controller/cmd_vel$"
+        - "^/mtt_.*"
+        - "^/mtt/.*"
+        - "^/trailer/.*"
+        - "^/mapping/icp_odom$"
+        - "^/mapping/trajectory_path$"
+        - "^/mapping/aligned_scan$"
+        - "^/mtt_obstacle/(?:hazard_status|front_clearance_m|stop_requested|slowdown_scale)$"
+        - "^/mtt_obstacle/debug_cloud$"
+        - "^/wiln/.*"
+        - "^/debug/hesai_points_voxel$"
+        - "^/zed/zed_node/(?:pose|odom|status/.*|obj_det/objects|body_trk/skeletons)$"
+        - "^/zed/markers/.*"
+        - "^/gps/.*"
+        - "^/gps_left/.*"
+        - "^/gps_right/.*"
+        - "^/navsat/.*"
+        - "^/mtt_battery/.*"
+      param_whitelist:
+        - ".*"
+      service_whitelist:
+        - "^/mtt_.*"
+        - "^/mapping/.*"
+        - "^/wiln/.*"
+      best_effort_qos_topic_whitelist:
+        - ".*"
+      client_topic_whitelist:
+        - ".*"
+      min_qos_depth: 1
+      max_qos_depth: 10
+      num_threads: 2
+      send_buffer_limit: 10485760
+      use_sim_time: false
+      capabilities:
+        - clientPublish
+        - parameters
+        - parametersSubscribe
+        - services
+        - connectionGraph
+        - assets
+      include_hidden: false
+      asset_uri_allowlist:
+        - "^package://(?:\\w+/)*\\w+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"

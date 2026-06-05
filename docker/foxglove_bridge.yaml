@@ -12,23 +12,79 @@
         - ".*"
       service_whitelist:
         - ".*"
-      # best_effort QoS uniquement sur les topics haute fréquence — évite
-      # les drops silencieux sur les topics critiques (cmd_vel, status)
+      # best_effort QoS — covers all BEST_EFFORT / SensorDataQoS publishers.
+      # Rule: subscribing BEST_EFFORT is always compatible (works with both
+      #   BEST_EFFORT and RELIABLE publishers). Subscribing RELIABLE with a
+      #   BEST_EFFORT publisher = incompatible → topic invisible in Foxglove.
+      # Excluded intentionally: /tf_static, /robot_description, /planned_trajectory,
+      #   /real_trajectory, /wiln/trajectory, /wiln/global_plan, /wiln/*/state,
+      #   /mtt_path_follower/reference_path, /mtt_repeat/*, /mtt_route/*,
+      #   /session/events — transient_local publishers that need RELIABLE to
+      #   deliver latched messages to late-joining Foxglove clients.
       best_effort_qos_topic_whitelist:
+        # CAN driver + odometry
         - "/mtt_tachometer"
         - "/mtt_odometry"
-        - "/scan"
-        - "/points"
-        - "/cloud"
-        - "/imu"
+        - "/mtt_articulation_angle"
+        - "/mtt_status"
+        - "/mtt_battery/status"
+        - "/mtt_health"
+        - "/runtime_joint_states"
+        - "/mtt_monitor/cmd_fallback_odom"
+        # MTT namespaced outputs
+        - "/mtt/.*"
+        # Hardware sensors (STM32 articulation)
+        - "/hardware/.*"
+        # Software articulation servo diagnostics
+        - "/articulation_servo/.*"
+        # Software speed servo diagnostics
+        - "/speed_servo/.*"
+        # Trailer perception + localization
+        - "/trailer/.*"
+        # Mapping / ICP
+        - "/mapping/.*"
+        # Merged LiDAR clouds
+        - "/merged_points.*"
+        # LiDAR raw + processed
+        - "/hesai_lidar/.*"
+        - "/lidar_packets"
+        - "/rsairy_ns/.*"
+        # IMU
+        - "/mti100/.*"
+        - "/mti10/.*"
+        # GPS
+        - "/gps/.*"
+        - "/gps_left/.*"
+        - "/gps_right/.*"
+        # Cameras
+        - "/zed/.*"
+        - "/oak/.*"
+        # Localization (factor graph + trailer pose)
+        - "/localization/.*"
+        # Teach/repeat real-time state (volatile, not transient-local)
+        - "/wiln/pose"
+        - "/wiln/obstacles"
+        - "/wiln/control/local_plan"
+        - "/wiln/debug/.*"
+        - "/wiln/markers"
+        - "/wiln/replay/diagnostics"
+        - "/mtt_obstacle/.*"
+        - "/mtt_path_follower/target_pose"
+        # Teleop
+        - "/joy"
+        - "/mtt_control/teleop_estop"
+        - "/mtt_control/teleop_deadman"
+        - "/mtt_control/manual_activity"
       client_topic_whitelist:
         - ".*"
       min_qos_depth: 1
-      max_qos_depth: 10
+      max_qos_depth: 25
       # 4 threads = 1 par famille de topics (tachometer, lidar, imu, control)
       num_threads: 4
-      # 20 MB — nécessaire pour les pointclouds LiDAR Hesai/RSLidar
-      send_buffer_limit: 20000000
+      # 50 MB — nécessaire pour les pointclouds LiDAR Hesai/RSLidar et les maps ICP.
+      # Calcul: map 200k pts × 32 bytes × 2Hz = 12.8 MB/s; headroom de 4 messages en vol.
+      # Avec le view-frustum culling (40m radius), le débit typique tombe à ~2.5 MB/s.
+      send_buffer_limit: 50000000
       use_sim_time: false
       capabilities:
         - clientPublish

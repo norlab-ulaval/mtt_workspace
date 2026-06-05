@@ -29,20 +29,28 @@ x-live-robot-base: &live_robot_base
     ZENOH_SESSION_CONFIG_URI: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
     RMW_ZENOH_CONFIG_FILE: ${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_session.json5
     RUST_LOG: ${ZENOH_RUST_LOG:-zenoh=info,zenoh_transport=warn}
+    FIELD_NETWORK_MODE: ${FIELD_NETWORK_MODE:-false}
+    DOODLE_ROBOT_IP: ${DOODLE_ROBOT_IP:-192.168.50.2}
+    DOODLE_PC_IP: ${DOODLE_PC_IP:-192.168.50.101}
+    ZENOH_FIELD_PORT: ${ZENOH_FIELD_PORT:-7447}
+    FOXGLOVE_BIND_ADDRESS: ${FOXGLOVE_BIND_ADDRESS:-192.168.50.2}
+    FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml}
+    FOXGLOVE_FIELD_PARAMS_FILE: ${FOXGLOVE_FIELD_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge_field_light.yaml}
     DRIVER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_driver.yaml
     HEALTH_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_health_monitor.yaml
     CONTROL_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_control.yaml
     FOLLOWER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_path_follower.yaml
     SUPERVISOR_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml
     ROUTE_MANAGER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_route_manager.yaml
+    FRONT_OBSTACLE_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_front_obstacle_monitor.yaml
     WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
   volumes:
     - /dev:/dev
     - /run/udev:/run/udev:ro
-    # ZED calibration files persist across container restarts.
-    # The ZED SDK downloads the calibration file on first run (requires internet).
-    # Without this mount the settings dir inside the container is always empty.
+    # ZED calibration and AI models persist across container restarts.
+    # The ZED SDK downloads models on first run (requires internet).
     - /usr/local/zed/settings:/usr/local/zed/settings:rw
+    - /usr/local/zed/resources:/usr/local/zed/resources:rw
 
 services:
   bash:
@@ -62,9 +70,27 @@ services:
       - |
         fuser -k 7447/tcp 2>/dev/null || true
         sleep 0.5
+        if [ "$${FIELD_NETWORK_MODE:-false}" = "true" ]; then
+          cfg="/tmp/zenoh_router_field_doodle.json5"
+          sed \
+            -e "s|__ROBOT_DOODLE_IP__|$${DOODLE_ROBOT_IP}|g" \
+            -e "s|__ZENOH_PORT__|$${ZENOH_FIELD_PORT:-7447}|g" \
+            "$${WORKSPACE}/src/external/norlab_robot/scripts/config/zenoh_router_field_doodle.template.json5" > "$${cfg}"
+          export ZENOH_ROUTER_CONFIG_URI="$${cfg}"
+          echo "FIELD_NETWORK_MODE=true: Zenoh router listening on tcp/$${DOODLE_ROBOT_IP}:$${ZENOH_FIELD_PORT:-7447}"
+        else
+          echo "FIELD_NETWORK_MODE=false: Zenoh router using $${ZENOH_ROUTER_CONFIG_URI}"
+        fi
         exec ros2 run rmw_zenoh_cpp rmw_zenohd
 
-  robot:
+  # ── Robot driver (CAN + odometry + operator control) ─────────────────────
+  # Launches description (URDF/TF) + CAN setup + driver + joystick/teleop.
+  # Sensors and mapping are separate restartable services below.
+  # Restart individually:
+  #   docker compose restart robot_driver   — restarts driver only
+  #   docker compose restart sensors        — restarts all sensors
+  #   docker compose restart mapping        — restarts ICP mapper
+  robot_driver:
     <<: [*live_robot_base]
     privileged: true
     depends_on:
@@ -80,38 +106,174 @@ services:
       - bash
       - -lc
       - |
-        echo "Runtime config → demos/live_robot/config/runtime.env + demos/common/config/"
-        echo "  env:          ${WORKSPACE}/demos/live_robot/config/runtime.env"
-        echo "  driver:       $${DRIVER_PARAMS_FILE}"
-        echo "  health:       $${HEALTH_PARAMS_FILE}"
-        echo "  control:      $${CONTROL_PARAMS_FILE}"
+        echo "=== robot_driver: CAN + odometry + operator control ==="
+        echo "  driver:  $${DRIVER_PARAMS_FILE}"
+        echo "  health:  $${HEALTH_PARAMS_FILE}"
+        echo "  control: $${CONTROL_PARAMS_FILE}"
         echo "  teleop=$${ENABLE_TELEOP} joystick=$${ENABLE_JOYSTICK} joy_device=$${JOYSTICK_DEVICE}"
         exec ros2 launch norlab_robot live_robot.launch.py \
           warnings:=false \
-          enable_mapping:=$${ENABLE_MAPPING} \
-          enable_sensors:=$${ENABLE_SENSORS} \
-          enable_perception:=$${ENABLE_PERCEPTION} \
+          enable_sensors:=false \
+          enable_mapping:=false \
+          enable_perception:=false \
+          enable_cloud_merger:=false \
           enable_teleop:=$${ENABLE_TELEOP} \
           enable_joystick:=$${ENABLE_JOYSTICK} \
           setup_real_can:=true \
-          gps_mode:=$${GPS_MODE} \
-          gps_antennas:=$${GPS_ANTENNAS} \
           driver_params_file:=$${DRIVER_PARAMS_FILE} \
           health_params_file:=$${HEALTH_PARAMS_FILE} \
           control_params_file:=$${CONTROL_PARAMS_FILE} \
+          joy_device:=$${JOYSTICK_DEVICE} \
+          joy_deadzone:=$${JOYSTICK_DEADZONE}
+
+  # ── Sensors (LiDAR + IMU + optional GPS/OAK) ─────────────────────────────
+  # Launches Hesai XT-32 + RS-Airy + MTi-100 and optional peripherals.
+  # Standalone sensors.launch.py — does NOT touch CAN or description.
+  # Restart without killing the driver:  docker compose restart sensors
+  sensors:
+    <<: [*live_robot_base]
+    privileged: true
+    depends_on:
+      robot_driver:
+        condition: service_started
+    volumes:
+      - /dev:/dev
+      - /dev/bus/usb:/dev/bus/usb
+      - /run/udev:/run/udev:ro
+      - /usr/local/zed/settings:/usr/local/zed/settings:rw
+      - /usr/local/zed/resources:/usr/local/zed/resources:rw
+    command:
+      - bash
+      - -lc
+      - |
+        echo "=== sensors: LiDAR + IMU + optional peripherals ==="
+        echo "  gps=$${ENABLE_GPS:-false} oak=$${ENABLE_OAK:-false} mti10=$${ENABLE_MTI10:-false}"
+        exec ros2 launch norlab_robot sensors.launch.py \
+          warnings:=false \
+          enable_gps:=$${ENABLE_GPS:-false} \
+          enable_oak:=$${ENABLE_OAK:-false} \
+          enable_mti10:=$${ENABLE_MTI10:-false} \
+          gps_mode:=$${GPS_MODE} \
+          gps_antennas:=$${GPS_ANTENNAS}
+
+  # ── ICP Mapping ───────────────────────────────────────────────────────────
+  # Norlab ICP mapper — restartable independently of sensors and driver.
+  # Waits for LiDAR and odometry to be live before launching.
+  # Restart without killing sensors:  docker compose restart mapping
+  mapping:
+    <<: [*live_robot_base]
+    depends_on:
+      robot_driver:
+        condition: service_started
+      sensors:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "=== mapping: Norlab ICP mapper ==="
+        echo "  points: $${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
+        echo "  config: $${MAPPING_CONFIG:-default}"
+        echo "  deskew=$${MAPPING_DESKEW} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
+        POINTS_TOPIC="$${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
+        echo "Waiting for LiDAR ($${POINTS_TOPIC})..."
+        for i in $$(seq 1 60); do
+          ros2 topic info "$${POINTS_TOPIC}" 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 60 ] && echo "  WARNING: $${POINTS_TOPIC} not available after 60s — launching anyway" && break
+          echo "  ($$i/60) Waiting for $${POINTS_TOPIC}..."
+          sleep 1
+        done
+        echo "Waiting for odometry (/mtt_odometry)..."
+        for i in $$(seq 1 30); do
+          ros2 topic info /mtt_odometry 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 30 ] && echo "  WARNING: /mtt_odometry not available after 30s — launching anyway" && break
+          echo "  ($$i/30) Waiting for /mtt_odometry..."
+          sleep 1
+        done
+        DELAY="$${MAPPING_DELAY_SECONDS:-10}"
+        [ "$${DELAY}" -gt 0 ] && {
+          echo "  Startup delay: $${DELAY}s (set MAPPING_DELAY_SECONDS=0 to skip)"
+          sleep "$${DELAY}"
+        }
+        exec ros2 launch norlab_robot mapping.launch.py \
+          use_sim_time:=false \
           mapping_deskew:=$${MAPPING_DESKEW} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
+          mapping_min_input_points:=$${MAPPING_MIN_INPUT_POINTS} \
+          mapping_max_translation_correction:=$${MAPPING_MAX_TRANSLATION_CORRECTION} \
+          mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
+          mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
+          mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
+          mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
+          mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
+          mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
+          deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03} \
+          deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5} \
+          deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
-          joy_device:=$${JOYSTICK_DEVICE} \
-          joy_deadzone:=$${JOYSTICK_DEADZONE}
+          mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
+          mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
+          mapping_odom_frame:=$${MAPPING_ODOM_FRAME:-odom} \
+          mapping_robot_frame:=$${MAPPING_ROBOT_FRAME:-base_footprint}
+
+  # ── Perception (trailer detector + cloud merger) ──────────────────────────
+  # Launches trailer_detector_node + trailer_pose_node.
+  # cloud_merger_node is included only if ENABLE_CLOUD_MERGER=true (default: false).
+  # Optional — start with:  docker compose up --profile perception
+  # ZED visualization scripts are separate services: zed_markers, zed_pose_viz
+  perception:
+    <<: [*live_robot_base]
+    profiles: ["perception"]
+    depends_on:
+      robot_driver:
+        condition: service_started
+      sensors:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "=== perception: trailer detector + cloud_merger=$${ENABLE_CLOUD_MERGER:-false} ==="
+        exec ros2 launch mtt_perception perception.launch.py \
+          use_sim_time:=false \
+          enable_cloud_merger:=$${ENABLE_CLOUD_MERGER:-false}
+
+  # ── ZED object detections → Foxglove markers ─────────────────────────────
+  # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray.
+  # Start with:  docker compose run --rm zed_markers
+  zed_markers:
+    <<: [*live_robot_base]
+    profiles: ["perception"]
+    depends_on:
+      sensors:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/zed_objects_to_markers.py
+      - --only-person
+
+  # ── ZED pose path visualizer ──────────────────────────────────────────────
+  # Publishes ZED odometry as a nav_msgs/Path for Foxglove trail visualization.
+  # Start with:  docker compose run --rm zed_pose_viz
+  zed_pose_viz:
+    <<: [*live_robot_base]
+    profiles: ["perception"]
+    depends_on:
+      sensors:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/zed_pose_visualizer.py
 
   foxglove:
     <<: [*live_robot_base]
     profiles: ["infra"]
     depends_on:
-      - robot
+      - robot_driver
     # network_mode: host (inherited) means the bridge binds on the robot host.
     # Keep this service opt-in so the default stack can reuse an existing host bridge.
     command:
@@ -122,15 +284,84 @@ services:
           fuser -k 8765/tcp 2>/dev/null || true
           sleep 0.5
         fi
+        params_file="$${FOXGLOVE_PARAMS_FILE}"
+        address_args=()
+        if [ "$${FIELD_NETWORK_MODE:-false}" = "true" ]; then
+          params_file="$${FOXGLOVE_FIELD_PARAMS_FILE}"
+          address_args=(-p address:="$${FOXGLOVE_BIND_ADDRESS}")
+          echo "FIELD_NETWORK_MODE=true: Foxglove binding $${FOXGLOVE_BIND_ADDRESS}:8765"
+          echo "  Params: $${params_file}"
+        fi
         exec ros2 run foxglove_bridge foxglove_bridge \
-          --ros-args --params-file \
-          ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml
+          --ros-args \
+          --params-file "$${params_file}" \
+          "$${address_args[@]}"
+
+  # ── Remote-safe LiDAR debug cloud ─────────────────────────────────────────
+  # Publishes a small ROI/voxelized cloud for Foxglove field use. Mapping and
+  # WILN still consume the raw Hesai cloud locally.
+  lidar_debug_cloud:
+    <<: [*live_robot_base]
+    profiles: ["field", "debug"]
+    depends_on:
+      - sensors
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/pointcloud_voxel_debug.py
+      - --ros-args
+      - -p
+      - input_topic:=${LIDAR_DEBUG_INPUT_TOPIC:-/hesai_lidar/points}
+      - -p
+      - output_topic:=${LIDAR_DEBUG_OUTPUT_TOPIC:-/debug/hesai_points_voxel}
+      - -p
+      - voxel_size:=${LIDAR_DEBUG_VOXEL_SIZE:-0.30}
+      - -p
+      - max_rate_hz:=${LIDAR_DEBUG_MAX_RATE_HZ:-2.0}
+      - -p
+      - max_points:=${LIDAR_DEBUG_MAX_POINTS:-25000}
+
+  network_audit:
+    <<: [*live_robot_base]
+    profiles: ["check", "field", "debug"]
+    command:
+      - bash
+      - -lc
+      - |
+        ${WORKSPACE}/scripts/audit_network_field.sh
+
+  doodle_check:
+    <<: [*live_robot_base]
+    profiles: ["check", "field", "debug"]
+    command:
+      - bash
+      - -lc
+      - |
+        ${WORKSPACE}/scripts/field_doodle_check.sh
+
+  # ── LiDAR-Camera colorizer ────────────────────────────────────────────────
+  # Projects ZED2i RGB onto the Hesai PointCloud2 and publishes
+  # /hesai_lidar/points_colored (keeps intensity + adds rgb field).
+  # Usage: dc up --profile colorizer
+  colorizer:
+    <<: [*live_robot_base]
+    profiles: ["colorizer"]
+    depends_on:
+      - sensors
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for sensors to settle..."
+        sleep 5
+        exec ros2 launch mtt_lidar_camera_colorizer colorizer.launch.py \
+          use_sim_time:=false \
+          image_transport:=raw
 
   rviz:
     <<: [*live_robot_base]
     profiles: ["viz"]
     depends_on:
-      - robot
+      - robot_driver
     command:
       - ros2
       - launch
@@ -143,7 +374,7 @@ services:
     <<: [*live_robot_base]
     profiles: ["manual"]
     depends_on:
-      - robot
+      - robot_driver
     command:
       - bash
       - -lc
@@ -156,30 +387,38 @@ services:
     <<: [*live_robot_base]
     profiles: ["wiln"]
     depends_on:
-      - robot
-    environment:
-      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
+      - mapping
     command:
       - bash
       - -lc
       - |
-        echo "Waiting for /mapping/icp_odom..."
-        for i in $$(seq 1 30); do
-          ros2 topic info /mapping/icp_odom >/dev/null 2>&1 && break
-          sleep 1
-        done
-        echo "ICP ready — starting teach/repeat stack"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        wait_for_topic() {
+          topic="$$1"; timeout_s="$$2"; label="$$3"
+          echo "Waiting for $$label ($$topic)..."
+          for i in $$(seq 1 "$$timeout_s"); do
+            ros2 topic info "$$topic" 2>/dev/null | grep -qE "Publisher count: [1-9]" && return 0
+            sleep 1
+          done
+          echo "ERROR: $$label ($$topic) not available after $${timeout_s}s"
+          return 1
+        }
+        wait_for_topic /mapping/icp_odom 45 "Norlab ICP odom" || exit 1
+        wait_for_topic /mapping/map 45 "Norlab ICP map" || exit 1
+        wait_for_topic /mapping/trajectory_path 45 "Norlab ICP trajectory path" || exit 1
+        echo "Norlab ICP ready — starting teach/repeat stack"
         echo ""
         echo "  Fresh route:"
         echo "    dc run --rm wiln_teach_start     — start teaching"
         echo "    ... drive manually ..."
         echo "    dc run --rm wiln_teach_stop      — stop teaching, route armed in memory"
-        echo "    dc run --rm wiln_replay          — replay immediately (same session)"
+        echo "    dc run --rm route_replay         — replay through route safety checks"
         echo "    dc run --rm wiln_save            — optional, save to $${WILN_LTR_DIR}/route.ltr"
+        echo "    dc run --rm route_check          — validate + preview saved route"
         echo ""
         echo "  Existing route:"
         echo "    dc run --rm wiln_load            — load from $${WILN_LTR_DIR}/route.ltr"
-        echo "    dc run --rm wiln_replay          — replay loaded route"
+        echo "    dc run --rm route_replay         — replay loaded route"
         echo ""
         echo "  Diagnostics:"
         echo "    dc run --rm wiln_status"
@@ -189,13 +428,16 @@ services:
         echo "  WILN cfg:           $${WILN_PARAMS_FILE}"
         echo "  Follower cfg:       $${FOLLOWER_PARAMS_FILE}"
         echo "  Supervisor cfg:     $${SUPERVISOR_PARAMS_FILE}"
+        echo "  Route manager cfg:  $${ROUTE_MANAGER_PARAMS_FILE}"
+        echo "  Front obstacle cfg: $${FRONT_OBSTACLE_PARAMS_FILE}"
         echo ""
         exec ros2 launch norlab_robot teach_repeat.launch.py \
           use_sim_time:=false \
           wiln_params_file:=$${WILN_PARAMS_FILE} \
           follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
           supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE} \
-          route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE}
+          route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE} \
+          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE}
 
   wiln_teach_start:
     <<: [*live_robot_base]
@@ -222,36 +464,44 @@ services:
   wiln_save:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /save_map_traj wiln/srv/SaveMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode save --create-dir --update-latest)"
+        # 11C: Wait for /wiln/trajectory before saving — avoids race when wiln_save is
+        # called immediately after wiln_teach_stop. The teach node publishes the trajectory
+        # on stop; transient_local QoS ensures late subscribers receive it, but there is a
+        # brief DDS propagation window. Timeout 5s covers normal startup delays.
+        echo "Waiting for trajectory on /wiln/trajectory..."
+        timeout 5 ros2 topic echo --once /wiln/trajectory > /dev/null 2>&1 || {
+          echo "ERROR: No trajectory available after 5s. Did you run wiln_teach_stop first?"
+          exit 1
+        }
+        echo "Saving route '$${ROUTE_NAME}' -> $${ROUTE_FILE}"
+        ros2 topic pub --once /wiln/command std_msgs/msg/String "{data: 'save:$${ROUTE_FILE}'}"
 
   wiln_load:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      WILN_LTR_DIR: ${WILN_LTR_DIR:-${WORKSPACE}/data}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /load_map_traj wiln/srv/LoadMapTraj "{file_name: {data: \"$${WILN_LTR_DIR}/route.ltr\"}}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        echo "Loading route '$${ROUTE_NAME}' -> $${ROUTE_FILE}"
+        ros2 topic pub --once /wiln/command std_msgs/msg/String "{data: 'load:$${ROUTE_FILE}'}"
         ros2 service call /mtt_repeat/mark_ready std_srvs/srv/Trigger "{}"
 
   wiln_validate:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      WILN_LTR_FILE: ${WILN_LTR_FILE:-${WORKSPACE}/data/route.ltr}
     command:
       - bash
       - -lc
       - |
-        python3 ${WORKSPACE}/scripts/validate_wiln_route.py "$${WILN_LTR_FILE}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        python3 ${WORKSPACE}/scripts/validate_wiln_route.py "$${ROUTE_FILE}"
 
   wiln_replay:
     <<: [*live_robot_base]
@@ -278,13 +528,36 @@ services:
   wiln_replay_loop:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      N: ${N:-1}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /mtt_repeat/play_loop wiln/srv/PlayLoop "{nb_loops: {data: $${N}}}"
+        ros2 service call /mtt_repeat/play_loop std_srvs/srv/Trigger "{}"
+
+  icp_check:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/check_icp_odom.py
+      - --duration
+      - ${ICP_CHECK_DURATION:-8}
+
+  field_ready:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/field_ready_check.py
+      - --icp-duration
+      - ${ICP_CHECK_DURATION:-6}
+
+  icp_health:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/audit_icp_health.py
 
   wiln_status:
     <<: [*live_robot_base]
@@ -293,24 +566,71 @@ services:
       - bash
       - -lc
       - |
-        echo "WILN native services:"
-        for svc in /start_recording /stop_recording /play_line /cancel_trajectory /save_map_traj /load_map_traj /play_loop; do
-          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+        green='\033[0;32m'; red='\033[0;31m'; yellow='\033[1;33m'; bold='\033[1m'; reset='\033[0m'
+        ok(){ echo -e "  $${green}✓$${reset} $$1"; }
+        bad(){ echo -e "  $${red}✗$${reset} $$1"; }
+        warn(){ echo -e "  $${yellow}⚠$${reset} $$1"; }
+        has_topic(){ ros2 topic list 2>/dev/null | grep -qx "$$1"; }
+        has_service(){ ros2 service list 2>/dev/null | grep -qx "$$1"; }
+        echo -e "$${bold}== WILN / Repeat Status ==$${reset}"
+        echo ""
+        echo -e "$${bold}Stack$${reset}"
+        has_topic /wiln/command && ok "/wiln/command ready" || bad "/wiln/command missing — wiln container probably crashed; run: docker compose logs --tail=200 wiln"
+        for topic in /wiln/teach/state /wiln/route/state /wiln/replay/state /wiln/follower/state /wiln/trajectory /wiln/global_plan /wiln/control/local_plan; do
+          has_topic "$$topic" && ok "$$topic" || warn "$$topic missing"
         done
         echo ""
-        echo "Supervisor services:"
+        echo -e "$${bold}MTT repeat services$${reset}"
         for svc in /mtt_repeat/teach_start /mtt_repeat/teach_stop /mtt_repeat/play_line /mtt_repeat/play_loop /mtt_repeat/cancel /mtt_repeat/mark_ready; do
-          ros2 service list 2>/dev/null | grep -qx "$$svc" && echo "  ✓ $$svc" || echo "  ✗ $$svc"
+          has_service "$$svc" && ok "$$svc" || bad "$$svc missing"
         done
         echo ""
-        echo "Topics / action:"
-        for topic in /mapping/icp_odom /mtt_health /mtt_repeat/state /mtt_repeat/ready /cmd_vel/manual /controller/cmd_vel /mtt_control/selected_source; do
-          ros2 topic list 2>/dev/null | grep -qx "$$topic" && echo "  ✓ $$topic" || echo "  ✗ $$topic"
+        echo -e "$${bold}Control mode / buttons$${reset}"
+        printf "  selected_mode: "; timeout 2s ros2 topic echo --once /mtt_control/selected_mode --field data 2>/dev/null || echo "missing (mode manager not publishing)"
+        printf "  auto_enabled:  "; timeout 2s ros2 topic echo --once /mtt_control/auto_mode_enabled --field data 2>/dev/null || echo "missing"
+        printf "  selected_src:  "; timeout 2s ros2 topic echo --once /mtt_control/selected_source --field data 2>/dev/null || echo "missing"
+        printf "  deadman:       "; timeout 2s ros2 topic echo --once /mtt_control/teleop_deadman --field data 2>/dev/null || echo "missing (normal if no joystick/deadman pressed)"
+        echo "  buttons: A=auto, B=stop, Y=manual, RB=deadman"
+        echo ""
+        echo -e "$${bold}Repeat command flow$${reset}"
+        for topic in /wiln/trajectory /wiln/control/local_plan /controller/cmd_vel /cmd_vel; do
+          if has_topic "$$topic"; then
+            ok "$$topic"
+            timeout 2s ros2 topic hz "$$topic" 2>/dev/null | sed -n '1,2p' | sed 's/^/    /' || true
+          else
+            warn "$$topic missing"
+          fi
         done
         echo ""
-        echo "Latched repeat state:"
+        echo -e "$${bold}Safety / odometry$${reset}"
+        has_topic /mapping/icp_odom && ok "/mapping/icp_odom" || bad "/mapping/icp_odom missing"
+        has_topic /mapping/map && ok "/mapping/map" || warn "/mapping/map missing"
+        has_topic /mapping/trajectory_path && ok "/mapping/trajectory_path" || warn "/mapping/trajectory_path missing"
+        has_topic /mapping/aligned_scan && ok "/mapping/aligned_scan" || warn "/mapping/aligned_scan missing"
+        has_topic /mtt_health && ok "/mtt_health" || bad "/mtt_health missing"
+        has_topic /hesai_lidar/points && ok "/hesai_lidar/points" || bad "/hesai_lidar/points missing — front obstacle stop cannot work"
+        has_topic /mtt_obstacle/hazard_status && ok "/mtt_obstacle/hazard_status" || warn "/mtt_obstacle/hazard_status missing — WILN/front obstacle monitor not running"
+        printf "  front obstacle: "; timeout 2s ros2 topic echo --once /mtt_obstacle/hazard_status --field data 2>/dev/null || echo "unavailable"
+        printf "  front clearance:"; timeout 2s ros2 topic echo --once /mtt_obstacle/front_clearance_m --field data 2>/dev/null || echo " unavailable"
+        printf "  front stop:     "; timeout 2s ros2 topic echo --once /mtt_obstacle/stop_requested --field data 2>/dev/null || echo "unavailable"
+        printf "  slowdown scale: "; timeout 2s ros2 topic echo --once /mtt_obstacle/slowdown_scale --field data 2>/dev/null || echo "unavailable"
+        echo "  quick ICP check: docker compose run --rm icp_check"
+        printf "  health:        "; timeout 2s ros2 topic echo --once /mtt_health 2>/dev/null | sed -n '1,12p' || echo "unavailable"
+        echo ""
+        echo -e "$${bold}Repeat state$${reset}"
         timeout 2s ros2 topic echo --once /mtt_repeat/state 2>/dev/null || echo "  /mtt_repeat/state unavailable"
         timeout 2s ros2 topic echo --once /mtt_repeat/ready 2>/dev/null || echo "  /mtt_repeat/ready unavailable"
+        echo ""
+        echo -e "$${bold}Route manager$${reset}"
+        timeout 4s ros2 service call /mtt_route/status mtt_interfaces/srv/RouteStatus "{}" 2>/dev/null || echo "  /mtt_route/status unavailable"
+        timeout 2s ros2 topic echo --once /mtt_route/status_text 2>/dev/null || true
+        echo ""
+        echo -e "$${bold}Debug hint$${reset}"
+        echo "  If mode is not auto, press A or use route_replay (it requests auto)."
+        echo "  If selected_src is AUTO_WAIT, WILN is not publishing /controller/cmd_vel yet."
+        echo "  If /wiln/control/local_plan is missing during replay, route is not loaded/playing."
+        echo "  If ICP check fails, do not repeat; fix mapper/TF/cloud first."
+        echo "  If /wiln/command is missing, inspect: docker compose logs --tail=200 wiln"
 
   route_list:
     <<: [*live_robot_base]
@@ -326,46 +646,54 @@ services:
   route_validate:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      ROUTE: ${ROUTE:-garage_1559}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /mtt_route/validate mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        ros2 service call /mtt_route/validate mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE_NAME}\"}"
 
   route_preview:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      ROUTE: ${ROUTE:-garage_1559}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /mtt_route/preview mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        MPLCONFIGDIR=/tmp/matplotlib python3 ${WORKSPACE}/scripts/preview_wiln_route.py "$${ROUTE_FILE}" --output-dir "$${WILN_LTR_DIR}"
+        PREVIEW_RC=$$?
+        if [ "$${PREVIEW_RC}" -ne 0 ] && [ "$${PREVIEW_RC}" -ne 2 ]; then exit "$${PREVIEW_RC}"; fi
+        ros2 service call /mtt_route/preview mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE_NAME}\"}"
+
+  route_check:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - bash
+      - -lc
+      - |
+        ${WORKSPACE}/scripts/route_field_check.sh
 
   route_load:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      ROUTE: ${ROUTE:-garage_1559}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /mtt_route/load mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        ros2 service call /mtt_route/load mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE_NAME}\"}"
 
   route_replay:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]
-    environment:
-      ROUTE: ${ROUTE:-garage_1559}
     command:
       - bash
       - -lc
       - |
-        ros2 service call /mtt_route/replay mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE}\"}"
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        ros2 service call /mtt_route/replay mtt_interfaces/srv/RouteCommand "{route_name: \"$${ROUTE_NAME}\"}"
 
   route_stop:
     <<: [*live_robot_base]
@@ -388,3 +716,51 @@ services:
       - /mtt_route/status
       - mtt_interfaces/srv/RouteStatus
       - "{}"
+
+  # ── Live diagnostic tools ─────────────────────────────────────────────────
+  audit_topics:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/audit_live_topics.py
+      - --duration
+      - ${AUDIT_DURATION:-30}
+
+  audit_tf:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/audit_tf_chain.py
+      - --duration
+      - ${AUDIT_DURATION:-60}
+
+  route_start_check:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - bash
+      - -lc
+      - |
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        python3 ${WORKSPACE}/scripts/route_start_check.py --route "$${ROUTE_FILE}"
+
+  route_align:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - bash
+      - -lc
+      - |
+        eval "$$($${WORKSPACE}/scripts/wiln_route_env.sh --mode load)"
+        python3 ${WORKSPACE}/scripts/align_route_to_pose.py --route "$${ROUTE_FILE}"
+
+  map_quality:
+    <<: [*live_robot_base]
+    profiles: ["wiln-ctrl"]
+    command:
+      - python3
+      - ${WORKSPACE}/scripts/icp_map_quality_check.py
+      - --duration
+      - ${AUDIT_DURATION:-120}
