@@ -19,6 +19,10 @@ x-monitor-base: &monitor_base
     LOCAL_FOXGLOVE_PORT: ${LOCAL_FOXGLOVE_PORT:-8766}
     MTT_ZENOH_CONFIG_TEMPLATE: /config/zenoh_session.template.json5
     ZENOH_ROUTER_CHECK_ATTEMPTS: ${ZENOH_ROUTER_CHECK_ATTEMPTS:-5}
+    FIELD_NETWORK_MODE: ${FIELD_NETWORK_MODE:-false}
+    DOODLE_ROBOT_IP: ${DOODLE_ROBOT_IP:-192.168.50.2}
+    MONITOR_FOXGLOVE_PARAMS_FILE: ${MONITOR_FOXGLOVE_PARAMS_FILE:-/config/foxglove_bridge.yaml}
+    MONITOR_FIELD_FOXGLOVE_PARAMS_FILE: ${MONITOR_FIELD_FOXGLOVE_PARAMS_FILE:-/config/foxglove_bridge_field_light.yaml}
 
 services:
   base:
@@ -36,16 +40,41 @@ services:
   monitor:
     <<: [*monitor_base]
     command:
+      - bash
+      - -lc
+      - |
+        params_file="$${MONITOR_FOXGLOVE_PARAMS_FILE}"
+        if [ "$${FIELD_NETWORK_MODE:-false}" = "true" ]; then
+          export ROBOT_ZENOH_ENDPOINT="tcp/$${DOODLE_ROBOT_IP}:7447"
+          export ROBOT_FOXGLOVE_URL="ws://$${DOODLE_ROBOT_IP}:8765"
+          params_file="$${MONITOR_FIELD_FOXGLOVE_PARAMS_FILE}"
+          echo "FIELD_NETWORK_MODE=true: monitor Zenoh endpoint $${ROBOT_ZENOH_ENDPOINT}"
+          echo "  Foxglove params: $${params_file}"
+        fi
+        exec scripts/run_with_zenoh_session.sh \
+          ros2 run foxglove_bridge foxglove_bridge \
+          --ros-args \
+          --params-file "$${params_file}" \
+          -p port:=${LOCAL_FOXGLOVE_PORT:-8766}
+
+  zed_markers:
+    <<: [*monitor_base]
+    profiles: ["zed", "viz"]
+    command:
       - scripts/run_with_zenoh_session.sh
-      - ros2
-      - run
-      - foxglove_bridge
-      - foxglove_bridge
-      - --ros-args
-      - --params-file
-      - /config/foxglove_bridge.yaml
-      - -p
-      - port:=${LOCAL_FOXGLOVE_PORT:-8766}
+      - python3
+      - -u
+      - scripts/zed_objects_to_markers.py
+      - --only-person
+
+  zed_viz:
+    <<: [*monitor_base]
+    profiles: ["zed", "viz"]
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - python3
+      - -u
+      - scripts/zed_pose_visualizer.py
 
   rviz:
     <<: [*monitor_base]
@@ -61,6 +90,7 @@ services:
   teleop_pc:
     <<: [*monitor_base]
     profiles: ["manual"]
+    privileged: true
     command:
       - scripts/run_with_zenoh_session.sh
       - ros2
@@ -68,6 +98,27 @@ services:
       - mtt_driver
       - mtt_operator_teleop.launch.py
       - joy_device:=/dev/input/js0
+
+  joy_pc:
+    <<: [*monitor_base]
+    profiles: ["manual"]
+    privileged: true
+    volumes:
+      - ../live_robot/config:/config:ro
+      - /dev/input:/dev/input
+    command:
+      - scripts/run_with_zenoh_session.sh
+      - ros2
+      - run
+      - joy_linux
+      - joy_linux_node
+      - --ros-args
+      - -p
+      - dev:=${JOY_DEVICE:-/dev/input/js0}
+      - -p
+      - deadzone:=${JOY_DEADZONE:-0.15}
+      - -p
+      - autorepeat_rate:=20.0
 
   constant_speed:
     <<: [*monitor_base]

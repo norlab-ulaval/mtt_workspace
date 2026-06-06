@@ -1,39 +1,80 @@
 # simulation
 
-Local simulation entry points live here.
+Local Gazebo + joystick + motion-model tuning entry points.
 
-Use this demo instead of the repository-root `compose.yaml` when you want Gazebo, RViz, Foxglove, or the operator control stack for simulation.
+## Main workflow
+
+Edit gains and test shape in:
+
+```bash
+demos/simulation/config/tuning.env
+```
+
+Then run:
+
+```bash
+dcup -d simulation control path_follow model_monitor rviz
+```
+
+Launch one trajectory:
+
+```bash
+dcu path_arc
+dcu path_s_curve
+dcu path_straight
+```
+
+If you changed follower gains in `config/tuning.env`:
+
+```bash
+dcup -d --force-recreate path_follow
+```
+
+If you changed Gazebo bridge signs or speed scale:
+
+```bash
+dcup -d --force-recreate simulation
+```
 
 ## Services
 
-- `simulation`
-  starts Gazebo and the robot runtime
-- `control`
-  starts the shared `mtt_control` operator stack for simulation
-- `rviz`
-  starts RViz against the simulation clock
-- `foxglove`
-  starts the Foxglove bridge
+- `simulation`: Gazebo + simulated robot runtime.
+- `control`: same joystick/control stack as the real robot.
+- `path_follow`: `mtt_path_follower` on Gazebo ground truth `/mtt_odometry/ground_truth`.
+- `model_monitor`: compares `/mtt_odometry` against Gazebo ground truth so the simulated motion model can be tuned instead of trusted blindly.
+- `path_arc`: one-shot arc trajectory from current robot pose.
+- `path_s_curve`: one-shot S-curve trajectory from current robot pose.
+- `path_straight`: one-shot straight trajectory from current robot pose.
+- `rviz`: motion-model tuning view.
+- `foxglove`: Foxglove bridge.
 
-## Common commands
+## RViz
 
-From the repository root:
+The tuning RViz view shows:
 
-```bash
-docker compose -f demos/simulation/compose.yaml up -d simulation
-docker compose -f demos/simulation/compose.yaml up -d rviz
-docker compose -f demos/simulation/compose.yaml up -d foxglove
-docker compose -f demos/simulation/compose.yaml up -d control
-```
+- blue: `/sim_motion_model/test_path`
+- green: `/mtt_path_follower/reference_path`
+- orange: `/mtt_path_follower/target_pose`
+- robot model, TF, and `/mtt_odometry/ground_truth`
 
-Start the simulator first, then add the other services one by one.
-
-Useful environment overrides:
+## Debug topics
 
 ```bash
-SIM_HEADLESS=false
-SIM_ENABLE_OPERATOR_CONTROL=false
-SIM_CONTROL_ENABLE_JOYSTICK=true
-SIM_JOY_DEVICE=/dev/input/js0
-SIM_JOY_DEADZONE=0.15
+/mtt_path_follower/debug/lateral_error_m
+/mtt_path_follower/debug/heading_error_rad
+/mtt_path_follower/debug/kappa_desired_m_inv
+/mtt_path_follower/debug/kappa_feedforward_m_inv
+/mtt_path_follower/debug/kappa_adaptive_bias_m_inv
+/mtt_path_follower/debug/kappa_command_m_inv
+/mtt_path_follower/debug/kappa_effective_est_m_inv
+/mtt_path_follower/debug/psi_cmd_rad
+/mtt_path_follower/debug/slip_scale
+/sim_model_monitor/position_error_m
+/sim_model_monitor/heading_error_rad
+/sim_model_monitor/distance_ratio_model_over_gt
+/sim_model_monitor/status
+/mtt_tachometer
+/mtt_health
+/mtt/articulation_state
+/mtt_articulation_angle
 ```

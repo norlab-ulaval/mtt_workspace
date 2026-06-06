@@ -1,0 +1,133 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Views
+    Name: Views
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Class: rviz_default_plugins/Grid
+      Enabled: true
+      Name: Grid
+      Plane: XY
+      Plane Cell Count: 30
+      Cell Size: 1
+      Color: 160; 160; 164
+      Alpha: 0.5
+      Value: true
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Frame Timeout: 15
+      Show Arrows: true
+      Show Axes: true
+      Show Names: false
+      Tree:
+        {}
+      Value: true
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: RobotModel
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+        Durability Policy: Volatile
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 5
+      Collision Enabled: false
+      Visual Enabled: true
+      Alpha: 1
+      Value: true
+    - Class: rviz_default_plugins/Odometry
+      Enabled: true
+      Name: Sim Odom
+      Topic:
+        Value: /mtt_odometry
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 10
+      Shape:
+        Value: Arrow
+      Color: 255; 255; 255
+      Keep: 200
+      Position Tolerance: 0.05
+      Angle Tolerance: 0.05
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Test Path
+      Topic:
+        Value: /sim_motion_model/test_path
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 10
+      Color: 0; 180; 255
+      Alpha: 1
+      Line Style: Lines
+      Line Width: 0.08
+      Pose Style: None
+      Value: true
+    - Class: rviz_default_plugins/Path
+      Enabled: true
+      Name: Follower Reference
+      Topic:
+        Value: /mtt_path_follower/reference_path
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 10
+      Color: 0; 255; 80
+      Alpha: 1
+      Line Style: Lines
+      Line Width: 0.06
+      Pose Style: None
+      Value: true
+    - Class: rviz_default_plugins/Pose
+      Enabled: true
+      Name: Target Pose
+      Topic:
+        Value: /mtt_path_follower/target_pose
+        Reliability Policy: Reliable
+        History Policy: Keep Last
+        Depth: 10
+      Shape: Arrow
+      Color: 255; 80; 0
+      Alpha: 1
+      Shaft Length: 0.8
+      Shaft Radius: 0.04
+      Head Length: 0.25
+      Head Radius: 0.12
+      Value: true
+  Enabled: true
+  Global Options:
+    Background Color: 24; 24; 24
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+      Hide Inactive Objects: true
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 18
+      Focal Point:
+        X: 4
+        Y: 0
+        Z: 0
+      Name: Current View
+      Pitch: 0.9
+      Target Frame: base_footprint
+      Yaw: 0.8
+    Saved: ~
+Window Geometry:
+  Height: 1000
+  Width: 1400

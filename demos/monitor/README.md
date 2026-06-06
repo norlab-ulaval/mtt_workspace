@@ -26,6 +26,19 @@ Start laptop-side joystick teleop:
 docker compose up teleop_pc
 ```
 
+Publish only the laptop joystick as `/joy` and let the robot-side control stack
+apply the normal MTT mapping/safety logic:
+
+```bash
+docker compose up joy_pc
+```
+
+For a stable device path, use:
+
+```bash
+JOY_DEVICE=/dev/input/by-id/<your-joystick> docker compose up joy_pc
+```
+
 Send a fixed command instead:
 
 ```bash

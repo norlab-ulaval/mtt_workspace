@@ -5,6 +5,48 @@ x-sim-base: &sim_base
   env_file:
     - ../../.env
 
+x-path-follow: &path_follow
+  <<: [*sim_base]
+  depends_on:
+    - simulation
+    - control
+  command:
+    - bash
+    - -lc
+    - |
+      source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+      source $${WORKSPACE}/install/local_setup.bash
+      set -a
+      source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+      set +a
+      ros2 run mtt_bringup mtt_path_follower.py \
+        --ros-args \
+        --params-file $${SIM_PATH_FOLLOWER_PARAMS_FILE} \
+        -p use_sim_time:=true \
+        -p max_speed_ms:=$${SIM_FOLLOWER_MAX_SPEED} \
+        -p default_speed_ms:=$${SIM_FOLLOWER_DEFAULT_SPEED} \
+        -p k_y:=$${SIM_FOLLOWER_K_Y} \
+        -p k_theta:=$${SIM_FOLLOWER_K_THETA} \
+        -p l_eq_m:=$${SIM_MODEL_L_EQ} \
+        -p model_yaw_slip_base:=$${SIM_MODEL_SLIP_BASE} \
+        -p model_yaw_slip_speed_gain:=$${SIM_MODEL_SLIP_SPEED_GAIN} \
+        -p model_yaw_slip_articulation_gain:=$${SIM_MODEL_SLIP_ARTICULATION_GAIN} \
+        -p model_yaw_slip_min_scale:=$${SIM_MODEL_SLIP_MIN_SCALE} \
+        -p use_path_curvature_feedforward:=$${SIM_USE_PATH_CURVATURE_FEEDFORWARD} \
+        -p use_adaptive_curvature_bias:=$${SIM_USE_ADAPTIVE_CURVATURE_BIAS} \
+        -p adaptive_kappa_i_gain:=$${SIM_ADAPTIVE_KAPPA_I_GAIN} \
+        -p adaptive_kappa_decay:=$${SIM_ADAPTIVE_KAPPA_DECAY} \
+        -p adaptive_kappa_deadband_m:=$${SIM_ADAPTIVE_KAPPA_DEADBAND_M} \
+        -p adaptive_kappa_bias_limit:=$${SIM_ADAPTIVE_KAPPA_BIAS_LIMIT}
+
+x-path-test: &path_test
+  <<: [*sim_base]
+  profiles: ["test"]
+  depends_on:
+    - simulation
+    - control
+    - path_follow
+
 services:
   base:
     extends:
@@ -21,16 +63,213 @@ services:
       - bash
       - -lc
       - |
-        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
-        source ${WORKSPACE}/install/local_setup.bash
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
         ros2 launch mtt_bringup mtt_simulation.launch.py \
-          use_rviz:=${SIM_USE_RVIZ:-false} \
-          headless:=${SIM_HEADLESS:-true} \
-          enable_operator_control:=${SIM_ENABLE_OPERATOR_CONTROL:-false} \
-          enable_joystick:=${SIM_ENABLE_JOYSTICK:-false} \
-          joy_device:=${SIM_JOY_DEVICE:-/dev/input/js0}
+          use_rviz:=false \
+          headless:=$${SIM_HEADLESS} \
+          x_pose:=$${SIM_ROBOT_X} \
+          y_pose:=$${SIM_ROBOT_Y} \
+          yaw:=$${SIM_ROBOT_YAW} \
+          enable_operator_control:=$${SIM_ENABLE_OPERATOR_CONTROL} \
+          enable_joystick:=$${SIM_ENABLE_JOYSTICK} \
+          joy_device:=$${SIM_JOY_DEVICE} \
+          controller_gear_ratio:=$${SIM_WHEEL_GEAR_RATIO} \
+          controller_wheel_command_sign:=$${SIM_WHEEL_COMMAND_SIGN} \
+          controller_yaw_command_sign:=$${SIM_YAW_COMMAND_SIGN} \
+          controller_yaw_command_mode:=position_servo \
+          controller_yaw_position_kp:=$${SIM_YAW_POSITION_KP} \
+          controller_yaw_velocity_limit_rad_s:=$${SIM_YAW_VELOCITY_LIMIT_RAD_S} \
+          synthetic_tachometer_max_linear_speed_ms:=$${SIM_SYNTHETIC_MAX_SPEED} \
+          synthetic_model_wheelbase_m:=$${SIM_SYNTHETIC_MODEL_WHEELBASE} \
+          synthetic_model_max_articulation_deg:=$${SIM_SYNTHETIC_MODEL_MAX_ARTICULATION_DEG} \
+          synthetic_model_speed_response_gain:=$${SIM_SYNTHETIC_MODEL_SPEED_RESPONSE_GAIN} \
+          synthetic_model_articulation_response_gain:=$${SIM_SYNTHETIC_MODEL_ARTICULATION_RESPONSE_GAIN} \
+          synthetic_model_yaw_slip_base:=$${SIM_SYNTHETIC_MODEL_YAW_SLIP_BASE} \
+          synthetic_model_yaw_slip_speed_gain:=$${SIM_SYNTHETIC_MODEL_YAW_SLIP_SPEED_GAIN} \
+          synthetic_model_yaw_slip_articulation_gain:=$${SIM_SYNTHETIC_MODEL_YAW_SLIP_ARTICULATION_GAIN} \
+          synthetic_model_yaw_slip_min_scale:=$${SIM_SYNTHETIC_MODEL_YAW_SLIP_MIN_SCALE}
 
   control:
+    <<: [*sim_base]
+    privileged: true
+    depends_on:
+      - simulation
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        ros2 launch mtt_control operator_control.launch.py \
+          use_sim_time:=true \
+          control_params_file:=$${SIM_CONTROL_PARAMS_FILE} \
+          enable_joystick:=$${SIM_CONTROL_ENABLE_JOYSTICK} \
+          joy_device:=$${SIM_JOY_DEVICE} \
+          joy_deadzone:=$${SIM_JOY_DEADZONE}
+
+  path_follow:
+    <<: *path_follow
+
+  path_test:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape $${SIM_TEST_SHAPE} \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_SPEED} \
+          --length $${SIM_TEST_LENGTH} \
+          --radius $${SIM_TEST_RADIUS} \
+          --angle-deg $${SIM_TEST_ANGLE_DEG} \
+          --amplitude $${SIM_TEST_AMPLITUDE} \
+          --cycles $${SIM_TEST_CYCLES} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_TEST_OFFSET_X} \
+          --offset-y $${SIM_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_TEST_OFFSET_YAW_DEG}
+
+  path_arc:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape arc \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_ARC_SPEED} \
+          --radius $${SIM_TEST_RADIUS} \
+          --angle-deg $${SIM_TEST_ANGLE_DEG} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_TEST_OFFSET_X} \
+          --offset-y $${SIM_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_TEST_OFFSET_YAW_DEG}
+
+  path_s_curve:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape s_curve \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_S_CURVE_SPEED} \
+          --length $${SIM_TEST_LENGTH} \
+          --amplitude $${SIM_TEST_AMPLITUDE} \
+          --cycles $${SIM_TEST_CYCLES} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_TEST_OFFSET_X} \
+          --offset-y $${SIM_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_TEST_OFFSET_YAW_DEG}
+
+  path_straight:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape straight \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_STRAIGHT_SPEED} \
+          --length $${SIM_TEST_LENGTH} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_TEST_OFFSET_X} \
+          --offset-y $${SIM_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_TEST_OFFSET_YAW_DEG}
+
+  path_reverse_straight:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape straight \
+          --reverse \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_REVERSE_SPEED} \
+          --length $${SIM_REVERSE_TEST_LENGTH} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_REVERSE_TEST_OFFSET_X} \
+          --offset-y $${SIM_REVERSE_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_REVERSE_TEST_OFFSET_YAW_DEG}
+
+  path_reverse_arc:
+    <<: *path_test
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        set -a
+        source "$${WORKSPACE}/demos/simulation/config/tuning.env"
+        set +a
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/follow_test_path.py \
+          --shape arc \
+          --reverse \
+          --odom-topic $${SIM_TEST_ODOM_TOPIC} \
+          --speed $${SIM_TEST_REVERSE_SPEED} \
+          --radius $${SIM_REVERSE_TEST_RADIUS} \
+          --angle-deg $${SIM_REVERSE_TEST_ANGLE_DEG} \
+          --points $${SIM_TEST_POINTS} \
+          --offset-x $${SIM_REVERSE_TEST_OFFSET_X} \
+          --offset-y $${SIM_REVERSE_TEST_OFFSET_Y} \
+          --offset-yaw-deg $${SIM_REVERSE_TEST_OFFSET_YAW_DEG}
+
+  model_monitor:
+    <<: [*sim_base]
+    depends_on:
+      - simulation
+      - path_follow
+      - model_odom_aligned
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/model_monitor.py \
+          --ros-args \
+          -p model_odom_topic:=/mtt_odometry/aligned
+
+  model_odom_aligned:
     <<: [*sim_base]
     depends_on:
       - simulation
@@ -38,28 +277,25 @@ services:
       - bash
       - -lc
       - |
-        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
-        source ${WORKSPACE}/install/local_setup.bash
-        ros2 launch mtt_control operator_control.launch.py \
-          use_sim_time:=true \
-          enable_joystick:=${SIM_CONTROL_ENABLE_JOYSTICK:-true} \
-          joy_device:=${SIM_JOY_DEVICE:-/dev/input/js0} \
-          joy_deadzone:=${SIM_JOY_DEADZONE:-0.15}
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
+        exec python3 $${WORKSPACE}/demos/simulation/scripts/align_model_odom.py
 
   rviz:
     <<: [*sim_base]
     depends_on:
       - simulation
+      - path_follow
     command:
       - bash
       - -lc
       - |
         sleep 3
-        source /opt/ros/${ROS_DISTRO:-jazzy}/setup.bash
-        source ${WORKSPACE}/install/local_setup.bash
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        source $${WORKSPACE}/install/local_setup.bash
         ros2 launch mtt_bringup mtt_rviz.launch.py \
           use_sim_time:=true \
-          rviz_config:=${SIM_RVIZ_CONFIG:-${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz}
+          rviz_config:=$${SIM_RVIZ_CONFIG:-$${WORKSPACE}/demos/simulation/config/motion_model.rviz}
 
   foxglove:
     extends:
