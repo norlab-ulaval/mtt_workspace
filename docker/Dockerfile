@@ -62,6 +62,14 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     ros-${ROS_DISTRO}-controller-manager \
     ros-${ROS_DISTRO}-zed-description \
     ros-${ROS_DISTRO}-zed-msgs \
+    ros-${ROS_DISTRO}-diagnostic-updater \
+    ros-${ROS_DISTRO}-backward-ros \
+    ros-${ROS_DISTRO}-zstd-image-transport \
+    ros-${ROS_DISTRO}-compressed-image-transport \
+    ros-${ROS_DISTRO}-compressed-depth-image-transport \
+    ros-${ROS_DISTRO}-theora-image-transport \
+    ros-${ROS_DISTRO}-cv-bridge \
+    ros-${ROS_DISTRO}-image-geometry \
     ros-${ROS_DISTRO}-forward-command-controller \
     ros-${ROS_DISTRO}-foxglove-bridge \
     ros-${ROS_DISTRO}-gz-ros2-control \

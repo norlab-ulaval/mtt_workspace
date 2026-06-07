@@ -59,6 +59,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libpcap-dev \
     libudev-dev \
     libusb-1.0-0-dev \
+    libopenblas-dev \
+    libgoogle-glog-dev \
+    nlohmann-json3-dev \
+    v4l-utils \
+    usbutils \
+    ffmpeg \
+    libqt5gui5 \
+    libqt5core5a \
+    libqt5widgets5 \
     pciutils \
     python3-can \
     python3-colcon-common-extensions \
@@ -87,11 +96,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     libnvinfer-dev \
     libnvinfer-plugin-dev
 
-# --- Layer 3: ZED SDK 5.2 (1.2 GB) ---
+# --- Layer 3: ZED SDK 5.3 (1.2 GB) ---
 RUN wget -q -O /tmp/ZED_SDK_Ubuntu24.run \
-        https://download.stereolabs.com/zedsdk/5.2/cu12/ubuntu24 && \
+        https://download.stereolabs.com/zedsdk/5.3/cu12/ubuntu24 && \
     chmod +x /tmp/ZED_SDK_Ubuntu24.run && \
-    /tmp/ZED_SDK_Ubuntu24.run -- silent skip_tools skip_cuda && \
+    /tmp/ZED_SDK_Ubuntu24.run -- silent skip_cuda && \
     rm /tmp/ZED_SDK_Ubuntu24.run && \
     chmod -R a+rX /usr/local/zed
 

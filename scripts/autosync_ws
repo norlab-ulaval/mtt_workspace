@@ -6,17 +6,18 @@ cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 print_usage() {
   cat <<'EOF'
-Usage: ./scripts/autosync_ws [--watch] [--dry-run] [--no-prepare] [--eth] [--remote] [[user@]host] [remote_path]
+Usage: ./scripts/autosync_ws [--watch] [--dry-run] [--no-prepare] [--eth] [--remote] [--doodle] [[user@]host] [remote_path]
 
 Examples:
   ./scripts/autosync_ws
-  ./scripts/autosync_ws --eth
-  ./scripts/autosync_ws --remote
+  ./scripts/autosync_ws --eth      # via Ethernet (192.168.3.102)
+  ./scripts/autosync_ws --remote   # via Tailscale (100.77.55.41)
+  ./scripts/autosync_ws --doodle   # via Doodle radio (192.168.2.2)
   ./scripts/autosync_ws <robot_user>@192.168.2.2
   ./scripts/autosync_ws --watch <robot_user>@192.168.2.2 /home/<robot_user>/Project/mtt_ws
 
 The sync sends the workspace files that matter:
-  compose.yaml  src/  docker/  scripts/  demos/  doc/  README.md
+  compose.yaml  src/  docker/  scripts/  demos/  documentations/  README.md
 
 It skips local files:
   .git  .vscode  .devcontainer  .env  build/install/log  caches  local data
@@ -28,6 +29,7 @@ dry_run=false
 prepare_remote=true
 use_eth=false
 use_remote=false
+use_doodle=false
 positionals=()
 
 while [[ $# -gt 0 ]]; do
@@ -52,6 +54,10 @@ while [[ $# -gt 0 ]]; do
       use_remote=true
       shift
       ;;
+    --doodle)
+      use_doodle=true
+      shift
+      ;;
     -h|--help)
       print_usage
       exit 0
@@ -64,7 +70,10 @@ while [[ $# -gt 0 ]]; do
 done
 
 default_robot_user="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_USER "robot")"
-if [[ "${use_remote}" == true ]]; then
+if [[ "${use_doodle}" == true ]]; then
+  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_DOODLE "192.168.2.2")"
+  default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET_DOODLE "${default_robot_user}@${default_robot_host}")"
+elif [[ "${use_remote}" == true ]]; then
   default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_REMOTE "100.77.55.41")"
   default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET_REMOTE "${default_robot_user}@${default_robot_host}")"
 elif [[ "${use_eth}" == true ]]; then
@@ -120,13 +129,24 @@ exclude_args=(
   --exclude='*.pyo'
 )
 
+# The demo compose files need demos/*/.env at parse time for variable
+# interpolation. create_env generates those files as symlinks to ../../.env.
+# Because we sync demos/ with --delete-excluded, plain excludes would delete
+# the generated remote symlinks on every sync before the final create_env step.
+# Protect them on the receiver so interrupted/manual syncs do not leave Docker
+# Compose without WORKSPACE.
+protect_args=(
+  --filter='P .env'
+  --filter='P .env.*'
+)
+
 sync_entries=(
   compose.yaml
   src
   docker
   scripts
   demos
-  doc
+  documentations
   README.md
 )
 
@@ -144,12 +164,38 @@ finalize_remote_workspace() {
     return
   fi
 
-  ssh "${host}" "cd ${remote_path_quoted} && if [[ -x scripts/create_env ]]; then ./scripts/create_env >/dev/null; fi"
+  ssh "${host}" "cd ${remote_path_quoted} && bash -lc '
+    set -euo pipefail
+    if [[ ! -x scripts/create_env ]]; then
+      echo >&2 \"[autosync] missing executable scripts/create_env on remote\"
+      exit 1
+    fi
+    ./scripts/create_env >/dev/null
+    grep -q \"^WORKSPACE=\" .env
+    missing_env=false
+    for compose in demos/*/compose.yaml; do
+      demo_dir=\${compose%/compose.yaml}
+      if [[ ! -e \"\${demo_dir}/.env\" ]]; then
+        echo >&2 \"[autosync] missing \${demo_dir}/.env after create_env\"
+        missing_env=true
+      fi
+    done
+    [[ \"\${missing_env}\" == false ]]
+  '"
 }
 
 sync_workspace() {
   prepare_remote_workspace
-  rsync "${rsync_args[@]}" "${exclude_args[@]}" -e ssh -- "${sync_entries[@]}" "${host}:${remote_path}"
+  local existing_entries=()
+  local entry
+  for entry in "${sync_entries[@]}"; do
+    if [[ -e "${entry}" ]]; then
+      existing_entries+=("${entry}")
+    else
+      echo "[autosync] skip missing entry: ${entry}"
+    fi
+  done
+  rsync "${rsync_args[@]}" "${protect_args[@]}" "${exclude_args[@]}" -e ssh -- "${existing_entries[@]}" "${host}:${remote_path}"
   finalize_remote_workspace
 }
 
