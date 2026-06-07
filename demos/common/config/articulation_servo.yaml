@@ -1,0 +1,27 @@
+mtt_articulation_servo_node:
+  ros__parameters:
+    # Operating mode:
+    #   "position" — accept /mtt_articulation_setpoint (rad), hold with PD
+    #   "velocity" — accept /mtt_articulation_velocity_cmd (rad/s), integrate to setpoint
+    #   "disabled" — node does nothing (safe default)
+    mode: "position"
+
+    control_frequency_hz: 50.0
+
+    feedback_topic: "/hardware/articulation_angle"
+    position_cmd_topic: "/mtt_articulation_setpoint"
+    velocity_cmd_topic: "/mtt_articulation_velocity_cmd"
+
+    # ── PD gains ─────────────────────────────────────────────────────────
+    kp: 2.0             # normalized_steer / rad
+    kd: 0.05            # normalized_steer·s / rad
+    ki: 0.0             # disabled
+    integrator_limit: 0.30
+
+    # ── Limits ───────────────────────────────────────────────────────────
+    max_steer: 1.0
+    max_articulation_rad: 1.047   # ±60°
+    max_velocity_rad_s: 0.50      # velocity mode rate limit (~29°/s)
+
+    # ── Safety ───────────────────────────────────────────────────────────
+    feedback_timeout_s: 0.30

@@ -1,16 +1,18 @@
 mtt_operator_input_node:
   ros__parameters:
-    max_linear_speed: 2.4
+    # Nominal teleop ceiling: 4.2 m/s ~= 15 km/h.
+    # Physical CAN scaling is set separately by mtt_can_node.max_linear_speed_ms.
+    max_linear_speed: 4.2
     max_angular_command: 0.4
-    linear_deadband: 0.10
-    angular_deadband: 0.10
-    linear_expo: 1.2
-    angular_expo: 1.6
+    linear_deadband: 0.03
+    angular_deadband: 0.05
+    linear_expo: 1.0
+    angular_expo: 1.1
     manual_activity_linear_threshold: 0.05
     manual_activity_angular_threshold: 0.05
     deadman_button_index: 5
     light_button_index: 2
-    articulation_hold_button_index: 6
+    articulation_hold_button_index: 10
     steer_mode_switch_button_index: 4
     enable_steering_mode_switch: true
     linear_axis_index: 1
@@ -23,9 +25,11 @@ mtt_operator_input_node:
     invert_angular_axis: false
     enable_brake_axis: true
     brake_axis_default: 1.0
+    articulation_hold_mode_default: true
     articulation_hold_enabled: true
-    articulation_hold_max_speed_ms: 0.25
+    articulation_hold_max_speed_ms: 1.75
     articulation_hold_release_deadband: 0.08
+    parking_brake_dither_amplitude: 0.30
     articulation_hold_reset_on_deadman_release: true
 
 mtt_manual_cmd_filter_node:
@@ -34,14 +38,14 @@ mtt_manual_cmd_filter_node:
     output_topic: cmd_vel/manual
     input_timeout_s: 0.4
     publish_rate_hz: 50.0
-    linear_rise_rate: 0.5
-    linear_fall_rate: 1.2
-    angular_rise_rate: 0.5
-    angular_fall_rate: 1.5
+    linear_rise_rate: 2.1
+    linear_fall_rate: 3.5
+    angular_rise_rate: 2.0
+    angular_fall_rate: 3.0
     # Feedforward decel: when stick released, briefly command
     # -gain * current_output to create motor counter-thrust.
     # No tachometer needed. 0.35 → ~35% reverse throttle at max speed.
-    decel_brake_gain: 0.35
+    decel_brake_gain: 0.20
     decel_brake_threshold: 0.05
     enable_dynamic_filter: false
     linear_omega_n: 8.0

@@ -28,6 +28,9 @@ else:
 TOPICS = {
     "/cmd_vel",
     "/cmd_vel/teleop",
+    "/cmd_vel/teleop_raw",
+    "/cmd_vel/manual",
+    "/cmd_vel/manual_raw",
     "/controller/cmd_vel",
     "/mtt_status",
     "/mtt_tachometer",
@@ -145,12 +148,20 @@ def stamp_to_sec(stamp) -> float:
 
 
 def extract_sample(topic: str, msg, bag_time_s: float) -> dict[str, float | str | bool]:
-    if topic in {"/cmd_vel", "/cmd_vel/teleop", "/controller/cmd_vel"}:
+    if topic in {
+        "/cmd_vel",
+        "/cmd_vel/teleop",
+        "/cmd_vel/teleop_raw",
+        "/cmd_vel/manual",
+        "/cmd_vel/manual_raw",
+        "/controller/cmd_vel",
+    }:
         t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
+        twist = msg.twist.twist if hasattr(msg.twist, "twist") else msg.twist
         return {
             "t": t,
-            "linear_x": float(msg.twist.linear.x),
-            "angular_z": float(msg.twist.angular.z),
+            "linear_x": float(twist.linear.x),
+            "angular_z": float(twist.angular.z),
         }
 
     if topic == "/mtt_tachometer":

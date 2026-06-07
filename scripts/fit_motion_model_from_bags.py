@@ -303,12 +303,15 @@ def read_bag_samples(bag_dir: Path, wanted_topics: set[str]) -> tuple[dict[str, 
 
 
 def read_offline_icp(session_dir: Path) -> tuple[list[dict[str, Any]], str]:
-    replay = session_dir / "offline_icp" / "icp_odom_replay"
-    if (replay / "metadata.yaml").exists():
-        samples, _ = read_bag_samples(replay, {"/mapping/icp_odom"})
-        rows = samples.get("/mapping/icp_odom", [])
-        if rows:
-            return rows, "offline_icp/icp_odom_replay"
+    for label, replay in (
+        ("offline_icp_canonical/icp_odom_replay", session_dir / "offline_icp_canonical" / "icp_odom_replay"),
+        ("offline_icp/icp_odom_replay", session_dir / "offline_icp" / "icp_odom_replay"),
+    ):
+        if (replay / "metadata.yaml").exists():
+            samples, _ = read_bag_samples(replay, {"/mapping/icp_odom"})
+            rows = samples.get("/mapping/icp_odom", [])
+            if rows:
+                return rows, label
     return [], "missing"
 
 
@@ -399,6 +402,8 @@ def build_rows(
         cmd = series.get("/cmd_vel", Series([])).nearest(t, 0.1)
         teleop = series.get("/cmd_vel/teleop", Series([])).nearest(t, 0.1)
         teleop_raw = series.get("/cmd_vel/teleop_raw", Series([])).nearest(t, 0.1)
+        manual = series.get("/cmd_vel/manual", Series([])).nearest(t, 0.1)
+        manual_raw = series.get("/cmd_vel/manual_raw", Series([])).nearest(t, 0.1)
         controller = series.get("/controller/cmd_vel", Series([])).nearest(t, 0.1)
         status = series.get("/mtt_status", Series([])).nearest(t, 0.1)
         health = series.get("/mtt_health", Series([])).nearest(t, 0.2)
@@ -412,11 +417,14 @@ def build_rows(
             or series.get("/imu/data", Series([])).nearest(t, 0.05)
         )
 
-        cmd_linear = float(cmd["linear_x"]) if cmd else None
+        primary_cmd = cmd or controller or teleop or teleop_raw or manual or manual_raw
+        cmd_linear = float(primary_cmd["linear_x"]) if primary_cmd else None
         has_observed_command = (
             cmd is not None
             or teleop is not None
             or teleop_raw is not None
+            or manual is not None
+            or manual_raw is not None
             or controller is not None
         )
         effective_cmd = (
