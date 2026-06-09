@@ -16,11 +16,13 @@ Bootstrap the current `mtt_workspace` repository.
 What it does:
   1. prepares the local .env via ./scripts/create_env
   2. creates the local workspace directories under src/
-  3. imports the repositories listed in dependencies/robot.repos
+  3. initializes Git submodules from .gitmodules
+  4. falls back to dependencies/robot.repos only if .gitmodules is absent
 
 Requirements:
-  - vcs available in PATH
-  - access to the private GitHub repositories referenced by the manifest
+  - git available in PATH
+  - access to the private GitHub repositories referenced by .gitmodules
+  - vcs only for legacy fallback import from dependencies/robot.repos
 EOF
 }
 
@@ -29,34 +31,40 @@ if [[ "${1-}" == "-h" || "${1-}" == "--help" ]]; then
   exit 0
 fi
 
-if ! command -v vcs >/dev/null 2>&1; then
-  cat >&2 <<'EOF'
-[create_ws] vcstool is required but 'vcs' was not found.
-
-Install it first, for example:
-  sudo apt install vcstool
-EOF
-  exit 1
-fi
-
-if [[ ! -f "${repos_file}" ]]; then
-  echo "[create_ws] missing manifest: ${repos_file}" >&2
-  exit 1
-fi
-
 echo "[create_ws] preparing local environment"
 ./scripts/create_env
 
 mkdir -p "${repo_root}/src" "${external_root}"
 
-echo "[create_ws] validating ${repos_file}"
-vcs validate < "${repos_file}"
+if [[ -f "${repo_root}/.gitmodules" ]]; then
+  echo "[create_ws] initializing Git submodules from .gitmodules"
+  git submodule sync --recursive
+  git submodule update --init --recursive
+else
+  if ! command -v vcs >/dev/null 2>&1; then
+    cat >&2 <<'EOF'
+[create_ws] .gitmodules is absent and vcstool is required for fallback import, but 'vcs' was not found.
 
-echo "[create_ws] importing repositories declared in ${repos_file}"
-# robot.repos paths are relative to the workspace root (for example
-# src/mtt_core or src/external/pkg), so vcs import must run from the
-# workspace root, not from an inner directory.
-vcs import --recursive --skip-existing "${repo_root}" < "${repos_file}"
+Install it first, for example:
+  sudo apt install vcstool
+EOF
+    exit 1
+  fi
+
+  if [[ ! -f "${repos_file}" ]]; then
+    echo "[create_ws] missing manifest: ${repos_file}" >&2
+    exit 1
+  fi
+
+  echo "[create_ws] validating ${repos_file}"
+  vcs validate < "${repos_file}"
+
+  echo "[create_ws] importing repositories declared in ${repos_file}"
+  # robot.repos paths are relative to the workspace root (for example
+  # src/mtt_core or src/external/pkg), so vcs import must run from the
+  # workspace root, not from an inner directory.
+  vcs import --recursive --skip-existing "${repo_root}" < "${repos_file}"
+fi
 
 cat <<EOF
 [create_ws] workspace bootstrap complete

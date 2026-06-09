@@ -1,14 +1,8 @@
-# Curated external repositories for the observed MTT robot workspace.
+# ROS workspace repositories for MTT.
 #
-# This file is intentionally smaller than the full norlab_robot dependency tree.
-# It focuses on the repos that were observed in the robot snapshots and that matter
-# for rebuilding the MTT runtime around this repository.
-#
-# Notably absent on purpose:
-# - depthai_ros_driver / OAK upstream: the exact dependency still needs to be
-#   confirmed on the real robot before we add it here.
-# - project-specific extras such as theodolite, ixblue, vectornav, and other
-#   repos that were not part of the default MTT sensor / mapping path we audited.
+# .gitmodules is the canonical Git source of truth for this workspace.
+# This file mirrors it for vcstool users and host/bootstrap scripts.
+# Keep paths, URLs, and versions aligned with .gitmodules.
 
 repositories:
   src/mtt_core:
@@ -55,7 +49,7 @@ repositories:
 
   src/external/HesaiLidar_ROS_2.0:
     type: git
-    url: git@github.com:norlab-ulaval/HesaiLidar_ROS.git
+    url: git@github.com:norlab-ulaval/HesaiLidar_ROS_2.0.git
     version: jazzy
 
   src/external/rslidar_msg:

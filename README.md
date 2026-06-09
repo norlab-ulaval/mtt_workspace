@@ -34,16 +34,18 @@ mtt_workspace/
   Imported dependencies and runtime overlays.
 - `src/external/norlab_robot`
   Robot runtime integration: sensors, mapping, recording, Foxglove, teach-and-repeat.
+- `.gitmodules`
+  Canonical source of truth for nested repositories and exact Git pointers.
 - `dependencies/robot.repos`
-  Source of truth for the imported repositories expected in this workspace.
+  Mirror manifest for `vcs` users and legacy bootstrap flows.
 
 ## Before you start
 
 Host requirements:
 - Ubuntu with Docker installed and working
 - ROS 2 Jazzy available on the host if you want to build outside Docker
-- `vcstool` installed as `vcs`
-- access to the private repositories listed in `dependencies/robot.repos`
+- access to the private repositories listed in `.gitmodules`
+- `vcstool` installed as `vcs` only if you need the legacy `dependencies/robot.repos` flow
 
 Typical host setup:
 
@@ -76,10 +78,16 @@ Create the local environment files and bind-mount directories:
 ./scripts/create_env
 ```
 
-Import the nested repositories:
+Initialize the nested repositories:
 
 ```bash
 ./scripts/create_ws
+```
+
+Equivalent direct Git command:
+
+```bash
+git submodule update --init --recursive
 ```
 
 Check the result:
@@ -247,5 +255,6 @@ All technical notes live in:
 ## Notes
 
 - Do not treat package default YAML files under `src/` as the normal operator surface.
+- The parent repo pins all nested repositories through submodules. Keep `.gitmodules` and `dependencies/robot.repos` aligned when adding or removing dependencies.
 - Do not assume the parent repo alone describes the full runtime. `norlab_robot` still owns a large part of the live assembly.
 - If something works in one demo and not another, compare the demo-owned config first before changing package code.

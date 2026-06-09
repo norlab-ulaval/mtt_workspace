@@ -1,0 +1,136 @@
+[submodule "src/external/depthai-ros"]
+	path = src/external/depthai-ros
+	url = https://github.com/luxonis/depthai-ros.git
+	branch = jazzy
+	update = checkout
+
+[submodule "src/external/drive_custom_srv"]
+	path = src/external/drive_custom_srv
+	url = git@github.com:norlab-ulaval/drive_custom_srv.git
+	branch = main
+	update = checkout
+
+[submodule "src/external/DRIVE"]
+	path = src/external/DRIVE
+	url = git@github.com:norlab-ulaval/drive.git
+	branch = humble
+	update = checkout
+
+[submodule "src/external/HesaiLidar_ROS_2.0"]
+	path = src/external/HesaiLidar_ROS_2.0
+	url = git@github.com:norlab-ulaval/HesaiLidar_ROS_2.0.git
+	branch = jazzy
+	update = checkout
+
+[submodule "src/external/imu_odom"]
+	path = src/external/imu_odom
+	url = git@github.com:norlab-ulaval/imu_odom.git
+	branch = humble
+	update = checkout
+
+[submodule "src/external/imu_tools"]
+	path = src/external/imu_tools
+	url = git@github.com:norlab-ulaval/imu_tools.git
+	branch = humble
+	update = checkout
+
+[submodule "src/external/libpointmatcher_ros"]
+	path = src/external/libpointmatcher_ros
+	url = git@github.com:norlab-ulaval/libpointmatcher_ros.git
+	update = checkout
+
+[submodule "src/external/norlab_controllers_msgs"]
+	path = src/external/norlab_controllers_msgs
+	url = git@github.com:norlab-ulaval/norlab_controllers_msgs.git
+	branch = humble
+	update = checkout
+
+[submodule "src/external/norlab_controllers_ros"]
+	path = src/external/norlab_controllers_ros
+	url = git@github.com:norlab-ulaval/norlab_controllers_ros.git
+	branch = mtt
+	update = checkout
+
+[submodule "src/external/norlab_custom_interfaces"]
+	path = src/external/norlab_custom_interfaces
+	url = git@github.com:norlab-ulaval/norlab_custom_interfaces.git
+	branch = main
+	update = checkout
+
+[submodule "src/external/norlab_icp_mapper_ros"]
+	path = src/external/norlab_icp_mapper_ros
+	url = git@github.com:norlab-ulaval/norlab_icp_mapper_ros.git
+	branch = mohamed
+	update = checkout
+
+[submodule "src/external/norlab_imu_tools"]
+	path = src/external/norlab_imu_tools
+	url = git@github.com:norlab-ulaval/norlab_imu_tools.git
+	branch = humble
+	update = checkout
+
+[submodule "src/external/norlab_robot"]
+	path = src/external/norlab_robot
+	url = git@github.com:norlab-ulaval/norlab_robot.git
+	branch = mtt-hl-devel
+	update = checkout
+
+[submodule "src/external/norlab_trajectory_generator"]
+	path = src/external/norlab_trajectory_generator
+	url = git@github.com:norlab-ulaval/norlab_trajectory_generator.git
+	branch = main
+	update = checkout
+
+[submodule "src/external/norlab_xsens_driver"]
+	path = src/external/norlab_xsens_driver
+	url = git@github.com:norlab-ulaval/norlab_xsens_driver.git
+	branch = jazzy
+	update = checkout
+
+[submodule "src/external/rslidar_msg"]
+	path = src/external/rslidar_msg
+	url = https://github.com/RoboSense-LiDAR/rslidar_msg.git
+	branch = master
+	update = checkout
+
+[submodule "src/external/rslidar_sdk"]
+	path = src/external/rslidar_sdk
+	url = git@github.com:norlab-ulaval/rslidar_sdk.git
+	branch = main
+	update = checkout
+
+[submodule "src/external/service_caller"]
+	path = src/external/service_caller
+	url = git@github.com:norlab-ulaval/service_caller.git
+	branch = master
+	update = checkout
+
+[submodule "src/external/sinkage_cmd_sender"]
+	path = src/external/sinkage_cmd_sender
+	url = git@github.com:norlab-ulaval/sinkage_cmd_sender.git
+	branch = dev_mtt_mode
+	update = checkout
+
+[submodule "src/external/twist_mux"]
+	path = src/external/twist_mux
+	url = https://github.com/ros-teleop/twist_mux.git
+	branch = rolling
+	update = checkout
+
+[submodule "src/external/wiln"]
+	path = src/external/wiln
+	url = git@github.com:norlab-ulaval/wiln.git
+	branch = mohamed
+	update = checkout
+
+[submodule "src/external/zed-ros2-wrapper"]
+	path = src/external/zed-ros2-wrapper
+	url = https://github.com/stereolabs/zed-ros2-wrapper.git
+	branch = master
+	update = checkout
+
+[submodule "src/mtt_core"]
+	path = src/mtt_core
+	url = git@github.com:norlab-ulaval/mtt_core.git
+	branch = dev
+	update = checkout

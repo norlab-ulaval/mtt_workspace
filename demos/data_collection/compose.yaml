@@ -283,43 +283,6 @@ services:
       - -u
       - ${WORKSPACE}/scripts/zed_pose_visualizer.py
 
-  # ── GenZ-ICP mapping (Experimental Live) ──────────────────────────────────
-  # Alternative to Norlab ICP for robust mapping in degenerate environments.
-  # Listens to /merged_points_filtered and provides odometry + pointcloud map.
-  # Publishes map -> odom transformation.
-  mapping_genz:
-    <<: [*dc_base]
-    profiles: ["mapping_genz"]
-    depends_on:
-      sensors:
-        condition: service_started
-    environment:
-      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/merged_points_filtered}
-      MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-map}
-      MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-odom}
-    command:
-      - bash
-      - -lc
-      - |
-        echo "Waiting for $${MAPPING_POINTS_TOPIC} before starting GenZ-ICP..."
-        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
-          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
-          exit 1
-        }
-        echo "Starting GenZ-ICP (Global Mapper Mode) with:"
-        echo "  points: $${MAPPING_POINTS_TOPIC}"
-        echo "  odom_frame: $${MAPPING_ODOM_FRAME}"
-        echo "  base_frame: $${MAPPING_ROBOT_FRAME}"
-        exec ros2 launch genz_icp odometry.launch.py \
-          use_sim_time:=false \
-          topic:=$${MAPPING_POINTS_TOPIC} \
-          odom_frame:=$${MAPPING_ODOM_FRAME} \
-          base_frame:=$${MAPPING_ROBOT_FRAME} \
-          deskew:=true \
-          max_range:=60.0 \
-          voxel_size:=0.3 \
-          visualize:=true
-
   # ── Localization: Factor Graph + Trailer Localizer ───────────────────────
   # Runs mtt_localization/localization.launch.py (live, no sim time).
   # Launches two nodes:

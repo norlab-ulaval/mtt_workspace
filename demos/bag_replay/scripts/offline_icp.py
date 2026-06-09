@@ -1014,7 +1014,7 @@ def run_pipeline(
             "mapping_global_output_map_min_dist_new_point:=0.05",
             "mapping_enable_map_trimming:=true",
             "mapping_map_trim_interval_scans:=10",
-            "mapping_map_trim_radius_m:=60.0",
+            f"mapping_map_trim_radius_m:={os.environ.get('OFFLINE_ICP_LOCAL_MAP_RADIUS_M', '60.0')}",
             "mapping_max_map_points_before_trim:=250000",
             f"mapping_max_idle_time:={max(300.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)}",
         ]

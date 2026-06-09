@@ -159,9 +159,7 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/mapping/map",              "ICP Map",            1.0, 50.0, required=False, group="mapping"),
     TopicSpec("/mapping/trajectory_path",  "ICP Trajectory",     1.0, 50.0, required=False, group="mapping"),
 
-    # ── Optional alternative mapper / perception diagnostics ─────────────────
-    TopicSpec("/genz/odometry",                 "GenZ Odom",         10.0, 30.0, required=False, group="mapping"),
-    TopicSpec("/genz/local_map",                "GenZ Map",           0.5, 2.0, required=False, group="mapping"),
+    # ── Optional perception diagnostics ─────────────────────────────────────
     TopicSpec("/trailer/articulation_angle",     "Trailer Angle",      5.0, 80.0, required=False, group="mapping"),
     TopicSpec("/trailer/pose",                   "Trailer Pose",       5.0, 80.0, required=False, group="mapping"),
 
@@ -695,7 +693,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         print(f"  {DIM}– WILN / repeat supervisor not running in this session.{RESET}")
         print(f"    {DIM}Start with: docker compose --profile wiln up -d wiln{RESET}")
     else:
-        icp_ok = counts.get("/mapping/icp_odom", 0) > 0 or counts.get("/genz/odometry", 0) > 0
+        icp_ok = counts.get("/mapping/icp_odom", 0) > 0
         health_ok = counts.get("/mtt_health", 0) > 0
         repeat_ok = repeat_service_count == len(repeat_services) and "/wiln/command" in discovered and icp_ok and health_ok
         color = GREEN if repeat_ok else YELLOW
