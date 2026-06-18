@@ -18,6 +18,7 @@ What it does:
   2. creates the local workspace directories under src/
   3. initializes Git submodules from .gitmodules
   4. falls back to dependencies/robot.repos only if .gitmodules is absent
+  5. verifies that no declared submodule remains uninitialized
 
 Requirements:
   - git available in PATH
@@ -66,10 +67,26 @@ EOF
   vcs import --recursive --skip-existing "${repo_root}" < "${repos_file}"
 fi
 
+if [[ -f "${repo_root}/.gitmodules" ]]; then
+  submodule_status="$(git submodule status --recursive)"
+  if grep -qE '^[-+U]' <<<"${submodule_status}"; then
+    cat >&2 <<EOF
+[create_ws] submodule verification failed.
+
+Lines starting with:
+  -  mean the submodule is not initialized
+  +  mean it is not at the commit pinned by its parent
+  U  mean it has unresolved conflicts
+
+${submodule_status}
+EOF
+    exit 1
+  fi
+fi
+
 cat <<EOF
 [create_ws] workspace bootstrap complete
 
 Next steps:
-  source /opt/ros/jazzy/setup.bash
-  colcon build --base-paths src/mtt_core src/external --symlink-install
+  ./scripts/compile
 EOF

@@ -43,7 +43,6 @@ mtt_workspace/
 
 Host requirements:
 - Ubuntu with Docker installed and working
-- ROS 2 Jazzy available on the host if you want to build outside Docker
 - access to the private repositories listed in `.gitmodules`
 - `vcstool` installed as `vcs` only if you need the legacy `dependencies/robot.repos` flow
 
@@ -60,31 +59,31 @@ Typical Docker setup:
 sudo apt-get update
 sudo apt-get install -y docker.io docker-compose-plugin
 sudo usermod -aG docker "$USER"
-newgrp docker
+```
+
+Log out and back in after adding yourself to the `docker` group. Verify access
+without `sudo`:
+
+```bash
+docker info
 ```
 
 ## Get the workspace
 
-Clone the workspace shell:
+Clone and initialize the complete workspace:
 
 ```bash
 git clone git@github.com:norlab-ulaval/mtt_workspace.git
 cd mtt_workspace
-```
-
-Create the local environment files and bind-mount directories:
-
-```bash
-./scripts/create_env
-```
-
-Initialize the nested repositories:
-
-```bash
 ./scripts/create_ws
+./scripts/compile
 ```
 
-Equivalent direct Git command:
+`create_ws` creates `.env` with the current host UID/GID and initializes every
+nested submodule. `compile` verifies Docker access, rebuilds the local image
+when its user does not match the host UID/GID, then builds the ROS workspace.
+
+Equivalent Git-only submodule command:
 
 ```bash
 git submodule update --init --recursive
@@ -102,19 +101,24 @@ Check the result:
 
 This is the standard path for this workspace.
 
-Build images explicitly when needed (new clone, Dockerfile change, or missing image):
+For normal use, including the first build on a new machine:
 
 ```bash
-docker compose --profile build -f compose.yaml build devel_image
+./scripts/compile
 ```
 
-If you need the heavy base image explicitly:
+The script rebuilds `mtt_workspace:base` and `mtt_workspace:devel` when the
+development image is absent or was built for another UID/GID. This is required
+because the container writes directly into the bind-mounted workspace.
+
+Advanced explicit image builds:
 
 ```bash
+docker compose --profile build -f compose.yaml build base devel_image
 docker compose -f compose.yaml build base
 ```
 
-Build the ROS workspace (no image rebuild):
+Direct ROS build without the preflight checks:
 
 ```bash
 docker compose -f compose.yaml run --rm compile
@@ -127,7 +131,25 @@ docker compose -f compose.yaml run --rm bash
 ```
 
 If the image is missing, `compile` and `bash` will fail instead of rebuilding.
-Run the explicit build once, then continue with `compile`.
+Prefer `./scripts/compile`, which handles this automatically.
+
+### Installation troubleshooting
+
+`permission denied` when running Docker:
+
+```bash
+sudo usermod -aG docker "$USER"
+```
+
+Log out and back in, then check `docker info`.
+
+`permission denied` under `build/`, `install/`, `log/`, or `.ccache/` means
+those generated directories belong to a different UID. `./scripts/compile`
+detects this and prints the exact `chown` command to repair them.
+
+`not our ref` or an empty nested dependency means a submodule pointer is not
+available from its configured remote. Rerun `./scripts/create_ws`; it now
+validates every recursive submodule and reports the exact failing path.
 
 ### Docker images (what they contain)
 

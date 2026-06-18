@@ -213,9 +213,9 @@ create_binded_files() {
   mkdir -p data
   mkdir -p data/records
   mkdir -p data/cache
-  touch -a "${HOME}/.bash_history"
-  touch -a "${HOME}/.gitconfig"
-  touch -a "${HOME}/.Xauthority"
+  [[ -e "${HOME}/.bash_history" ]] || touch "${HOME}/.bash_history"
+  [[ -e "${HOME}/.gitconfig" ]] || touch "${HOME}/.gitconfig"
+  [[ -e "${HOME}/.Xauthority" ]] || touch "${HOME}/.Xauthority"
 }
 
 create_demo_env_symlinks() {

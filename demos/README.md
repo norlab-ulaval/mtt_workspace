@@ -24,18 +24,18 @@ From the repository root:
 
 ```bash
 xhost +si:localuser:$USER
-docker compose --profile build -f compose.yaml build devel_image
-docker compose run --rm compile
+./scripts/create_ws
+./scripts/compile
 docker compose run --rm bash
 ```
 
-`compile` only builds the ROS workspace. It does not rebuild images. If the
-image is missing, build it explicitly with the `devel_image` profile first.
+`scripts/compile` checks Docker access and the image UID/GID. It rebuilds the
+images when required, then builds the ROS workspace.
 
-If you only want the heavy base layer:
+Advanced explicit image build:
 
 ```bash
-docker compose -f compose.yaml build base
+docker compose --profile build -f compose.yaml build base devel_image
 ```
 
 On the robot:

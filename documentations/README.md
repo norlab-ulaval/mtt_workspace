@@ -52,13 +52,15 @@ The workspace is a shell around nested repositories.
 Use the scripts instead of manual git calls.
 
 ```bash
-./scripts/create_env
 ./scripts/create_ws
+./scripts/compile
 ./scripts/status
 ```
 
-- create_env writes .env (paths, domain IDs, image tags)
-- create_ws imports repos from dependencies/robot.repos
+- create_ws writes `.env`, initializes recursive Git submodules, and verifies
+  that every dependency is at the commit pinned by its parent
+- compile validates Docker access and image UID/GID, rebuilds images when
+  required, then runs the ROS build
 - status shows the root repo plus nested repos together
 
 Root level git status is not enough.
@@ -80,16 +82,20 @@ Compose rules:
 - Runtime services are image only. They do not rebuild images.
 - Images are built explicitly only when you ask for it.
 
-Build once when needed (new clone or Dockerfile change):
+Normal build, including a clean machine:
 
 ```bash
-docker compose --profile build -f compose.yaml build devel_image
-docker compose -f compose.yaml build base
+./scripts/compile
 ```
 
-Then run normally without rebuilds:
+The script rebuilds the base/devel images when the image is missing or its
+container user differs from the host UID/GID. This prevents permission errors
+in the bind-mounted `build/`, `install/`, and `log/` directories.
+
+Advanced direct Compose commands:
 
 ```bash
+docker compose --profile build -f compose.yaml build base devel_image
 docker compose -f compose.yaml run --rm compile
 docker compose -f compose.yaml run --rm bash
 ```
@@ -106,7 +112,8 @@ compose.yaml defines:
 - devel_image (profile build)
   builds mtt_workspace:devel
 - compile
-  runs colcon build inside mtt_workspace:devel
+  runs colcon build inside mtt_workspace:devel; use `scripts/compile` as the
+  normal entry point because it performs the host/image preflight checks
 - bash/dev
   interactive shell inside the runtime image
 - monitor
@@ -173,7 +180,8 @@ Environment:
 
 Colcon build notes:
 - compile runs colcon without --symlink-install to avoid editable install issues
-- if you add a new package, update dependencies/robot.repos and re-run create_ws
+- if you add a new package, update `.gitmodules` and its
+  `dependencies/robot.repos` mirror, then re-run create_ws
 
 ## Host build model
 

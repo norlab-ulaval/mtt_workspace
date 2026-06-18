@@ -1,0 +1,100 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+host_uid="$(id -u)"
+host_gid="$(id -g)"
+
+if ! command -v docker >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+[compile] Docker is not installed.
+
+Install Docker Engine and the Compose plugin, then rerun:
+  ./scripts/compile
+EOF
+  exit 1
+fi
+
+if ! docker compose version >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+[compile] The Docker Compose plugin is not available.
+
+Install docker-compose-plugin, then rerun:
+  ./scripts/compile
+EOF
+  exit 1
+fi
+
+if ! docker info >/dev/null 2>&1; then
+  cat >&2 <<EOF
+[compile] The current user cannot access the Docker daemon.
+
+Run:
+  sudo usermod -aG docker "$USER"
+
+Then log out and back in before rerunning ./scripts/compile.
+EOF
+  exit 1
+fi
+
+./scripts/create_env
+
+# shellcheck disable=SC1091
+. "$(pwd)/scripts/lib/mtt_env.sh"
+image="$(mtt_env_or_file_or_default "$(pwd)" MTT_IMAGE "mtt_workspace:devel")"
+
+image_user_id() {
+  local flag="$1"
+  docker run --rm --entrypoint /usr/bin/id "${image}" "${flag}" mtt 2>/dev/null
+}
+
+rebuild_image=false
+if ! docker image inspect "${image}" >/dev/null 2>&1; then
+  echo "[compile] ${image} is missing; a local image build is required."
+  rebuild_image=true
+else
+  image_uid="$(image_user_id -u || true)"
+  image_gid="$(image_user_id -g || true)"
+  if [[ "${image_uid}" != "${host_uid}" || "${image_gid}" != "${host_gid}" ]]; then
+    echo "[compile] image user mismatch: host=${host_uid}:${host_gid}, image=${image_uid:-?}:${image_gid:-?}"
+    echo "[compile] rebuilding images for this host user."
+    rebuild_image=true
+  fi
+fi
+
+if [[ "${rebuild_image}" == true ]]; then
+  docker compose --profile build -f compose.yaml build base devel_image
+
+  image_uid="$(image_user_id -u || true)"
+  image_gid="$(image_user_id -g || true)"
+  if [[ "${image_uid}" != "${host_uid}" || "${image_gid}" != "${host_gid}" ]]; then
+    cat >&2 <<EOF
+[compile] image rebuild completed, but the container user is still incorrect.
+  host : ${host_uid}:${host_gid}
+  image: ${image_uid:-?}:${image_gid:-?}
+EOF
+    exit 1
+  fi
+fi
+
+blocked_paths=()
+for path in build install log .ccache; do
+  if [[ -e "${path}" && ! -w "${path}" ]]; then
+    blocked_paths+=("${path}")
+  fi
+done
+
+if (( ${#blocked_paths[@]} > 0 )); then
+  printf '[compile] These generated directories are not writable by UID %s:\n' "${host_uid}" >&2
+  printf '  - %s\n' "${blocked_paths[@]}" >&2
+  cat >&2 <<EOF
+
+Repair their ownership once, then rerun:
+  sudo chown -R ${host_uid}:${host_gid} ${blocked_paths[*]}
+EOF
+  exit 1
+fi
+
+echo "[compile] building the ROS workspace with ${image} as ${host_uid}:${host_gid}"
+exec docker compose -f compose.yaml run --rm compile
