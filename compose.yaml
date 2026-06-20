@@ -72,7 +72,7 @@ services:
         colcon build \
           --base-paths "$${workspace_paths[@]}" \
           --cmake-args \
-            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \
             -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
           --parallel-workers $$(nproc)
