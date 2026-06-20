@@ -22,6 +22,9 @@ x-replay-base: &replay_base
     ROS_DOMAIN_ID: ${ROS_DOMAIN_ID:-0}
     RMW_IMPLEMENTATION: ${RMW_IMPLEMENTATION:-rmw_cyclonedds_cpp}
     REPLAY_RATE: ${REPLAY_RATE:-1.0}
+    REPLAY_START_OFFSET: ${REPLAY_START_OFFSET:-0}
+    REPLAY_KEEP_ZED_ODOM: ${REPLAY_KEEP_ZED_ODOM:-false}
+    REPLAY_USE_RECORDED_MAPPING: ${REPLAY_USE_RECORDED_MAPPING:-false}
     # Path to the bag to replay — set in .env or on the command line:
     #   BAG_PATH=/path/to/bag dcr up
     BAG_PATH: ${BAG_PATH:-}
@@ -84,8 +87,13 @@ services:
           /mtt_route/start_pose /mtt_route/status_text /mtt_route/safety_status
           /localization/articulation_angle /localization/articulation_pitch
           /trailer/odom /trailer/pose_in_map
-          /zed/zed_node/pose /zed/zed_node/odom
+          /zed/zed_node/pose
         )
+        # ZED odom stays excluded unless used as the mapper odom prior
+        # (zed_odom service + REPLAY_KEEP_ZED_ODOM=true).
+        if [ "$${REPLAY_KEEP_ZED_ODOM:-false}" != "true" ]; then
+          EXCLUDE_TOPICS+=( /zed/zed_node/odom )
+        fi
         if [ "$${REPLAY_USE_RECORDED_MAPPING:-false}" != "true" ]; then
           EXCLUDE_TOPICS+=(
             /mapping/icp_odom /mapping/map /mapping/pose_in
@@ -98,7 +106,10 @@ services:
         fi
         exec ros2 bag play \
           --clock \
+          --loop \
+          --read-ahead-queue-size 10000 \
           --rate ${REPLAY_RATE:-1.0} \
+          --start-offset ${REPLAY_START_OFFSET:-0} \
           --storage mcap \
           --exclude-topics "$${EXCLUDE_TOPICS[@]}" \
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
@@ -173,15 +184,103 @@ services:
       - -p
       - use_articulation_state_lidar:=false
       - -p
-      - imu_yaw_rate_topic:=${REPLAY_ODOM_IMU_TOPIC:-/unused/imu}
+      - imu_yaw_rate_topic:=${REPLAY_ODOM_IMU_TOPIC:-/mti100/data}
       - -p
       - imu_yaw_rate_sign:=${REPLAY_ODOM_IMU_YAW_SIGN:--1.0}
+      # Gyro bias is bag-dependent: bags recorded with the bias_compensator
+      # active (/mti100/data already unbiased) need 0.0. Measure per bag with
+      # scripts/analyze_imu_bias.py and override REPLAY_ODOM_IMU_BIAS if needed.
+      - -p
+      - imu_yaw_rate_bias_rad_s:=${REPLAY_ODOM_IMU_BIAS:-0.0}
       - -p
       - imu_yaw_rate_timeout_seconds:=0.2
+      # CRITICAL: use_imu_heading=false prevents the yaw-jump bug where the
+      # IMU's Madgwick absolute heading (from orientation quaternion) directly
+      # overwrites the model heading (odometry_calculator.cpp:124).  In replay,
+      # IMU data gaps > 0.2 s freeze the stale heading; when IMU resumes the
+      # heading snaps by up to 47° in one 50 ms tick.  With false, the heading
+      # is integrated smoothly from the IMU yaw rate (eff_ang).  The mapper's
+      # ICP corrects the resulting slow drift.
+      - -p
+      - use_imu_heading:=false
       - -r
       - mtt_odometry:=mtt_odometry/runtime
       - -r
       - mtt_articulation_angle:=mtt_articulation_angle/runtime
+
+  # ── IMU-based odometry for replay (rotation-only prior) ─────────────────────
+  # Alternative to runtime_odometry when wheel encoders produce bad Z values.
+  # Subscribes to /mti100/data and publishes odom → base_footprint TF using
+  # MTi-100 IMU orientation only (no acceleration integration, no Z drift).
+  #
+  # rotation_only=true : only heading/orientation from IMU, position constant
+  # real_time=false    : unlimited TF buffer (1000000 s) and unlimited message
+  #                      queue — required for bag replay with sim_time.
+  #
+  # Usage (replaces runtime_odometry for mapping):
+  #   BAG_PATH=... MAPPING_CONFIG=.../_config_hesai_imu_replay.yaml \
+  #     docker compose up bag_player description imu_odom mapping foxglove
+  #
+  # Profile-guarded: does NOT start with `--profile mapping` (profiles: [imu_odom]).
+  #   Run explicitly: docker compose up imu_odom mapping
+  # WARNING: do NOT start both imu_odom and runtime_odometry at the same time —
+  #   both publish odom → base_footprint TF which creates a TF tree conflict.
+  imu_odom:
+    <<: [*replay_base]
+    profiles: ["imu_odom"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - ros2
+      - run
+      - imu_odom
+      - imu_odom_node
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - odom_frame:=${IMU_ODOM_FRAME:-odom}
+      - -p
+      - robot_frame:=${IMU_ODOM_ROBOT_FRAME:-base_footprint}
+      - -p
+      - imu_frame:=${IMU_ODOM_IMU_FRAME:-imu_link}
+      - -p
+      - rotation_only:=${IMU_ODOM_ROTATION_ONLY:-true}
+      - -p
+      - real_time:=false
+      - -r
+      - imu_topic:=${IMU_ODOM_TOPIC:-/mti100/data}
+
+  # ── ZED visual odometry → odom TF (replay-only odom prior) ──────────────
+  # Wheel odom translation diverges on the downhill segment (track slip at
+  # 2 m/s: >100% error between processed scans → ICP loses lock). The ZED VIO
+  # recorded in the bag tracked that segment correctly, including the real
+  # z descent. Requires REPLAY_KEEP_ZED_ODOM=true on bag_player.
+  # Do NOT run together with runtime_odometry or imu_odom (same TF).
+  zed_odom:
+    <<: [*replay_base]
+    profiles: ["zed_odom"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/zed_odom_to_tf.py
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - odom_frame:=${ZED_ODOM_FRAME:-odom}
+      - -p
+      - robot_frame:=${ZED_ODOM_ROBOT_FRAME:-base_footprint}
+      - -p
+      - camera_frame:=${ZED_ODOM_CAMERA_FRAME:-zed_camera_link}
 
   # ── Joint-state reconstruction from replay-local articulation + tachometer ─
   # One shared builder owns the articulated visualization in replay and in
@@ -197,12 +296,18 @@ services:
       - mtt_driver
       - mtt_joint_state_builder_node_exe
       - --ros-args
+      - --params-file
+      - ${WORKSPACE}/demos/common/config/mtt_driver.yaml
       - -p
       - use_sim_time:=true
       - -p
       - joint_state_topic:=joint_states
       - -p
       - articulation_topic:=mtt_articulation_angle/runtime
+      - -p
+      - articulation_state_topic:=mtt/articulation_state/runtime
+      - -p
+      - articulation_state_timeout_seconds:=1.0
       - -p
       - tachometer_topic:=mtt_tachometer
 
@@ -256,6 +361,7 @@ services:
       OFFLINE_ICP_FILTER_TRAILER: ${OFFLINE_ICP_FILTER_TRAILER:-true}
       OFFLINE_ICP_MAPPING_ODOM_FRAME: ${OFFLINE_ICP_MAPPING_ODOM_FRAME:-odom}
       OFFLINE_ICP_EXPERIMENT_NAME: ${OFFLINE_ICP_EXPERIMENT_NAME:-}
+      OFFLINE_ICP_PLAYBACK_POLICY: ${OFFLINE_ICP_PLAYBACK_POLICY:-auto}
     command:
       - python3
       - -u
@@ -323,49 +429,129 @@ services:
         condition: service_started
       description:
         condition: service_started
-      runtime_odometry:
-        condition: service_started
+      # runtime_odometry removed: mapper works with either runtime_odometry or
+      # imu_odom as the odom TF source. Start the right one explicitly:
+      #   wheel odom : docker compose up ... runtime_odometry mapping
+      #   IMU odom   : docker compose up ... imu_odom mapping (+ MAPPING_CONFIG=..._hesai_imu_replay.yaml)
+    volumes:
+      - ${WORKSPACE}/scripts:${WORKSPACE}/scripts
     environment:
-      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/kiss_icp/input_points}
+      MAPPING_RAW_POINTS_TOPIC: ${MAPPING_RAW_POINTS_TOPIC:-/hesai_lidar/points}
       MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml}
       MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.50}
-      MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-0.05}
+      MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-1.0}
       MAPPING_MAP_TF_PUBLISH_RATE: ${MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
       MAPPING_MIN_INPUT_POINTS: ${MAPPING_MIN_INPUT_POINTS:-200}
       MAPPING_MAX_TRANSLATION_CORRECTION: ${MAPPING_MAX_TRANSLATION_CORRECTION:-2.50}
       MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_ROTATION_CORRECTION_DEG:-35.0}
       MAPPING_MAX_VELOCITY_MS: ${MAPPING_MAX_VELOCITY_MS:-8.0}
       MAPPING_MAX_YAW_RATE_DEG_S: ${MAPPING_MAX_YAW_RATE_DEG_S:-80.0}
-      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-4.0}
-      MAPPING_MAX_Z_JUMP_M: ${MAPPING_MAX_Z_JUMP_M:-0.75}
+      # Raised for replay: consecutive rejections during motion freeze
+      # lastAcceptedRobotToMap_ → when a scan finally passes quality gate
+      # the yaw/pos step against the stale baseline exceeds the original
+      # live limits (30°, 4m).  180° / 100 m accommodate any real motion
+      # between acceptances while still catching clearly-impossible jumps.
+      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MAPPING_MAX_POSE_YAW_STEP_DEG:-180.0}
+      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-100.0}
+      # 2.0m default (vs 0.75m live): replayed odom can have a Z offset if the
+      # sensor mount was recalibrated since recording. ICP with force4DOF=1
+      # self-corrects Z after the first accepted scan; subsequent jumps <0.1m.
+      MAPPING_MAX_Z_JUMP_M: ${MAPPING_MAX_Z_JUMP_M:-2.0}
       MAPPING_MAX_REGISTRATION_TIME_MS: ${MAPPING_MAX_REGISTRATION_TIME_MS:-3000.0}
-      MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-10.0}
-      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03}
-      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5}
-      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03}
+      # Increased from 10s: in replay the idle timer now fires on every arriving
+      # scan (not just accepted ones), but slow replay rates or bag gaps can still
+      # exceed a short window. 60s prevents spurious shutdown during analysis.
+      MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-60.0}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.10}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-1.0}
+      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.08}
       MAPPING_DESKEW: ${MAPPING_DESKEW:-true}
-      MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-true}
+      # IMU gyro deskew: avoids odom-error → swirl coupling.
+      # deskew_source=imu uses MTi-100 angular velocity for per-point correction
+      # instead of TF-odom (which bakes wheel-slip / heading-error into every inserted
+      # scan, producing the swirl / double-tree artefact). TF is still used for ICP
+      # prior; only per-point deskew moves to IMU.
+      MAPPING_DESKEW_SOURCE: ${MAPPING_DESKEW_SOURCE:-imu}
+      MAPPING_DESKEW_IMU_TOPIC: ${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data}
+      # Map trimming exists to bound online ICP cost (live robot). In replay it
+      # is FATAL: trim radius 40m < sensorMaxRange 60m means after a trim the
+      # far ring of every scan can no longer match the map, the insertion
+      # overlap gate (0.30, compile-time) never passes again, the map freezes
+      # and every scan ends up rejected. Observed 2026-06-11 at map=632k pts.
+      MAPPING_ENABLE_MAP_TRIMMING: ${MAPPING_ENABLE_MAP_TRIMMING:-true}
+      MAPPING_MAP_TRIM_RADIUS_M: ${MAPPING_MAP_TRIM_RADIUS_M:-100.0}
+      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-150000}
+      # Overlap gates, lowered for replay exploration. The live defaults
+      # (pose 0.25/0.45, insertion 0.30/0.50) deadlock when the robot reaches a
+      # spot where a large NEW area becomes visible: insertion is refused for
+      # the very scans that would map it, the map freezes, and a few meters
+      # later every scan is rejected — always at the same bag position.
+      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.10}
+      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.20}
+      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.10}
+      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.20}
+      # Correction-size insertion limit measures PRIOR error, not alignment
+      # quality. With wheel slip downhill the prior is 2-3 m off while ICP
+      # still aligns fine — 4.0 m keeps the map alive (live default: 1.5 m).
+      # NOTE: translation limit relaxed; rotation limit kept at original 12° —
+      # relaxing rotation to 20° caused gradual yaw accumulation toward 90°
+      # over 2-3 map updates. max_pose_yaw_step_deg (30°) is the backstop.
+      MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M: ${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-4.0}
+      MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-12.0}
+      MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-false}
       MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-odom}
       MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-base_footprint}
+      MAPPING_TF_CONFLICT_CHECK: ${MAPPING_TF_CONFLICT_CHECK:-true}
+      MAPPING_TF_CONFLICT_CHECK_SECONDS: ${MAPPING_TF_CONFLICT_CHECK_SECONDS:-8}
+      MAPPING_TF_CONFLICT_YAW_ALERT_DEG: ${MAPPING_TF_CONFLICT_YAW_ALERT_DEG:-25}
     command:
       - bash
       - -lc
       - |
-        echo "Waiting for $${MAPPING_POINTS_TOPIC} before starting ICP mapper..."
-        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
-          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
+        echo "Waiting for $${MAPPING_RAW_POINTS_TOPIC} before starting transform node..."
+        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_RAW_POINTS_TOPIC}"; do sleep 1; done' || {
+          echo "ERROR: $${MAPPING_RAW_POINTS_TOPIC} not available"
           exit 1
         }
-        echo "Waiting for replay odometry TF before starting ICP mapper..."
-        timeout 45 bash -lc 'until ros2 topic info /mtt_odometry/runtime 2>/dev/null | grep -qE "Publisher count: [1-9]"; do sleep 1; done' || {
-          echo "WARN: /mtt_odometry/runtime not visible yet; starting mapper anyway."
+        echo "Starting transform node (Y-forward hesai_lidar → X-forward base_footprint)..."
+        python3 $${WORKSPACE}/scripts/pointcloud_to_base_frame.py &
+        echo "Waiting for corrected points topic ($${MAPPING_POINTS_TOPIC})..."
+        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
+          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available (transform node may have failed)"
+          exit 1
         }
+        echo "Waiting for odom TF ($${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME})..."
+        timeout 45 bash -lc 'until ros2 run tf2_ros tf2_echo "$${MAPPING_ODOM_FRAME}" "$${MAPPING_ROBOT_FRAME}" 2>&1 | grep -q "Translation"; do sleep 1; done' || {
+          echo "WARN: $${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME} TF not visible after 45s."
+          echo "  If no odom source is running, the mapper will start with identity prior (no motion)."
+          echo "  For IMU-only prior (bags without tachometer), run:"
+          echo "    MAPPING_CONFIG=.../_config_hesai_imu_replay.yaml docker compose up imu_odom mapping"
+        }
+        if [ "$${MAPPING_TF_CONFLICT_CHECK:-true}" = "true" ]; then
+          echo "Checking $${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME} for TF yaw jumps before starting mapper..."
+          python3 "$${WORKSPACE}/scripts/detect_tf_conflict.py" \
+            --parent "$${MAPPING_ODOM_FRAME}" \
+            --child "$${MAPPING_ROBOT_FRAME}" \
+            --yaw-alert "$${MAPPING_TF_CONFLICT_YAW_ALERT_DEG}" \
+            --duration "$${MAPPING_TF_CONFLICT_CHECK_SECONDS}" || {
+              echo "ERROR: TF conflict/yaw jump detected on $${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME}."
+          echo "Start exactly one odom TF source:"
+          echo "  runtime_odometry  — wheel encoder odometry (bags WITH real/synthetic tachometer)"
+          echo "  imu_odom          — IMU rotation-only prior (bags WITHOUT tachometer)"
+          echo "  zed_odom          — ZED visual odometry (bags WITH ZED + REPLAY_KEEP_ZED_ODOM=true)"
+          echo "Override only for debugging with MAPPING_TF_CONFLICT_CHECK=false."
+              exit 2
+            }
+        fi
         sleep 2
         exec ros2 launch norlab_robot mapping.launch.py \
           use_sim_time:=true \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG} \
           mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_deskew_source:=$${MAPPING_DESKEW_SOURCE} \
+          mapping_deskew_imu_topic:=$${MAPPING_DESKEW_IMU_TOPIC} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
@@ -374,6 +560,7 @@ services:
           mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
           mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
           mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
+          mapping_max_pose_yaw_step_deg:=$${MAPPING_MAX_POSE_YAW_STEP_DEG} \
           mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
           mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
           mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
@@ -381,14 +568,62 @@ services:
           deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M} \
           deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG} \
           deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT} \
+          mapping_enable_map_trimming:=$${MAPPING_ENABLE_MAP_TRIMMING} \
+          mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M} \
+          mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM} \
+          mapping_min_pose_overlap_near_ratio:=$${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO} \
+          mapping_min_pose_overlap_loose_ratio:=$${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO} \
+          mapping_min_map_overlap_near_ratio:=$${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO} \
+          mapping_min_map_overlap_loose_ratio:=$${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO} \
+          mapping_max_map_update_translation_correction_m:=$${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M} \
+          mapping_max_map_update_rotation_correction_deg:=$${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE} \
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME}
 
+  # ── KISS-ICP lightweight LiDAR odometry ──────────────────────────────────
+  # Alternative to the norlab_icp_mapper_ros mapper above. Uses a different ICP
+  # pipeline (KISS-ICP) that may handle frame-alignment differently.
+  # Usage: BAG_PATH=... docker compose --profile kissicp up
+  kiss_icp:
+    <<: [*replay_base]
+    profiles: ["kissicp"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    volumes:
+      - ${WORKSPACE}/scripts:${WORKSPACE}/scripts
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /hesai_lidar/points before starting KISS-ICP..."
+        timeout 45 bash -lc '
+          until ros2 topic list | grep -qx "/hesai_lidar/points"; do sleep 1; done
+        ' || { echo "ERROR: /hesai_lidar/points not available"; exit 1; }
+
+        # Publish static map→odom identity so the TF tree works
+        ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom &
+
+        # Transform Hesai points (Y-forward intrinsic) → base_footprint (X-forward)
+        python3 ${WORKSPACE}/scripts/pointcloud_to_base_frame.py &
+
+        exec ros2 run kiss_icp kiss_icp_node --ros-args \
+          -p base_frame:=base_footprint \
+          -p lidar_odom_frame:=odom \
+          -p publish_odom_tf:=true \
+          -p invert_odom_tf:=false \
+          -p publish_debug_clouds:=true \
+          -p use_sim_time:=true \
+          -p data.deskew:=false \
+          --remap pointcloud_topic:=/kiss_icp/input_points
+
   # ── WILN obstacle cloud regenerated in replay map frame ─────────────────
   # The bag may contain /wiln/obstacles from the live run, but those points
-  # were published in the old recorded map frame. Rebuild them from LiDAR +
-  # the current replay TF/ICP map so Foxglove's fixed "map" frame is coherent.
+  # were published in the live robot's map frame. Rebuild them from LiDAR +
+  # the current replay ICP map TF so Foxglove's fixed "map" frame is coherent.
   wiln_obstacles:
     <<: [*replay_base]
     profiles: ["mapping", "teach_repeat", "wiln_obstacles"]
@@ -717,8 +952,8 @@ services:
           -p port:=8765
 
   # ── RViz (optional — requires X11 display on host) ───────────────────────
-  # Usage: DISPLAY=:0 dc run --rm rviz
-  # Or with X forwarding: ssh -X host → then dc run --rm rviz
+  # Usage (after stack is up): docker compose exec mapping rviz2 -d /workspace/config/replay_mapping.rviz
+  # Or: DISPLAY=:0 docker compose run --no-deps --rm rviz
   rviz:
     <<: [*replay_base]
     profiles: ["rviz"]
@@ -726,18 +961,11 @@ services:
       DISPLAY: ${DISPLAY:-:0}
     volumes:
       - /tmp/.X11-unix:/tmp/.X11-unix:rw
-    depends_on:
-      bag_player:
-        condition: service_started
-      description:
-        condition: service_started
+      - ${PWD}/config:/workspace/config:ro
     command:
-      - ros2
-      - launch
-      - mtt_bringup
-      - mtt_rviz.launch.py
-      - use_sim_time:=true
-      - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
+      - rviz2
+      - -d
+      - /workspace/config/replay_mapping.rviz
 
   # ── Teach-and-Repeat stack for offline WILN validation ───────────────────
   #
