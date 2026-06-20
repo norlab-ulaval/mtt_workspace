@@ -134,3 +134,9 @@
 	url = git@github.com:norlab-ulaval/mtt_core.git
 	branch = dev
 	update = checkout
+[submodule "src/external/kiss_icp"]
+	path = src/external/kiss_icp
+	url = https://github.com/PRBonn/kiss-icp.git
+[submodule "src/external/mtt_motor_driver"]
+	path = src/external/mtt_motor_driver
+	url = git@github.com:norlab-ulaval/mtt_motor_driver.git
