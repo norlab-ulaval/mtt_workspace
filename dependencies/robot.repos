@@ -122,3 +122,9 @@ repositories:
     type: git
     url: git@github.com:norlab-ulaval/service_caller.git
     version: master
+
+  # LiDAR-only SLAM (alternative to norlab_icp_mapper_ros)
+  src/external/kiss_icp:
+    type: git
+    url: https://github.com/PRBonn/kiss-icp.git
+    version: main

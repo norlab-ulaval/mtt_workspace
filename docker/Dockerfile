@@ -100,8 +100,24 @@ RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
         cantools \
         "open3d>=0.13" \
         scipy \
-        opencv-python-headless && \
+        opencv-python-headless \
+        pysoem && \
     chmod -R a+rX /usr/local/lib/python3.12/dist-packages/
+
+# --- Layer 8b: SOEM (Simple Open EtherCAT Master, GPLv2) ---
+# Build from source — no apt package available.
+# CAP_NET_RAW needed at runtime (live_robot service is already privileged).
+# This layer is intentionally in the devel Dockerfile (not base) so rebuilding
+# the devel image after adding mtt_motor_driver is sufficient.
+RUN git clone --depth 1 https://github.com/OpenEtherCATsociety/SOEM.git /tmp/soem && \
+    cmake -S /tmp/soem -B /tmp/soem/build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+        -DCMAKE_INSTALL_PREFIX=/usr/local && \
+    cmake --build /tmp/soem/build --parallel $(nproc) && \
+    cmake --install /tmp/soem/build && \
+    ldconfig && \
+    rm -rf /tmp/soem
 
 # ══════════════════════════════════════════════════════════════════════════════
 # devel stage — workspace source + colcon build
