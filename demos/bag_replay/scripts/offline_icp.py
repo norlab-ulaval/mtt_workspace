@@ -241,12 +241,30 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         help="Abort step replay after this many consecutive cloud/ICP timeouts.",
     )
     parser.add_argument(
+        "--step-cloud-stride",
+        type=int,
+        default=int(os.environ.get("OFFLINE_ICP_CLOUD_STRIDE", "1")),
+        help=(
+            "Step replay only: publish one mapping cloud out of N while still replaying "
+            "support topics. Use 4 for about 5 Hz from a 20 Hz Hesai bag."
+        ),
+    )
+    parser.add_argument(
         "--checkpoint-interval-s",
         type=float,
         default=float(os.environ.get("OFFLINE_ICP_CHECKPOINT_INTERVAL_S", "600.0")),
         help=(
             "Save map_checkpoint_latest.vtk and trajectory_checkpoint_latest.vtk "
             "periodically while the mapper is alive. Set <=0 to disable."
+        ),
+    )
+    parser.add_argument(
+        "--enable-global-output-map",
+        action=argparse.BooleanOptionalAction,
+        default=bool_env("OFFLINE_ICP_ENABLE_GLOBAL_OUTPUT_MAP", True),
+        help=(
+            "Keep an untrimmed global output map for final map.vtk. Disable for fast "
+            "motion-model runs where only /mapping/icp_odom is required."
         ),
     )
     return parser.parse_args()
@@ -948,7 +966,7 @@ def run_pipeline(
                     "-p", "articulation_state_topic:=/unused/articulation_state",
                     "-p", "articulation_state_output_topic:=mtt/articulation_state/runtime",
                     "-p", "use_articulation_state_lidar:=false",
-                    "-p", "imu_yaw_rate_topic:=/unused/imu",
+                    "-p", f"imu_yaw_rate_topic:={args.imu_topic}",
                     "-r", "mtt_odometry:=mtt_odometry/runtime",
                     "-r", "mtt_articulation_angle:=mtt_articulation_angle/runtime",
                 ],
@@ -1010,7 +1028,7 @@ def run_pipeline(
             f"mapping_robot_frame:={mapping_robot_frame}",
             f"mapping_is_online:={mapping_is_online}",
             "mapping_input_qos_reliable:=true",
-            "mapping_enable_global_output_map:=true",
+            f"mapping_enable_global_output_map:={str(args.enable_global_output_map).lower()}",
             "mapping_global_output_map_min_dist_new_point:=0.05",
             "mapping_enable_map_trimming:=true",
             "mapping_map_trim_interval_scans:=10",
@@ -1100,6 +1118,8 @@ def run_pipeline(
                 str(args.step_icp_timeout_s),
                 "--max-consecutive-timeouts",
                 str(args.step_max_consecutive_timeouts),
+                "--cloud-stride",
+                str(max(1, args.step_cloud_stride)),
                 "--mapper-log",
                 str(log_dir / f"mapping_{pipeline.mode}.log"),
             ]
@@ -1123,7 +1143,7 @@ def run_pipeline(
             bag_proc = start_process(
                 [
                     "ros2", "bag", "play",
-                    "--input", str(bag_dir), "mcap",
+                    "--storage", "mcap", str(bag_dir),
                     "--clock",
                     "--rate", str(replay_rate),
                     "--disable-keyboard-controls",
