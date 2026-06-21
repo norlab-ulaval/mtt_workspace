@@ -266,6 +266,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--accept-any-new-icp", action="store_true")
     parser.add_argument("--progress-interval", type=int, default=25)
     parser.add_argument(
+        "--cloud-stride",
+        type=int,
+        default=1,
+        help=(
+            "Publish only one mapping cloud out of N. Support topics are still replayed. "
+            "Use 4 for about 5 Hz from a 20 Hz Hesai bag."
+        ),
+    )
+    parser.add_argument(
         "--mapper-log",
         default="",
         help=(
@@ -328,12 +337,15 @@ def main() -> int:
     node = StepReplayNode(args, {topic: topic_types[topic] for topic in topics})
     print(
         f"step replay: bag={bag_dir} points={args.points_topic} topics={len(topics)} "
-        f"timeout={args.icp_timeout_s}s",
+        f"timeout={args.icp_timeout_s}s cloud_stride={max(1, args.cloud_stride)}",
         flush=True,
     )
 
     clouds = 0
+    source_clouds = 0
     skipped_clouds = 0
+    stride_skipped_clouds = 0
+    cloud_stride = max(1, args.cloud_stride)
     support_messages = 0
     bad_support_messages = 0
     bad_clouds = 0
@@ -387,6 +399,17 @@ def main() -> int:
                     )
                 continue
             cloud_stamp_s = msg_stamp_or_bag_time(cloud_msg, bag_time_s)
+            source_clouds += 1
+            if cloud_stride > 1 and (source_clouds - 1) % cloud_stride != 0:
+                stride_skipped_clouds += 1
+                if stride_skipped_clouds == 1 or stride_skipped_clouds % args.progress_interval == 0:
+                    print(
+                        f"step replay stride skip: source_clouds={source_clouds} "
+                        f"published_clouds={clouds} stride_skipped={stride_skipped_clouds} "
+                        f"cloud_stamp={cloud_stamp_s:.9f} stride={cloud_stride}",
+                        flush=True,
+                    )
+                continue
             support_deadline_s = cloud_stamp_s + max(0.0, args.support_lookahead_s)
 
             while reader.has_next():
@@ -461,7 +484,8 @@ def main() -> int:
                 elapsed = max(time.monotonic() - start, 1e-6)
                 print(
                     f"step replay progress: clouds={clouds} support={support_messages} "
-                    f"skipped={skipped_clouds} bad_clouds={bad_clouds} "
+                    f"source_clouds={source_clouds} skipped={skipped_clouds} "
+                    f"stride_skipped={stride_skipped_clouds} bad_clouds={bad_clouds} "
                     f"bad_support={bad_support_messages} icp={node.icp_count} timeouts={timeouts} "
                     f"mapper_callbacks={mapper_log.callbacks} "
                     f"last_cloud={last_cloud_stamp:.9f} wall={elapsed:.1f}s "
@@ -481,7 +505,8 @@ def main() -> int:
     elapsed = max(time.monotonic() - start, 1e-6)
     print(
         f"step replay done: clouds={clouds} support={support_messages} "
-        f"skipped={skipped_clouds} bad_clouds={bad_clouds} "
+        f"source_clouds={source_clouds} skipped={skipped_clouds} "
+        f"stride_skipped={stride_skipped_clouds} bad_clouds={bad_clouds} "
         f"bad_support={bad_support_messages} icp={node.icp_count} "
         f"timeouts={timeouts} mapper_callbacks={mapper_log.callbacks} "
         f"wall={elapsed:.1f}s "
