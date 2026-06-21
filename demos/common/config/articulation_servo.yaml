@@ -25,3 +25,4 @@ mtt_articulation_servo_node:
 
     # ── Safety ───────────────────────────────────────────────────────────
     feedback_timeout_s: 0.30
+    command_timeout_s: 0.25

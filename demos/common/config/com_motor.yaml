@@ -1,0 +1,74 @@
+################################################################################
+# COM motor calibration — soft position limits, home position, and persistence.
+#
+# Applied to BOTH nodes in the com_motor stack:
+#   motor_driver_node   — EtherCAT 1 kHz loop, enforces position_limit_min/max
+#   com_position_node   — spring-return controller, home + calibration file
+#
+# Workflow after changing these values:
+#   1. Save this file (no recompile needed — it's a YAML override).
+#   2. Restart the com_motor container:
+#        docker compose -f demos/live_robot/compose.yaml --profile com restart com_motor
+################################################################################
+
+# ── Low-level driver (motor_driver_node) ─────────────────────────────────────
+motor_driver_node:
+  ros__parameters:
+    # Soft travel limits in encoder counts (absolute values).
+    # The commanded position is clamped to [min, max] BEFORE being sent to the
+    # drive — hardware safety net independent of the controller above.
+    # A "clamped to limit" log message appears whenever a command is rejected.
+    #
+    # How to calibrate:
+    #   1. Run in SETUP mode (no limits active yet — find the mechanical extremes).
+    #   2. Jog to each extreme; note the count from /motor/joint_state.position[0].
+    #   3. Set below with a safety margin (e.g. ±500 counts from the true extreme).
+    position_limit_min: -2000
+    position_limit_max:  2000
+    startup_relative_limit_counts: 2000
+    allow_uncalibrated_limits: false
+
+# ── High-level controller (com_position_node) ────────────────────────────────
+com_position_node:
+  ros__parameters:
+    # ── Home (centre) position ───────────────────────────────────────────────
+    # Pre-calibrated home in encoder counts.
+    # When set, COM mode skips SETUP and enters RUN immediately.
+    # If unset (commented out), the node first tries the calibration file
+    # (see below), then falls back to manual SETUP mode.
+    #
+    # How to calibrate:
+    #   1. Comment this line out → node enters SETUP (jog-velocity mode).
+    #   2. Jog to the desired centre position using the joystick.
+    #   3. Send com_set_home (e.g. via Foxglove button or ros2 topic pub).
+    #      The node transitions to RUN and saves the calibration file.
+    #   4. Note the count from /motor/joint_state.position[0] and set below.
+    # home_position_counts: 0.0      # FILL IN after calibration
+
+    # ── Spring parameters ────────────────────────────────────────────────────
+    # Half-range of the spring in RUN mode (counts).
+    # Stick at ±1 → home ± amplitude_counts.
+    amplitude_counts: 200.0
+
+    # Max jog speed in SETUP mode (counts/second).
+    setup_slew: 200.0
+
+    # Max slew rate in RUN mode (counts/second).
+    run_slew: 500.0
+
+    # Slide-in speed when deadman is re-armed in RUN mode (counts/second).
+    # Also used as park speed (autonomous return to home).
+    rearm_slew: 200.0
+
+    # ── Calibration persistence ──────────────────────────────────────────────
+    # File where home is saved after SET_HOME or PARK completion.
+    # Must be on a host-mounted path to survive container restarts.
+    # /data is mounted from the robot host (see docker/common.yaml).
+    calibration_file: "/data/mtt/com_calibration.yaml"
+
+    # Encoder drift threshold for auto-restore (counts).
+    # If |actual_position - saved_position| < threshold at startup →
+    #   motor session is continuous → home auto-restored, SETUP skipped.
+    # If >= threshold → motor was power-cycled → SETUP required.
+    # 1000 counts ≈ a few motor steps, well below any intentional motion.
+    home_consistency_threshold: 1000.0

@@ -24,13 +24,22 @@ mtt_operator_input_node:
     invert_linear_axis: false
     invert_angular_axis: false
     enable_brake_axis: true
-    brake_axis_default: 1.0
-    articulation_hold_mode_default: true
-    articulation_hold_enabled: true
-    articulation_hold_max_speed_ms: 1.75
-    articulation_hold_release_deadband: 0.08
+    # Calibrated fail-safe brake mapping.  With default_trig_val=1.0 in joy_linux,
+    # the RT axis reads 1.0 (released) at boot → brake_value=0 until actually pressed.
+    brake_axis_released: 1.0
+    brake_axis_pressed: -1.0
+    brake_full_fraction: 0.6
+    joy_timeout_s: 0.25
+    articulation_hold_mode_default: false
+    articulation_hold_enabled: false
     parking_brake_dither_amplitude: 0.30
     articulation_hold_reset_on_deadman_release: true
+    # ---- COM motor mode toggle (bouton 7 par défaut) ----
+    # Appui bouton 7 : stick droit → pilote moteur COM (position ressort).
+    # Ré-appui        : stick droit → articulation (comportement nominal).
+    enable_com_mode_switch: true
+    com_toggle_button_index: 7
+    invert_com_steer: false
 
 mtt_manual_cmd_filter_node:
   ros__parameters:
@@ -42,6 +51,7 @@ mtt_manual_cmd_filter_node:
     linear_fall_rate: 3.5
     angular_rise_rate: 2.0
     angular_fall_rate: 3.0
+    immediate_angular_zero: true
     # Feedforward decel: when stick released, briefly command
     # -gain * current_output to create motor counter-thrust.
     # No tachometer needed. 0.35 → ~35% reverse throttle at max speed.

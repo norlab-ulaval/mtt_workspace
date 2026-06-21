@@ -95,8 +95,17 @@ mtt_odometry_node:
     imu_yaw_rate_topic: /mti100/data
     imu_yaw_rate_timeout_seconds: 0.2
     imu_yaw_rate_sign: -1.0
+    # /mti100/data is already bias-compensated upstream (bias_observer →
+    # bias_compensator chain in mti100.launch.py), so the default here is 0.0.
+    # Measured 2026-06-11 on mtt_calibration_test_garage_2026-06-02_09-01-53:
+    # gyro z mean = -0.00006 rad/s, Madgwick yaw drift 0.21°/min.
+    # The previous empirical 0.0195 only applied to a bag recorded without
+    # active compensation — on compensated bags it INJECTS a -1.1°/s drift.
+    # For replay of uncompensated bags, override REPLAY_ODOM_IMU_BIAS instead
+    # (measure with scripts/analyze_imu_bias.py).
     imu_yaw_rate_bias_rad_s: 0.0
     imu_complementary_alpha: 0.7
+    use_imu_heading: true
 
 mtt_joint_state_builder_node:
   ros__parameters:
