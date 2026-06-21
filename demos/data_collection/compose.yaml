@@ -218,12 +218,17 @@ services:
           mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
           mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
           mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
+          mapping_max_pose_yaw_step_deg:=$${MAPPING_MAX_POSE_YAW_STEP_DEG:-30.0} \
           mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
           mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
           mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
           deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03} \
           deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5} \
           deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03} \
+          mapping_enable_map_trimming:=$${MAPPING_ENABLE_MAP_TRIMMING:-false} \
+          mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M:-40.0} \
+          mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000} \
+          mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M:-40.0} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
