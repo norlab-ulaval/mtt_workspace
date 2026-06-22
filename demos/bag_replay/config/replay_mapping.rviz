@@ -1,0 +1,171 @@
+Panels:
+  - Class: rviz_common/Displays
+    Name: Displays
+  - Class: rviz_common/Selection
+    Name: Selection
+  - Class: rviz_common/Tool Properties
+    Name: Tool Properties
+  - Class: rviz_common/Views
+    Name: Views
+  - Class: rviz_common/Time
+    Name: Time
+    SyncMode: 0
+    SyncSource: ""
+Visualization Manager:
+  Class: ""
+  Displays:
+    - Alpha: 0.5
+      Cell Size: 1
+      Class: rviz_default_plugins/Grid
+      Color: 160; 160; 164
+      Enabled: true
+      Name: Grid
+      Reference Frame: <Fixed Frame>
+    - Class: rviz_default_plugins/RobotModel
+      Enabled: true
+      Name: RobotModel
+      Description Source: Topic
+      Description Topic:
+        Value: /robot_description
+    - Class: rviz_default_plugins/TF
+      Enabled: true
+      Name: TF
+      Show Names: true
+      Show Axes: true
+      Update Interval: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Hesai LiDAR
+      Enabled: true
+      Topic:
+        Value: /hesai_lidar/points
+        Reliability Policy: Best Effort
+      Color Transformer: Intensity
+      Size (m): 0.03
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: RS-Airy
+      Enabled: true
+      Topic:
+        Value: /rsairy_ns/points
+        Reliability Policy: Best Effort
+      Color Transformer: FlatColor
+      Color: 0; 200; 255
+      Size (m): 0.03
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Map (ICP)
+      Enabled: true
+      Topic:
+        Value: /mapping/map
+        Reliability Policy: Reliable
+        Durability Policy: Transient Local
+      Color Transformer: FlatColor
+      Color: 255; 255; 255
+      Size (m): 0.05
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Aligned Scan
+      Enabled: true
+      Topic:
+        Value: /mapping/aligned_scan
+        Reliability Policy: Best Effort
+      Color Transformer: FlatColor
+      Color: 0; 255; 0
+      Size (m): 0.02
+      Decay Time: 0
+    - Class: rviz_default_plugins/PointCloud2
+      Name: Scan After Filters
+      Enabled: true
+      Topic:
+        Value: /mapping/scan_after_input_filters
+        Reliability Policy: Best Effort
+      Color Transformer: FlatColor
+      Color: 255; 0; 0
+      Size (m): 0.02
+      Decay Time: 0
+    - Class: rviz_default_plugins/Path
+      Name: Trajectory Path
+      Enabled: true
+      Topic:
+        Value: /mapping/trajectory_path
+        Reliability Policy: Reliable
+      Color: 0; 255; 0
+      Line Width: 0.1
+    - Class: rviz_default_plugins/Odometry
+      Name: ICP Odometry
+      Enabled: true
+      Topic:
+        Value: /mapping/icp_odom
+        Reliability Policy: Reliable
+      Color: 255; 0; 0
+      Shape: Arrow
+      Length: 1.0
+    - Class: rviz_default_plugins/Odometry
+      Name: Runtime Odom
+      Enabled: true
+      Topic:
+        Value: /mtt_odometry/runtime
+        Reliability Policy: Reliable
+      Color: 0; 255; 255
+      Shape: Arrow
+      Length: 1.0
+    - Class: rviz_default_plugins/Odometry
+      Name: Recorded Odom
+      Enabled: true
+      Topic:
+        Value: /mtt_odometry
+        Reliability Policy: Reliable
+      Color: 255; 255; 0
+      Shape: Arrow
+      Length: 1.0
+    - Class: rviz_imu_plugin/Imu
+      Name: IMU
+      Enabled: true
+      Topic:
+        Value: /mti100/data
+        Reliability Policy: Best Effort
+      Scale: 0.5
+    - Class: rviz_default_plugins/PoseWithCovariance
+      Name: Mapping Pose In
+      Enabled: true
+      Topic:
+        Value: /mapping/pose_in
+        Reliability Policy: Reliable
+      Color: 255; 0; 255
+  Enabled: true
+  Global Options:
+    Background Color: 48; 48; 48
+    Fixed Frame: odom
+    Frame Rate: 30
+  Name: root
+  Tools:
+    - Class: rviz_default_plugins/Interact
+    - Class: rviz_default_plugins/MoveCamera
+    - Class: rviz_default_plugins/Select
+    - Class: rviz_default_plugins/FocusCamera
+    - Class: rviz_default_plugins/Measure
+    - Class: rviz_default_plugins/SetInitialPose
+      Topic:
+        Value: /initialpose
+    - Class: rviz_default_plugins/SetGoal
+      Topic:
+        Value: /goal_pose
+    - Class: rviz_default_plugins/PublishPoint
+      Topic:
+        Value: /clicked_point
+  Transformation:
+    Current:
+      Class: rviz_default_plugins/TF
+  Value: true
+  Views:
+    Current:
+      Class: rviz_default_plugins/Orbit
+      Distance: 20
+      Pitch: 0.5
+      Target Frame: <Fixed Frame>
+      Value: Orbit (rviz)
+      Yaw: 0
+    Saved: ~
+Window Geometry:
+  Height: 1080
+  Width: 1920

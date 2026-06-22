@@ -1,0 +1,24 @@
+kiss_icp_node:
+  ros__parameters:
+    publish_debug_clouds: true
+
+    data:
+      deskew: true
+      # Grande valeur pour garder tous les points de la carte
+      # (RemovePointsFarFromLocation ne supprime rien)
+      max_range: 100.0
+      min_range: 0.0
+
+    mapping:
+      # Force voxel_size explicit (sinon = max_range/100 = 100m = catastrophique)
+      voxel_size: 1.0
+      max_points_per_voxel: 20
+
+    adaptive_threshold:
+      initial_threshold: 2.0
+      min_motion_th: 0.1
+
+    registration:
+      max_num_iterations: 500
+      convergence_criterion: 0.0001
+      max_num_threads: 0
