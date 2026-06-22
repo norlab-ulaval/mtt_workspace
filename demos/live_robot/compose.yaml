@@ -206,12 +206,17 @@ services:
           mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
           mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
           mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
+          mapping_max_pose_yaw_step_deg:=$${MAPPING_MAX_POSE_YAW_STEP_DEG:-30.0} \
           mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
           mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
           mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
           deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03} \
           deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5} \
           deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03} \
+          mapping_enable_map_trimming:=$${MAPPING_ENABLE_MAP_TRIMMING:-false} \
+          mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M:-40.0} \
+          mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000} \
+          mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M:-40.0} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
@@ -296,6 +301,35 @@ services:
           --ros-args \
           --params-file "$${params_file}" \
           "$${address_args[@]}"
+
+  # ── COM motor (EtherCAT stepper, optional) ───────────────────────────────
+  # Launches mtt_motor_driver (SOEM 1kHz RT) + mtt_motor_control (position).
+  # Requires the CL86EC drive powered and the EtherCAT cable connected.
+  # Start with: docker compose up --profile com
+  #   or:       ENABLE_COM_MOTOR=true docker compose --profile com up
+  #
+  # COM_MOTOR_DRY_RUN=true  → test chain without hardware (echoes cmd→state)
+  # COM_ETHERCAT_IFACE=enp3s0 → override auto-detected NIC
+  com_motor:
+    <<: [*live_robot_base]
+    profiles: ["com"]
+    user: root
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "=== com_motor: CL86EC EtherCAT stepper driver + COM position controller ==="
+        echo "  dry_run=$${COM_MOTOR_DRY_RUN:-false}  iface=$${COM_ETHERCAT_IFACE:-auto}"
+        IFACE_ARG=""
+        [ -n "$${COM_ETHERCAT_IFACE:-}" ] && IFACE_ARG="ethercat_ifname:=$${COM_ETHERCAT_IFACE}"
+        exec ros2 launch mtt_motor_control com_motor.launch.py \
+          dry_run:=$${COM_MOTOR_DRY_RUN:-false} \
+          $$IFACE_ARG \
+          auto_enable:=$${COM_MOTOR_AUTO_ENABLE:-true} \
+          com_params:=$${COM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/com_motor.yaml}
 
   # ── Remote-safe LiDAR debug cloud ─────────────────────────────────────────
   # Publishes a small ROI/voxelized cloud for Foxglove field use. Mapping and
