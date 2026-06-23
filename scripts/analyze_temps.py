@@ -29,7 +29,6 @@ THRESH_WARN  = 50    # °C — temp_B commence à monter
 THRESH_BAD   = 80    # °C — danger
 THRESH_CRIT  = 100   # °C — seuil de dommage
 
-# ─────────────────────────────────────────────────────────────────────────────
 
 def color_temp(t: float) -> str:
     s = f"{t:+.0f}°C"
@@ -205,7 +204,6 @@ def try_plot(all_sessions: list):
         print(f"  {DIM}(matplotlib non disponible — install avec: pip3 install matplotlib){RESET}")
 
 
-# ─────────────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="MTT temperature forensics")

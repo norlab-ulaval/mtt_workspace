@@ -1016,7 +1016,7 @@ def main() -> int:
                             else:
                                 print("  warning: no offline ICP source found, using live bag icp_odom", file=sys.stderr)
                 rows = build_rows(samples)
-            # ── Auto-correct speed sign convention ────────────────────────────
+            # ── Auto-correct speed sign convention ──
             # mtt_operator_input_node uses invert_linear_axis=true by default,
             # which makes cmd_vel.linear.x (and model_speed_ms in cmd-sim mode)
             # negative for physical forward motion.  Detect by comparing the

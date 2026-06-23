@@ -700,7 +700,7 @@ def refine_lidar_lidar_icp(
     Returns (T_refined 4×4, last RegistrationResult).
     Quality gates raise RuntimeError if the result is implausible.
     """
-    # ── Automatic overlap AABB ──────────────────────────────────────────────
+    # ── Automatic overlap AABB ──
     aabb = _overlap_aabb(source_pts, target_pts, T_init)
     if aabb is None:
         print("[WARN] No geometric overlap detected — skipping AABB crop.")
@@ -753,7 +753,7 @@ def refine_lidar_lidar_icp(
             f"Δt={dt_m*100:.1f}cm  Δr={dr_deg:.2f}°"
         )
 
-        # ── Per-scale drift guard ─────────────────────────────────────────────
+        # ── Per-scale drift guard ──
         # Discard any scale that moves the solution far from T_init —
         # signals a spurious local minimum from false cross-FoV correspondences.
         if dt_m > _MAX_SCALE_DRIFT_M or dr_deg > _MAX_SCALE_DRIFT_DEG:
@@ -773,7 +773,7 @@ def refine_lidar_lidar_icp(
         )
         return T_init.copy(), None
 
-    # ── Quality gates ───────────────────────────────────────────────────────
+    # ── Quality gates ──
     dt_m, dr_deg, xi_delta = delta_se3(T_init, T)
     failures = []
     if last_reg is not None:
@@ -806,7 +806,7 @@ def refine_lidar_lidar_icp(
     else:
         print("\n[ICP] ✓ All quality gates passed.\n")
 
-    # ── PLY overlays for visual inspection ────────────────────────────────
+    # ── PLY overlays for visual inspection ──
     if save_dir:
         save_dir = Path(save_dir)
         save_dir.mkdir(parents=True, exist_ok=True)
@@ -1005,7 +1005,7 @@ def save_results(
         yaml.safe_dump(data, f, sort_keys=False)
     print(f"[SAVE] YAML         → {out_path}")
 
-    # ── static_transform_publisher command ──────────────────────────────────
+    # ── static_transform_publisher command ──
     c = c_refined
     xyz, q = c["xyz"], c["quat_xyzw"]
     tf_cmd = (
@@ -1020,7 +1020,7 @@ def save_results(
         f.write(tf_cmd + "\n")
     print(f"[SAVE] static_tf.sh → {sh_path}")
 
-    # ── URDF joint snippet ──────────────────────────────────────────────────
+    # ── URDF joint snippet ──
     snippet = urdf_joint_snippet(parent_frame, child_frame, T_refined, joint_name)
     urdf_path = out_path.with_suffix(".urdf_joint.xml")
     with open(urdf_path, "w") as f:
@@ -1028,7 +1028,7 @@ def save_results(
         f.write(snippet + "\n")
     print(f"[SAVE] URDF snippet → {urdf_path}")
 
-    # ── Human-readable summary ───────────────────────────────────────────────
+    # ── Human-readable summary ──
     rpy = c_refined["rpy"]
     print("\n" + "═" * 62)
     print("  CALIBRATION RESULT")
@@ -1174,7 +1174,7 @@ def mode_camera_lidar(args):
         joint_name=args.joint_name,
     )
 
-    # ── Back-project to URDF joint (optional) ──────────────────────────────
+    # ── Back-project to URDF joint (optional) ──
     # Calibration gives T_refined = T_camera_lidar (maps lidar_frame → camera_frame).
     # The URDF joint `oak_mount_joint` expresses T_urdf_parent_urdf_child,
     # e.g. T_rsairy_oak.  The internal camera transform (oak → camera_frame)

@@ -83,7 +83,7 @@ services:
         fi
         exec ros2 run rmw_zenoh_cpp rmw_zenohd
 
-  # ── Robot driver (CAN + odometry + operator control) ─────────────────────
+  # ── Robot driver (CAN + odometry + operator control) ──
   # Launches description (URDF/TF) + CAN setup + driver + joystick/teleop.
   # Sensors and mapping are separate restartable services below.
   # Restart individually:
@@ -126,7 +126,7 @@ services:
           joy_device:=$${JOYSTICK_DEVICE} \
           joy_deadzone:=$${JOYSTICK_DEADZONE}
 
-  # ── Sensors (LiDAR + IMU + optional GPS/OAK) ─────────────────────────────
+  # ── Sensors (LiDAR + IMU + optional GPS/OAK) ──
   # Launches Hesai XT-32 + RS-Airy + MTi-100 and optional peripherals.
   # Standalone sensors.launch.py — does NOT touch CAN or description.
   # Restart without killing the driver:  docker compose restart sensors
@@ -156,7 +156,7 @@ services:
           gps_mode:=$${GPS_MODE} \
           gps_antennas:=$${GPS_ANTENNAS}
 
-  # ── ICP Mapping ───────────────────────────────────────────────────────────
+  # ── ICP Mapping ──
   # Norlab ICP mapper — restartable independently of sensors and driver.
   # Waits for LiDAR and odometry to be live before launching.
   # Restart without killing sensors:  docker compose restart mapping
@@ -223,7 +223,7 @@ services:
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME:-odom} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME:-base_footprint}
 
-  # ── Perception (trailer detector + cloud merger) ──────────────────────────
+  # ── Perception (trailer detector + cloud merger) ──
   # Launches trailer_detector_node + trailer_pose_node.
   # cloud_merger_node is included only if ENABLE_CLOUD_MERGER=true (default: false).
   # Optional — start with:  docker compose up --profile perception
@@ -245,7 +245,7 @@ services:
           use_sim_time:=false \
           enable_cloud_merger:=$${ENABLE_CLOUD_MERGER:-false}
 
-  # ── ZED object detections → Foxglove markers ─────────────────────────────
+  # ── ZED object detections → Foxglove markers ──
   # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray.
   # Start with:  docker compose run --rm zed_markers
   zed_markers:
@@ -260,7 +260,7 @@ services:
       - ${WORKSPACE}/scripts/zed_objects_to_markers.py
       - --only-person
 
-  # ── ZED pose path visualizer ──────────────────────────────────────────────
+  # ── ZED pose path visualizer ──
   # Publishes ZED odometry as a nav_msgs/Path for Foxglove trail visualization.
   # Start with:  docker compose run --rm zed_pose_viz
   zed_pose_viz:
@@ -302,7 +302,7 @@ services:
           --params-file "$${params_file}" \
           "$${address_args[@]}"
 
-  # ── COM motor (EtherCAT stepper, optional) ───────────────────────────────
+  # ── COM motor (EtherCAT stepper, optional) ──
   # Launches mtt_motor_driver (SOEM 1kHz RT) + mtt_motor_control (position).
   # Requires the CL86EC drive powered and the EtherCAT cable connected.
   # Start with: docker compose up --profile com
@@ -331,7 +331,7 @@ services:
           auto_enable:=$${COM_MOTOR_AUTO_ENABLE:-true} \
           com_params:=$${COM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/com_motor.yaml}
 
-  # ── Remote-safe LiDAR debug cloud ─────────────────────────────────────────
+  # ── Remote-safe LiDAR debug cloud ──
   # Publishes a small ROI/voxelized cloud for Foxglove field use. Mapping and
   # WILN still consume the raw Hesai cloud locally.
   lidar_debug_cloud:
@@ -372,7 +372,7 @@ services:
       - |
         ${WORKSPACE}/scripts/field_doodle_check.sh
 
-  # ── LiDAR-Camera colorizer ────────────────────────────────────────────────
+  # ── LiDAR-Camera colorizer ──
   # Projects ZED2i RGB onto the Hesai PointCloud2 and publishes
   # /hesai_lidar/points_colored (keeps intensity + adds rgb field).
   # Usage: dc up --profile colorizer
@@ -751,7 +751,7 @@ services:
       - mtt_interfaces/srv/RouteStatus
       - "{}"
 
-  # ── Live diagnostic tools ─────────────────────────────────────────────────
+  # ── Live diagnostic tools ──
   audit_topics:
     <<: [*live_robot_base]
     profiles: ["wiln-ctrl"]

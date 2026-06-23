@@ -12,17 +12,17 @@ mtt_articulation_servo_node:
     position_cmd_topic: "/mtt_articulation_setpoint"
     velocity_cmd_topic: "/mtt_articulation_velocity_cmd"
 
-    # ── PD gains ─────────────────────────────────────────────────────────
+    # ── PD gains ──
     kp: 2.0             # normalized_steer / rad
     kd: 0.05            # normalized_steer·s / rad
     ki: 0.0             # disabled
     integrator_limit: 0.30
 
-    # ── Limits ───────────────────────────────────────────────────────────
+    # ── Limits ──
     max_steer: 1.0
     max_articulation_rad: 1.047   # ±60°
     max_velocity_rad_s: 0.50      # velocity mode rate limit (~29°/s)
 
-    # ── Safety ───────────────────────────────────────────────────────────
+    # ── Safety ──
     feedback_timeout_s: 0.30
     command_timeout_s: 0.25

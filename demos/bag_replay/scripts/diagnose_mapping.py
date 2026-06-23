@@ -38,7 +38,7 @@ from geometry_msgs.msg import TransformStamped
 import numpy as np
 
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
+# ─── helpers ──
 
 def quat_to_yaw(q) -> float:
     """Extract yaw (Z rotation) from a quaternion."""
@@ -61,7 +61,7 @@ def now_sec() -> float:
     return time.monotonic()
 
 
-# ─── dataclasses ──────────────────────────────────────────────────────────────
+# ─── dataclasses ──
 
 @dataclass
 class ScanRecord:
@@ -94,7 +94,7 @@ class TfRecord:
     yaw: float              # correction yaw (map←odom)
 
 
-# ─── node ─────────────────────────────────────────────────────────────────────
+# ─── node ──
 
 class MappingDiagNode(Node):
     def __init__(self, jump_thresh: float, out_path: Optional[str]):
@@ -136,7 +136,7 @@ class MappingDiagNode(Node):
         # Summary timer every 10s
         self.create_timer(10.0, self._print_summary)
 
-    # ── callbacks ─────────────────────────────────────────────────────────────
+    # ── callbacks ──
 
     def _odom_cb(self, msg: Odometry):
         wall = now_sec()
@@ -276,7 +276,7 @@ class MappingDiagNode(Node):
                         self._tfs = self._tfs[-500:]
                 break
 
-    # ── helpers ───────────────────────────────────────────────────────────────
+    # ── helpers ──
 
     def _print_header(self):
         print("=" * 80)
@@ -345,7 +345,7 @@ class MappingDiagNode(Node):
         except Exception as e:
             print(f"[DIAG] CSV write failed: {e}")
 
-    # ── shutdown ──────────────────────────────────────────────────────────────
+    # ── shutdown ──
 
     def shutdown_report(self):
         """Call on Ctrl+C to print final report."""
@@ -387,7 +387,7 @@ def _wrap_pi(a: float) -> float:
     return a
 
 
-# ─── main ─────────────────────────────────────────────────────────────────────
+# ─── main ──
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__,

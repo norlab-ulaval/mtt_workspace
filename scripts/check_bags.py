@@ -30,7 +30,7 @@ BOLD  = "\033[1m"; RED   = "\033[91m"; YELLOW = "\033[93m"
 GREEN = "\033[92m"; CYAN  = "\033[96m"; DIM   = "\033[2m"
 ORANGE = "\033[38;5;208m"; RESET = "\033[0m"
 
-# ── Topics surveillés ────────────────────────────────────────────────────────
+# ── Topics surveillés ──
 # Format: { group_label: [(topic, is_primary)] }
 # is_primary=True → topic DOIT avoir des msgs pour que le groupe soit OK
 WATCH = {
@@ -80,7 +80,7 @@ WATCH = {
     ],
 }
 
-# ── Causes racines connues ────────────────────────────────────────────────────
+# ── Causes racines connues ──
 KNOWN_CAUSES = {
     "/zed/zed_node/rgb/color/rect/image/compressed":
         "QoS mismatch: ZED SDK force BEST_EFFORT, recorder attend RELIABLE\n"

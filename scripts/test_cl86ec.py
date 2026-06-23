@@ -56,7 +56,7 @@ def run_cycles(slave, master, cw, n, pos=0, vel=0):
         time.sleep(0.001)
     return ec, sw, p
 
-# ── Connect ──────────────────────────────────────────────────────────────────
+# ── Connect ──
 print(f"\n=== CL86EC Direct Test ===")
 print(f"Opening {IFACE}...")
 master = pysoem.Master()
@@ -90,7 +90,7 @@ master.write_state()
 st = master.state_check(pysoem.OP_STATE, 5_000_000)
 print(f"OP:      {'OK' if st == pysoem.OP_STATE else 'TIMEOUT (continuing anyway)'}")
 
-# ── Initial status ────────────────────────────────────────────────────────────
+# ── Initial status ──
 ec, sw, pos = run_cycles(s, master, 0, 20)
 print(f"\n--- Initial state ---")
 print(f"  EC=0x{ec:04X}  SW=0x{sw:04X}  state='{state_name(sw)}'  pos={pos}")
@@ -100,7 +100,7 @@ if ec != 0:
     print(f"     0x6010 = EtherCAT watchdog → communication issue")
     print(f"     0x3120 = Under voltage")
 
-# ── Fault reset ───────────────────────────────────────────────────────────────
+# ── Fault reset ──
 print(f"\n--- Fault reset ---")
 run_cycles(s, master, 0x0000, 100)
 run_cycles(s, master, CW_FAULT_RESET, 300)
@@ -141,7 +141,7 @@ print(f"  After CW_ENABLED: SW=0x{sw:04X} '{state_name(sw)}'  EC=0x{ec:04X}")
 enabled = bool(sw & 0x0004)  # SW_OPERATION_ENABLED
 print(f"  ENABLED: {'✓ YES' if enabled else '✗ NO'}")
 
-# ── Move test ────────────────────────────────────────────────────────────────
+# ── Move test ──
 if enabled:
     target = seed + 5000
     print(f"\n--- Move test: {seed} → {target} (+5000 counts) ---")
@@ -163,7 +163,7 @@ else:
     print("   3. Power ON drive and wait for LED to stop flashing")
     print("   4. Run this script again")
 
-# ── Cleanup ───────────────────────────────────────────────────────────────────
+# ── Cleanup ──
 print("\n--- Cleanup ---")
 run_cycles(s, master, 0, 100)
 master.state = pysoem.INIT_STATE

@@ -11,7 +11,7 @@ x-build: &mtt_devel_build
     USER_GID: ${GID:-1000}
     BASE_IMAGE: mtt_workspace:base
 
-# ─── Base for all data-collection services ───────────────────────────────────
+# ─── Base for all data-collection services ──
 x-dc-base: &dc_base
   extends:
     file: ../../docker/common.yaml
@@ -68,7 +68,7 @@ x-dc-base: &dc_base
 
 services:
 
-  # ── Zenoh router ──────────────────────────────────────────────────────────
+  # ── Zenoh router ──
   # No profile → starts automatically with dc up.
   # The robot service depends on it so the router is always up before ROS nodes
   # attempt to register. The fuser kill ensures no stale router from a previous
@@ -94,7 +94,7 @@ services:
         fi
         exec ros2 run rmw_zenoh_cpp rmw_zenohd
 
-  # ── Robot driver (CAN + odometry + operator control) ─────────────────────
+  # ── Robot driver (CAN + odometry + operator control) ──
   # Launches description (URDF/TF) + CAN setup + driver + joystick/teleop.
   # Sensors and mapping are separate restartable services below.
   # Restart individually:
@@ -138,7 +138,7 @@ services:
           joy_device:=$${JOYSTICK_DEVICE} \
           joy_deadzone:=$${JOYSTICK_DEADZONE}
 
-  # ── Sensors (LiDAR + IMU + optional GPS/OAK) ─────────────────────────────
+  # ── Sensors (LiDAR + IMU + optional GPS/OAK) ──
   # Launches Hesai XT-32 + RS-Airy + MTi-100 and optional peripherals.
   # Standalone sensors.launch.py — does NOT touch CAN or description.
   # Restart without killing the driver:  docker compose restart sensors
@@ -168,7 +168,7 @@ services:
           gps_mode:=$${GPS_MODE} \
           gps_antennas:=$${GPS_ANTENNAS}
 
-  # ── ICP Mapping ───────────────────────────────────────────────────────────
+  # ── ICP Mapping ──
   # Norlab ICP mapper — restartable independently of sensors and driver.
   # Waits for LiDAR and odometry to be live before launching.
   # Restart without killing sensors:  docker compose restart mapping
@@ -235,7 +235,7 @@ services:
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME:-odom} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME:-base_footprint}
 
-  # ── Perception (trailer detector + cloud merger) ──────────────────────────
+  # ── Perception (trailer detector + cloud merger) ──
   # Launches trailer_detector_node + trailer_pose_node.
   # cloud_merger_node is included only if ENABLE_CLOUD_MERGER=true (default: false).
   # Optional — start with:  docker compose up --profile perception
@@ -257,7 +257,7 @@ services:
           use_sim_time:=false \
           enable_cloud_merger:=$${ENABLE_CLOUD_MERGER:-false}
 
-  # ── ZED object detections → Foxglove markers ─────────────────────────────
+  # ── ZED object detections → Foxglove markers ──
   # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray.
   # Requires ZED2i running (started by sensors service).
   # Start with:  docker compose run --rm zed_markers
@@ -273,7 +273,7 @@ services:
       - ${WORKSPACE}/scripts/zed_objects_to_markers.py
       - --only-person
 
-  # ── ZED pose path visualizer ──────────────────────────────────────────────
+  # ── ZED pose path visualizer ──
   # Publishes ZED odometry as a nav_msgs/Path for Foxglove trail visualization.
   # Requires ZED2i running (started by sensors service).
   # Start with:  docker compose run --rm zed_pose_viz
@@ -288,7 +288,7 @@ services:
       - -u
       - ${WORKSPACE}/scripts/zed_pose_visualizer.py
 
-  # ── Localization: Factor Graph + Trailer Localizer ───────────────────────
+  # ── Localization: Factor Graph + Trailer Localizer ──
   # Runs mtt_localization/localization.launch.py (live, no sim time).
   # Launches two nodes:
   #   - factor_graph_node: ISAM2 tractor pose + optimised φ
@@ -334,7 +334,7 @@ services:
         exec ros2 launch mtt_localization localization.launch.py \
           use_sim_time:=false
 
-  # ── Sensor health check (runs once, then exits) ───────────────────────────
+  # ── Sensor health check (runs once, then exits) ──
   # Waits 10s for sensors to settle, checks frequencies for 15s.
   # Exits 0 if all required sensors OK. Record service starts regardless
   # (use `depends_on: health_check: condition: service_completed_successfully`
@@ -355,7 +355,7 @@ services:
       - |
         exec python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
 
-  # ── Bag recorder ─────────────────────────────────────────────────────────
+  # ── Bag recorder ──
   # Launch manually when ready:  dcr record  (or: dc up --profile record)
   # Stop cleanly with Ctrl+C — SIGINT lets ros2 bag record finalize the mcap.
   record:
@@ -457,7 +457,7 @@ services:
         } > "$${BAG_DIR}/session_info.yaml"
         echo "  Session metadata → $${BAG_DIR}/session_info.yaml"
 
-        # ── Snapshot software version ──────────────────────────────
+        # ── Snapshot software version ──
         GIT_HASH=$$(git -C "${WORKSPACE}" rev-parse HEAD 2>/dev/null || echo "unknown")
         GIT_BRANCH=$$(git -C "${WORKSPACE}" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "unknown")
         GIT_DIRTY=$$(git -C "${WORKSPACE}" status --short 2>/dev/null | wc -l | xargs)
@@ -468,7 +468,7 @@ services:
         } >> "$${BAG_DIR}/session_info.yaml"
         echo "  Git:  $${GIT_BRANCH} @ $${GIT_HASH:0:8} ($${GIT_DIRTY} dirty files)"
 
-        # ── Snapshot ROS parameters for key nodes ──────────────────
+        # ── Snapshot ROS parameters for key nodes ──
         echo "  Waiting for key nodes before param snapshot..."
         for NODE in /mtt_can_node /mtt_odometry_node /mtt_cmd_arbiter_node; do
           for i in $$(seq 1 30); do
@@ -486,7 +486,7 @@ services:
         done
         echo "  ROS params → $${BAG_DIR}/ros_params.yaml"
 
-        # ── Snapshot active topic list ──────────────────────────────
+        # ── Snapshot active topic list ──
         ros2 topic list 2>/dev/null > "$${BAG_DIR}/topic_list.txt" || true
         ros2 topic list --show-types 2>/dev/null > "$${BAG_DIR}/topic_list_with_types.txt" || true
         echo "  Topics → $${BAG_DIR}/topic_list.txt"
@@ -604,7 +604,7 @@ services:
         }
         trap cleanup_recording EXIT INT TERM
 
-        # ── Record configured topics into BAG_DIR/bag/ ──────────────
+        # ── Record configured topics into BAG_DIR/bag/ ──
         ros2 bag record \
           --node-name rosbag2_recorder \
           --disable-keyboard-controls \
@@ -616,7 +616,7 @@ services:
           "$${RECORD_TOPICS[@]}" &
         BAG_PID=$$!
 
-        # ── Background size + disk monitor ──────────────────────────
+        # ── Background size + disk monitor ──
         (while true; do
           sleep 60
           SIZE=$$(du -sh "$${BAG_DIR}" 2>/dev/null | cut -f1)
@@ -634,7 +634,7 @@ services:
         RECORD_EXIT=$$?
         exit "$${RECORD_EXIT}"
 
-  # ── Foxglove live visualisation ───────────────────────────────────────────
+  # ── Foxglove live visualisation ──
   # No profile → starts automatically with dc up (same as zenoh and robot).
   # Previously required --profile infra which meant it was never started in practice.
   foxglove:
@@ -665,7 +665,7 @@ services:
           -p port:=${LOCAL_FOXGLOVE_PORT:-8765} \
           "$${address_args[@]}"
 
-  # ── Remote-safe LiDAR debug cloud ─────────────────────────────────────────
+  # ── Remote-safe LiDAR debug cloud ──
   # Publishes a small ROI/voxelized cloud for Foxglove field use. Mapping and
   # WILN still consume the raw Hesai cloud locally.
   lidar_debug_cloud:
@@ -707,7 +707,7 @@ services:
       - |
         ${WORKSPACE}/scripts/field_doodle_check.sh
 
-  # ── LiDAR-Camera colorizer ────────────────────────────────────────────────
+  # ── LiDAR-Camera colorizer ──
   # Projects ZED2i RGB onto the Hesai PointCloud2 and publishes
   # /hesai_lidar/points_colored (keeps intensity + adds rgb field).
   # Usage: dc up --profile colorizer
@@ -741,7 +741,7 @@ services:
       - use_sim_time:=false
       - rviz_config:=${WORKSPACE}/src/mtt_core/mtt_description/rviz/urdf_config.rviz
 
-  # ── Manual teleop ─────────────────────────────────────────────────────────
+  # ── Manual teleop ──
   teleop:
     <<: [*dc_base]
     profiles: ["manual"]
@@ -756,7 +756,7 @@ services:
         echo "Joystick teleop already runs inside the robot service."
         echo "Edit demos/data_collection/config/runtime.env and demos/common/config/mtt_control.yaml to change joystick behavior."
 
-  # ── SocketCAN → ROS2 bridge ───────────────────────────────────────────────
+  # ── SocketCAN → ROS2 bridge ──
   # Publishes raw CAN frames from can0 on /from_can_bus (can_msgs/Frame)
   # and forwards /to_can_bus back to the bus.
   # Requires: Dockerfile must have ros-jazzy-ros2-socketcan installed.
@@ -788,7 +788,7 @@ services:
           interface:=can0 \
           receiver_interval_sec:=0.1
 
-  # ── WILN teach-and-repeat ────────────────────────────────────────────────
+  # ── WILN teach-and-repeat ──
   # Launches the WILN navigation node + odom-to-pose converter.
   # Requires ICP mapping to be running (enable_mapping:=true on the robot service).
   #
@@ -861,7 +861,7 @@ services:
           route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE} \
           front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE}
 
-  # ── WILN control (one-shot) ──────────────────────────────────────────────
+  # ── WILN control (one-shot) ──
   # Run with:  dc run --rm wiln_teach_start
   # Profiles prevent accidental start on dc up; dc run ignores profiles.
   # All services share the same Zenoh ROS2 network (network_mode: host).
@@ -1145,7 +1145,7 @@ services:
       - "{}"
 
 
-  # ── Live diagnostic tools ─────────────────────────────────────────────────
+  # ── Live diagnostic tools ──
   # Run any of these while the robot service is up to inspect live state.
   # Usage: docker compose run --rm audit_topics
   #        docker compose run --rm audit_tf
@@ -1199,7 +1199,7 @@ services:
       - --duration
       - ${AUDIT_DURATION:-120}
 
-  # ── ICP map + trajectory saver (one-shot) ────────────────────────────────
+  # ── ICP map + trajectory saver (one-shot) ──
   # Manually save the current map and trajectory at any time during a session.
   # Usage:  dc run --rm -e OUT_DIR=${WORKSPACE}/data/my_session map_saver
   # Default output: ${WORKSPACE}/data/map_<timestamp>.vtk + trajectory_<timestamp>.vtk
@@ -1229,7 +1229,7 @@ services:
           "{trajectory_file_name: {data: \"$${TRAJ_FILE}\"}}"
         echo "Done."
 
-  # ── Debug shell ───────────────────────────────────────────────────────────
+  # ── Debug shell ──
   bash:
     <<: [*dc_base]
     profiles: ["debug"]

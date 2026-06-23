@@ -14,13 +14,13 @@ mtt_speed_servo_node:
     setpoint_topic: "/speed_setpoint"
     output_cmd_vel_topic: "controller/cmd_vel"
 
-    # ── PI gains ─────────────────────────────────────────────────────────
+    # ── PI gains ──
     kp: 1.5
     ki: 0.8
     kd: 0.0
     integrator_limit: 0.30
 
-    # ── Limits ───────────────────────────────────────────────────────────
+    # ── Limits ──
     max_throttle: 1.0
     # max_speed_ms MUST equal mtt_can_node.max_linear_speed_ms.
     # The servo outputs (throttle * max_speed_ms) as cmd_vel.linear.x, which the CAN
@@ -29,17 +29,17 @@ mtt_speed_servo_node:
     max_accel_ms2: 2.0
     max_decel_ms2: 3.5
 
-    # ── Feedforward LUT (speed_ms → throttle_normalized) ─────────────────
+    # ── Feedforward LUT (speed_ms → throttle_normalized) ──
     # After running mode: "characterize", copy the YAML from the logs here
     # and set feedforward_gain: 1.0.
     feedforward_gain: 0.0
     feedforward_lut: []
 
-    # ── Safety ───────────────────────────────────────────────────────────
+    # ── Safety ──
     feedback_timeout_s: 0.50
     command_timeout_s: 0.50
 
-    # ── Characterization ─────────────────────────────────────────────────
+    # ── Characterization ──
     characterize_throttle_step: 0.05
     characterize_settle_time_s: 3.0
     characterize_sample_time_s: 2.0

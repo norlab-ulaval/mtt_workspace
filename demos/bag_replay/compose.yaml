@@ -31,7 +31,7 @@ x-replay-base: &replay_base
 
 services:
 
-  # ── Bag player with synthetic clock ──────────────────────────────────────
+  # ── Bag player with synthetic clock ──
   # --clock: republishes bag timestamps as /clock → all nodes use bag time
   # --loop: loops the bag (remove for single-pass)
   # --rate: playback speed (1.0 = real-time, 0.5 = half speed for debug)
@@ -115,7 +115,7 @@ services:
           --qos-profile-overrides-path ${WORKSPACE}/src/external/norlab_robot/config/rosbag_record/qos_replay_override.yaml \
           "$${PLAY_PATH}"
 
-  # ── Robot description publisher (needed for TF from URDF) ────────────────
+  # ── Robot description publisher (needed for TF from URDF) ──
   # CRITICAL: use_sim_time:=true required for bag replay.
   # Without it, robot_state_publisher publishes TF with wall-clock timestamps
   # while the bag player emits /clock at bag timestamps → TF2 lookups at bag
@@ -137,7 +137,7 @@ services:
       - use_joint_state_publisher:=false
       - use_sim_time:=true
 
-  # ── ZED detections → Foxglove markers ────────────────────────────────────
+  # ── ZED detections → Foxglove markers ──
   # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray so
   # Foxglove can show detected people/objects in the 3D panel.
   zed_markers:
@@ -152,7 +152,7 @@ services:
       - ${WORKSPACE}/scripts/zed_objects_to_markers.py
       - --only-person
 
-  # ── Runtime odometry rebuild for replay ──────────────────────────────────
+  # ── Runtime odometry rebuild for replay ──
   # Older bags do not always carry a usable articulated body state for the
   # current URDF. Re-run the current odometry node on top of the recorded
   # tachometer/cmd_vel stream, but keep its outputs on replay-local topics.
@@ -208,7 +208,7 @@ services:
       - -r
       - mtt_articulation_angle:=mtt_articulation_angle/runtime
 
-  # ── IMU-based odometry for replay (rotation-only prior) ─────────────────────
+  # ── IMU-based odometry for replay (rotation-only prior) ──
   # Alternative to runtime_odometry when wheel encoders produce bad Z values.
   # Subscribes to /mti100/data and publishes odom → base_footprint TF using
   # MTi-100 IMU orientation only (no acceleration integration, no Z drift).
@@ -254,7 +254,7 @@ services:
       - -r
       - imu_topic:=${IMU_ODOM_TOPIC:-/mti100/data}
 
-  # ── ZED visual odometry → odom TF (replay-only odom prior) ──────────────
+  # ── ZED visual odometry → odom TF (replay-only odom prior) ──
   # Wheel odom translation diverges on the downhill segment (track slip at
   # 2 m/s: >100% error between processed scans → ICP loses lock). The ZED VIO
   # recorded in the bag tracked that segment correctly, including the real
@@ -311,7 +311,7 @@ services:
       - -p
       - tachometer_topic:=mtt_tachometer
 
-  # ── Factor Graph localization in replay mode ──────────────────────────────
+  # ── Factor Graph localization in replay mode ──
   # Fuses all recorded sensor topics.
   # use_sim_time:=true ensures the graph runs on bag timestamps.
   localization:
@@ -327,7 +327,7 @@ services:
       - localization.launch.py
       - use_sim_time:=true
 
-  # ── Offline ICP rebuild for one session or a whole data directory ────────
+  # ── Offline ICP rebuild for one session or a whole data directory ──
   # Replays the bag, rebuilds the merged cloud if both LiDARs are available,
   # runs the ICP mapper, and saves:
   #   <session>/offline_icp/map.vtk
@@ -367,7 +367,7 @@ services:
       - -u
       - ${WORKSPACE}/demos/bag_replay/scripts/offline_icp.py
 
-  # ── Perception in replay ─────────────────────────────────────────────────────
+  # ── Perception in replay ──
   # Launches the full perception stack via perception.launch.py:
   #
   #   cloud_merger_node       — fuses Hesai + RS-Airy into /merged_points_filtered
@@ -414,7 +414,7 @@ services:
           cloud_merger_publish_debug_inputs:=true \
           cloud_merger_enable_trailer_bbox_filter:=${REPLAY_FILTER_TRAILER_FROM_MAPPING:-true}
 
-  # ── ICP mapping in replay ────────────────────────────────────────────────
+  # ── ICP mapping in replay ──
   # Baseline: single LiDAR /hesai_lidar/points — pas de cloud fusionné.
   # Le cloud fusionné (/merged_points_filtered) cumule deux problemes :
   #   1. ObservationDirectionDataPointsFilter sur nuage multi-origine = directions fausses.
@@ -581,7 +581,7 @@ services:
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME}
 
-  # ── KISS-ICP lightweight LiDAR odometry ──────────────────────────────────
+  # ── KISS-ICP lightweight LiDAR odometry ──
   # Alternative to the norlab_icp_mapper_ros mapper above. Uses a different ICP
   # pipeline (KISS-ICP) that may handle frame-alignment differently.
   # Usage: BAG_PATH=... docker compose --profile kissicp up
@@ -620,7 +620,7 @@ services:
           -p data.deskew:=false \
           --remap pointcloud_topic:=/kiss_icp/input_points
 
-  # ── WILN obstacle cloud regenerated in replay map frame ─────────────────
+  # ── WILN obstacle cloud regenerated in replay map frame ──
   # The bag may contain /wiln/obstacles from the live run, but those points
   # were published in the live robot's map frame. Rebuild them from LiDAR +
   # the current replay ICP map TF so Foxglove's fixed "map" frame is coherent.
@@ -660,7 +660,7 @@ services:
           --params-file "$${WILN_PARAMS_FILE}" \
           -p use_sim_time:=true
 
-  # ── Lightweight cloud for Foxglove/debug in replay ───────────────────────
+  # ── Lightweight cloud for Foxglove/debug in replay ──
   # Use this instead of visualizing raw /hesai_lidar/points when debugging
   # mapping/obstacles. It publishes a cropped, voxelized cloud.
   lidar_debug_cloud:
@@ -713,7 +713,7 @@ services:
       - --duration
       - ${AUDIT_DURATION:-120}
 
-  # ── Post-process dataset export: ICP + lightweight enriched bag + CSV ──────
+  # ── Post-process dataset export: ICP + lightweight enriched bag + CSV ──
   # Writes per session:
   #   <session>/offline_icp/map.vtk
   #   <session>/offline_icp/trajectory.vtk
@@ -786,7 +786,7 @@ services:
         INPUT_PATH="$${BAG_PATH:-$${DATA_DIR}}"
         exec python3 -u ${WORKSPACE}/scripts/build_postprocess_dataset.py "$${INPUT_PATH}" --metadata-only
 
-  # ── Post-process audit: CSV integrity + physical consistency + plots ──────
+  # ── Post-process audit: CSV integrity + physical consistency + plots ──
   # Reads existing postprocess_dataset outputs only. It does not replay bags,
   # does not run ICP, and does not record enriched bags.
   #
@@ -823,7 +823,7 @@ services:
         fi
         exec python3 -u ${WORKSPACE}/scripts/audit_postprocess_dataset.py "$${ARGS[@]}"
 
-  # ── ICP/mapping investigation: cross-bag consistency + plots ─────────────
+  # ── ICP/mapping investigation: cross-bag consistency + plots ──
   # Reads existing postprocess outputs only by default. It does not replay bags.
   # Writes:
   #   <session>/icp_investigation/report.yaml
@@ -862,7 +862,7 @@ services:
         fi
         exec python3 -u ${WORKSPACE}/scripts/investigate_icp_mapping.py "$${ARGS[@]}"
 
-  # ── Offline localization reference from CSV dataset ───────────────────────
+  # ── Offline localization reference from CSV dataset ──
   # Converts postprocess_dataset/dataset.csv to the mtt_localization offline
   # solver input and runs offline_reference_solver. This is the bridge from the
   # database-style CSV exports to the factor-graph reference trajectory.
@@ -893,7 +893,7 @@ services:
         fi
         exec python3 -u ${WORKSPACE}/scripts/offline_reference.py "$${ARGS[@]}"
 
-  # ── Sensor health check on bag output ────────────────────────────────────
+  # ── Sensor health check on bag output ──
   health_check:
     <<: [*replay_base]
     profiles: ["check"]
@@ -910,7 +910,7 @@ services:
         sleep 5
         python3 ${WORKSPACE}/demos/data_collection/scripts/health_check.py
 
-  # ── LiDAR-Camera colorizer for replay visualization ─────────────────────
+  # ── LiDAR-Camera colorizer for replay visualization ──
   # Projects ZED2i RGB onto the Hesai PointCloud2 and publishes
   # /hesai_lidar/points_colored (keeps intensity + adds rgb field).
   # Usage: BAG_PATH=... docker compose --profile colorizer up bag_player description colorizer foxglove
@@ -932,7 +932,7 @@ services:
           use_sim_time:=true \
           image_transport:=compressed
 
-  # ── Foxglove for replay visualization ────────────────────────────────────
+  # ── Foxglove for replay visualization ──
   # Connect Foxglove Studio → "Open connection" → "Foxglove WebSocket" → ws://localhost:8765
   foxglove:
     <<: [*replay_base]
@@ -951,7 +951,7 @@ services:
           --params-file ${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml \
           -p port:=8765
 
-  # ── RViz (optional — requires X11 display on host) ───────────────────────
+  # ── RViz (optional — requires X11 display on host) ──
   # Usage (after stack is up): docker compose exec mapping rviz2 -d /workspace/config/replay_mapping.rviz
   # Or: DISPLAY=:0 docker compose run --no-deps --rm rviz
   rviz:
@@ -967,7 +967,7 @@ services:
       - -d
       - /workspace/config/replay_mapping.rviz
 
-  # ── Teach-and-Repeat stack for offline WILN validation ───────────────────
+  # ── Teach-and-Repeat stack for offline WILN validation ──
   #
   # Runs wiln_node + mtt_path_follower + mtt_repeat_supervisor on top of a bag.
   # Workflow:
@@ -1025,7 +1025,7 @@ services:
       - |
         python3 ${WORKSPACE}/scripts/validate_wiln_route.py "$${WILN_LTR_FILE}"
 
-  # ── Debug shell ───────────────────────────────────────────────────────────
+  # ── Debug shell ──
   bash:
     <<: [*replay_base]
     profiles: ["debug"]

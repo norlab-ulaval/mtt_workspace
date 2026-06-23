@@ -41,7 +41,7 @@ import rclpy.executors
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import yaml
 
-# ── ANSI colors ───────────────────────────────────────────────────────────────
+# ── ANSI colors ──
 GREEN  = "\033[92m"
 YELLOW = "\033[93m"
 RED    = "\033[91m"
@@ -50,7 +50,7 @@ BOLD   = "\033[1m"
 DIM    = "\033[2m"
 RESET  = "\033[0m"
 
-# ── Config from env ───────────────────────────────────────────────────────────
+# ── Config from env ──
 DURATION        = float(os.environ.get("HEALTH_CHECK_DURATION",    "15"))
 WAIT_TIMEOUT    = float(os.environ.get("HEALTH_CHECK_WAIT_TIMEOUT","40"))
 GPS_MODE        = os.environ.get("GPS_MODE", "serial")
@@ -103,15 +103,15 @@ class TopicSpec:
     group: str = ""
 
 
-# ── Topic list ────────────────────────────────────────────────────────────────
+# ── Topic list ──
 def build_topics() -> list[TopicSpec]:
     topics: list[TopicSpec] = [
-    # ── Infrastructure ────────────────────────────────────────────────────────
+    # ── Infrastructure ──
     TopicSpec("/tf",           "TF",           50.0, 90.0,  group="infra"),
     TopicSpec("/tf_static",    "TF Static",     1.0, 300.0, group="infra"),
     TopicSpec("/joint_states", "Joint States", 50.0, 90.0,  group="infra"),
 
-    # ── MTT CAN driver ────────────────────────────────────────────────────────
+    # ── MTT CAN driver ──
     TopicSpec("/mtt_odometry",           "MTT Odometry",   50.0, 90.0, group="can"),
     TopicSpec("/mtt_tachometer",         "MTT Tachometer", 50.0, 90.0, group="can"),
     TopicSpec("/mtt_articulation_angle", "Articul. Angle", 50.0, 90.0, group="can"),
@@ -123,24 +123,24 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/teleop_deadman",         "Teleop Deadman", 20.0, 80.0, required=False, group="operator"),
     TopicSpec("/teleop_estop",           "Teleop E-Stop",  20.0, 80.0, required=False, group="operator"),
 
-    # ── BMS / Battery ─────────────────────────────────────────────────────────
+    # ── BMS / Battery ──
     TopicSpec("/mtt_battery/status", "BMS Status", 10.0, 50.0, required=False, group="bms"),
 
-    # ── IMU — XSens MTi-100 (primary, required) ───────────────────────────────
+    # ── IMU — XSens MTi-100 (primary, required) ──
     # data_raw: 100 Hz raw measurements; data: ~100 Hz Kalman-filtered orientation.
     # Both recorded. data_raw used for odometry fusion; data for heading reference.
     TopicSpec("/mti100/data",           "MTi-100 data",     100.0, 95.0, group="imu"),
     TopicSpec("/mti100/data_raw",       "MTi-100 data_raw", 100.0, 95.0, group="imu"),
     TopicSpec("/mti100/time_reference", "MTi-100 TimeRef",   10.0, 50.0, group="imu"),
 
-    # ── LiDAR — Hesai XT-32 (required) ───────────────────────────────────────
+    # ── LiDAR — Hesai XT-32 (required) ──
     TopicSpec("/hesai_lidar/points",        "Hesai PointCloud",  10.0, 60.0, group="lidar"),
     TopicSpec("/hesai_lidar/lidar_packets_loss", "Hesai Pkt Loss", 10.0, 80.0, required=False, group="lidar"),
 
-    # ── LiDAR — RoboSense Bpearl (optional — rear/trailer) ───────────────────
+    # ── LiDAR — RoboSense Bpearl (optional — rear/trailer) ──
     TopicSpec("/rsairy_ns/points", "RS Bpearl pts", 10.0, 20.0, required=False, group="lidar"),
 
-    # ── Camera — ZED 2i stereo (optional but important) ───────────────────────
+    # ── Camera — ZED 2i stereo (optional but important) ──
     # Rates: RGB/Depth ≈ 5 Hz compressed, IMU ≈ 100 Hz
     TopicSpec("/zed/zed_node/rgb/color/rect/image/compressed",
               "ZED RGB",   10.0, 40.0, required=False, group="camera"),
@@ -151,7 +151,7 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/zed/zed_node/imu/data",
               "ZED IMU",  100.0, 30.0, required=False, group="camera"),
 
-    # ── ICP mapping diagnostics (norlab_icp_mapper_ros) ─────────────────────────
+    # ── ICP mapping diagnostics (norlab_icp_mapper_ros) ──
     # These start after mapping_delay_seconds (5s in data_collection, 10s default).
     # Not required here because health_check runs before full startup; use
     # check_icp_odom / audit_tf_chain for per-session ICP validation.
@@ -159,21 +159,21 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/mapping/map",              "ICP Map",            1.0, 50.0, required=False, group="mapping"),
     TopicSpec("/mapping/trajectory_path",  "ICP Trajectory",     1.0, 50.0, required=False, group="mapping"),
 
-    # ── Optional perception diagnostics ─────────────────────────────────────
+    # ── Optional perception diagnostics ──
     TopicSpec("/trailer/articulation_angle",     "Trailer Angle",      5.0, 80.0, required=False, group="mapping"),
     TopicSpec("/trailer/pose",                   "Trailer Pose",       5.0, 80.0, required=False, group="mapping"),
 
-    # ── Teach / Repeat supervision ───────────────────────────────────────────
+    # ── Teach / Repeat supervision ──
     TopicSpec("/mtt_repeat/state",               "Repeat State",       0.5, 500.0, required=False, group="repeat"),
     TopicSpec("/mtt_repeat/ready",               "Repeat Ready",       0.5, 500.0, required=False, group="repeat"),
 
-    # ── Operator annotations ──────────────────────────────────────────────────
+    # ── Operator annotations ──
     TopicSpec("/session/events", "Session Events", 0.1, 1000.0, required=False, group="infra"),
     ]
 
     if ENABLE_MTI10:
         topics.extend([
-            # ── IMU — XSens MTi-10 (secondary, optional) ──────────────────────
+            # ── IMU — XSens MTi-10 (secondary, optional) ──
             TopicSpec("/mti10/data", "MTi-10 data", 100.0, 30.0, required=False, group="imu"),
             TopicSpec("/mti10/data_raw", "MTi-10 data_raw", 100.0, 30.0, required=False, group="imu"),
         ])
@@ -195,7 +195,7 @@ def build_topics() -> list[TopicSpec]:
 
     if ENABLE_OAK:
         topics.extend([
-            # ── Camera — OAK-D (optional — rear/trailer) ──────────────────────
+            # ── Camera — OAK-D (optional — rear/trailer) ──
             TopicSpec("/oak/rgb/image_rect", "OAK RGB", OAK_RATE_HZ, 40.0, required=False, group="camera"),
             TopicSpec("/oak/stereo/image_raw", "OAK Depth", OAK_RATE_HZ, 60.0, required=False, group="camera"),
             TopicSpec("/oak/points", "OAK PointCloud", OAK_RATE_HZ, 70.0, required=False, group="camera"),
@@ -271,7 +271,7 @@ GROUP_HINTS = {
 }
 
 
-# ── Phase 1: Network pre-checks (no ROS) ─────────────────────────────────────
+# ── Phase 1: Network pre-checks (no ROS) ──
 
 def _ping(ip: str, timeout_s: float = 1.5) -> bool:
     """Single ICMP ping."""
@@ -411,7 +411,7 @@ def _import_msg_class(type_string: str):
         return None
 
 
-# ── Phase 2+3: ROS topic monitoring ──────────────────────────────────────────
+# ── Phase 2+3: ROS topic monitoring ──
 
 def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     rclpy.init()
@@ -454,7 +454,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
 
     required_primary = {s.topic for s in TOPICS if s.required and s.group in ("can", "imu", "lidar", "gps")}
 
-    # ── Phase 2: Smart wait for primary sensors ───────────────────────────────
+    # ── Phase 2: Smart wait for primary sensors ──
     print(f"{BOLD}{CYAN}── Phase 2: Waiting for sensors (max {wait_timeout:.0f}s) ──{RESET}")
     wait_start = time.monotonic()
     subscribed_topics: set = set()
@@ -537,7 +537,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         for k in gps_fix_worst:
             gps_fix_worst[k] = +99
 
-    # ── Phase 3: Measure ─────────────────────────────────────────────────────
+    # ── Phase 3: Measure ──
     print(f"{BOLD}{CYAN}── Phase 3: Measuring for {duration:.0f}s ─────────────────{RESET}")
     t_measure_start = time.monotonic()
     for i in range(int(duration)):
@@ -554,7 +554,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     executor.shutdown(timeout_sec=2.0)
     rclpy.shutdown()
 
-    # ── Phase 4: Report ───────────────────────────────────────────────────────
+    # ── Phase 4: Report ──
     COL = [44, 12, 10, 20, 5]
     sep = "─" * (sum(COL) + 4)
     header = (f"{'Topic':<{COL[0]}} {'Expected':>{COL[1]}} {'Sampled':>{COL[2]}} "
@@ -607,7 +607,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
 
     print(sep)
 
-    # ── GPS fix quality ───────────────────────────────────────────────────────
+    # ── GPS fix quality ──
     gps_quality_ok = True
     if ENABLE_GPS:
         print(f"\n{BOLD}GPS fix quality (worst seen during window):{RESET}")
@@ -657,7 +657,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     else:
         print(f"\n{BOLD}GPS fix quality:{RESET} {DIM}skipped (ENABLE_GPS=false){RESET}")
 
-    # ── Group-level hints for missing sensors ─────────────────────────────────
+    # ── Group-level hints for missing sensors ──
     if missing_by_group:
         print(f"\n{BOLD}Diagnosis:{RESET}")
         for grp, topics in missing_by_group.items():
@@ -709,7 +709,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         if not repeat_ok:
             has_warning = True
 
-    # ── Final verdict ─────────────────────────────────────────────────────────
+    # ── Final verdict ──
     print()
     if has_error:
         print(f"{RED}{BOLD}❌  HEALTH CHECK FAILED — required sensors missing or too slow.{RESET}")

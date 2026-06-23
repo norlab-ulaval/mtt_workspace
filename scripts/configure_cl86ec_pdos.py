@@ -43,7 +43,7 @@ def sdo_write(slave, idx, sub, data, label=""):
 
 
 def configure_pdos(slave):
-    # ── RxPDO: SM2 ← 0x1600 (5 entries = 16B) ──────────────────────────────
+    # ── RxPDO: SM2 ← 0x1600 (5 entries = 16B) ──
     sdo_write(slave, 0x1C12, 0, bytes([0x00]),           "1C12:0 clear")
     sdo_write(slave, 0x1600, 0, bytes([0x00]),           "1600:0 clear")
 
@@ -63,7 +63,7 @@ def configure_pdos(slave):
     sdo_write(slave, 0x1C12, 1, struct.pack("<H", 0x1600), "1C12:1 → 0x1600")
     sdo_write(slave, 0x1C12, 0, bytes([1]),              "1C12:0 enable")
 
-    # ── TxPDO: SM3 ← 0x1A00 (12 entries = 39B) ─────────────────────────────
+    # ── TxPDO: SM3 ← 0x1A00 (12 entries = 39B) ──
     sdo_write(slave, 0x1C13, 0, bytes([0x00]),           "1C13:0 clear")
     sdo_write(slave, 0x1A00, 0, bytes([0x00]),           "1A00:0 clear")
 

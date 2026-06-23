@@ -27,7 +27,7 @@ from pathlib import Path
 import yaml
 
 
-# ── Session / bag path resolver ──────────────────────────────────────────────
+# ── Session / bag path resolver ──
 
 def resolve_session_and_bag_dir(path: Path) -> tuple[Path, Path]:
     path = path.resolve()
@@ -43,7 +43,7 @@ def resolve_session_and_bag_dir(path: Path) -> tuple[Path, Path]:
     raise FileNotFoundError(f"Could not resolve session/bag directory from: {path}")
 
 
-# ── ros2 bag info parser ──────────────────────────────────────────────────────
+# ── ros2 bag info parser ──
 
 def run_ros2_bag_info(bag_dir: Path) -> dict:
     """
@@ -177,7 +177,7 @@ def _load_bag_info_from_metadata(metadata_path: Path) -> dict:
     }
 
 
-# ── Report generator ──────────────────────────────────────────────────────────
+# ── Report generator ──
 
 def generate_report(session_dir: Path, bag_dir: Path) -> str:
     session_info_path = session_dir / "session_info.yaml"
@@ -212,7 +212,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
     lines.append(f"Bag directory: `{bag_dir}`")
     lines.append(f"")
 
-    # ── Session metadata ──────────────────────────────────────────────────────
+    # ── Session metadata ──
     lines.append(f"## Session Metadata")
     lines.append(f"")
     lines.append(f"| Field | Value |")
@@ -235,7 +235,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
         lines.append(f"| {k} | {v} |")
     lines.append(f"")
 
-    # ── Bag statistics ────────────────────────────────────────────────────────
+    # ── Bag statistics ──
     lines.append(f"## Bag Statistics")
     lines.append(f"")
     lines.append(f"| Metric | Value |")
@@ -247,7 +247,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
     lines.append(f"| Storage | {bag_info.get('storage_id', 'mcap')} |")
     lines.append(f"")
 
-    # ── Topic breakdown ───────────────────────────────────────────────────────
+    # ── Topic breakdown ──
     topics = bag_info.get("topics", [])
     topic_map = {tp["topic"]: tp for tp in topics}
     if topics:
@@ -318,7 +318,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
                               f"{tp['count']:,} | {hz_str} |")
         lines.append(f"")
 
-    # ── Sensor coverage summary ───────────────────────────────────────────────
+    # ── Sensor coverage summary ──
     lines.append(f"## Sensor Coverage")
     lines.append(f"")
     recorded_topics = {tp["topic"] for tp in topics}
@@ -415,7 +415,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
         lines.append("- GPS is running in single-rover mode. `/gps/fix` and `/gps/time_reference` must be present to use it for time or global consistency checks.")
     lines.append("")
 
-    # ── Events / annotations ──────────────────────────────────────────────────
+    # ── Events / annotations ──
     lines.append(f"## Operator Annotations")
     lines.append(f"")
     lines.append(f"To review in-bag annotations after playback:")
@@ -425,7 +425,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
     lines.append(f"```")
     lines.append(f"")
 
-    # ── Post-processing hints ─────────────────────────────────────────────────
+    # ── Post-processing hints ──
     lines.append(f"## Post-Processing Hints")
     lines.append(f"")
     lines.append(f"```bash")
@@ -445,7 +445,7 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
     return "\n".join(lines)
 
 
-# ── Terminal UI & Multi-bag ───────────────────────────────────────────────────
+# ── Terminal UI & Multi-bag ──
 
 class Colors:
     OK = "\033[92m"
@@ -576,7 +576,7 @@ def print_comparative_table(stats_list: list[dict]):
     print("\n" + "-" * 105 + "\n")
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
+# ── Entry point ──
 
 def main() -> int:
     import argparse

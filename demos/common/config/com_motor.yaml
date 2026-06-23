@@ -11,56 +11,96 @@
 #        docker compose -f demos/live_robot/compose.yaml --profile com restart com_motor
 ################################################################################
 
-# ── Low-level driver (motor_driver_node) ─────────────────────────────────────
+# ── motor_driver_node ──
 motor_driver_node:
   ros__parameters:
     # Soft travel limits in encoder counts (absolute values).
     # The commanded position is clamped to [min, max] BEFORE being sent to the
     # drive — hardware safety net independent of the controller above.
-    # A "clamped to limit" log message appears whenever a command is rejected.
     #
     # How to calibrate:
     #   1. Run in SETUP mode (no limits active yet — find the mechanical extremes).
     #   2. Jog to each extreme; note the count from /motor/joint_state.position[0].
     #   3. Set below with a safety margin (e.g. ±500 counts from the true extreme).
-    position_limit_min: -2000
-    position_limit_max:  2000
-    startup_relative_limit_counts: 2000
+    #
+    # IMPORTANT: these must be WIDER than startup_relative_limit_counts × 2
+    # so the effective window is not clipped by the absolute bounds.
+    position_limit_min: -17500
+    position_limit_max:  73400
+
+    # ── Startup-relative guard ──
+    # When > 0, the effective limits are computed RELATIVE to the motor's
+    # actual position at the end of auto-enable:
+    #   effective_min = startup_pos - startup_relative_limit_counts
+    #   effective_max = startup_pos + startup_relative_limit_counts
+    #
+    # This prevents the motor from jumping when powering on with an uncalibrated
+    # encoder: if the motor was left at +53421 counts, the effective limits are
+    # [53421-2000, 53421+2000] = [51421, 55421], NOT [-2000, 2000].
+    #
+    # IMPORTANT: the effective window is ALSO clipped to the absolute limits
+    # above (position_limit_min/max), so if the startup position is outside
+    # the absolute limits, the window shifts but the absolute bounds still
+    # protect against end-of-travel.
+    #
+    # 0 = disable startup-relative mode (use absolute limits immediately).
+    # > 0 = enable (recommended with non-absolute encoders).
+    # Set this to half the desired travel range (e.g. 10000 = ±10000 counts window).
+    startup_relative_limit_counts: 0
+
+    # ── Max step rate limiter ──
+    # Override the computed rate limiter (window / 1000) with a fixed max speed.
+    # This allows the motor to move faster than the default 1-window-per-second
+    # calculation when the window is small (e.g. motor starts near a limit).
+    # 0 = compute from window (default).  Set to desired counts/sec.
+    max_step_counts_per_sec: 2000000
+
+    # ── Uncalibrated limits gate ──
+    # When false, the absolute position_limit_min/max are NOT applied until
+    # the first /motor/cmd_position message arrives (from com_position_node)
+    # or an explicit "abs" / "rel" text command.
+    #
+    # Why: Without this gate, the absolute limits apply during auto-enable
+    # and would clamp the startup seed position, causing a following error.
+    # With the gate closed (false), the driver stays wide open until the
+    # controller is live and has synced its state.
+    #
+    # Recommended: false with startup_relative_limit_counts > 0.
+    # Set to true if you want absolute limits from the first RT cycle.
     allow_uncalibrated_limits: false
 
-# ── High-level controller (com_position_node) ────────────────────────────────
+# ── com_position_node ──
 com_position_node:
   ros__parameters:
-    # ── Home (centre) position ───────────────────────────────────────────────
+    # ── Home (centre) position ──
     # Pre-calibrated home in encoder counts.
-    # When set, COM mode skips SETUP and enters RUN immediately.
-    # If unset (commented out), the node first tries the calibration file
-    # (see below), then falls back to manual SETUP mode.
+    # Used by PARK (return-to-home) and spring-toggle.
+    # Does NOT force spring mode — COM always starts in free (SETUP) mode.
+    # If unset, tries calibration file, then manual SET_HOME.
     #
-    # How to calibrate:
-    #   1. Comment this line out → node enters SETUP (jog-velocity mode).
-    #   2. Jog to the desired centre position using the joystick.
-    #   3. Send com_set_home (e.g. via Foxglove button or ros2 topic pub).
-    #      The node transitions to RUN and saves the calibration file.
-    #   4. Note the count from /motor/joint_state.position[0] and set below.
-    # home_position_counts: 0.0      # FILL IN after calibration
+    home_position_counts: 27469.0
 
-    # ── Spring parameters ────────────────────────────────────────────────────
+    # ── Spring parameters ──
     # Half-range of the spring in RUN mode (counts).
     # Stick at ±1 → home ± amplitude_counts.
-    amplitude_counts: 200.0
+    amplitude_counts: 5000.0
 
     # Max jog speed in SETUP mode (counts/second).
-    setup_slew: 200.0
+    setup_slew: 500000.0
 
     # Max slew rate in RUN mode (counts/second).
-    run_slew: 500.0
+    run_slew: 500000.0
 
     # Slide-in speed when deadman is re-armed in RUN mode (counts/second).
     # Also used as park speed (autonomous return to home).
-    rearm_slew: 200.0
+    rearm_slew: 200000.0
 
-    # ── Calibration persistence ──────────────────────────────────────────────
+    # ── Joystick deadband ──
+    # Normalised steer values below this threshold are treated as zero.
+    # Prevents motor creep when the stick doesn't return perfectly to centre.
+    steer_deadband: 0.05
+
+    # ── Calibration persistence ──
     # File where home is saved after SET_HOME or PARK completion.
     # Must be on a host-mounted path to survive container restarts.
     # /data is mounted from the robot host (see docker/common.yaml).
@@ -70,5 +110,6 @@ com_position_node:
     # If |actual_position - saved_position| < threshold at startup →
     #   motor session is continuous → home auto-restored, SETUP skipped.
     # If >= threshold → motor was power-cycled → SETUP required.
+    # Also used as the cmd/actual divergence warning threshold in RUN mode.
     # 1000 counts ≈ a few motor steps, well below any intentional motion.
-    home_consistency_threshold: 1000.0
+    home_consistency_threshold: 50000.0

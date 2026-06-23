@@ -34,12 +34,15 @@ mtt_operator_input_node:
     articulation_hold_enabled: false
     parking_brake_dither_amplitude: 0.30
     articulation_hold_reset_on_deadman_release: true
-    # ---- COM motor mode toggle (bouton 7 par défaut) ----
-    # Appui bouton 7 : stick droit → pilote moteur COM (position ressort).
-    # Ré-appui        : stick droit → articulation (comportement nominal).
+    # ---- COM motor — bouton 7 actions (durée d'appui) ----
+    # Appui court  (< 1.5s)        → toggle COM ON/OFF (stick droit ↔ moteur COM)
+    # Appui moyen  (1.5s – 4.0s)   → set_home (sauve position actuelle comme home)
+    # Appui long   (> 4.0s)        → park (retour automatique au home)
     enable_com_mode_switch: true
     com_toggle_button_index: 7
     invert_com_steer: false
+    com_short_press_max_s: 1.5
+    com_long_press_min_s: 4.0
 
 mtt_manual_cmd_filter_node:
   ros__parameters:
