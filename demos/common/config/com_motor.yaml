@@ -14,19 +14,11 @@
 # ── motor_driver_node ──
 motor_driver_node:
   ros__parameters:
-    # Soft travel limits in encoder counts (absolute values).
-    # The commanded position is clamped to [min, max] BEFORE being sent to the
-    # drive — hardware safety net independent of the controller above.
-    #
-    # How to calibrate:
-    #   1. Run in SETUP mode (no limits active yet — find the mechanical extremes).
-    #   2. Jog to each extreme; note the count from /motor/joint_state.position[0].
-    #   3. Set below with a safety margin (e.g. ±500 counts from the true extreme).
-    #
-    # IMPORTANT: these must be WIDER than startup_relative_limit_counts × 2
-    # so the effective window is not clipped by the absolute bounds.
-    position_limit_min: -17500
-    position_limit_max:  73400
+    # Soft travel limits — safety net, kept wide so com_position_node's
+    # home-relative limits ([home ± 45000]) are the operational limits.
+    # Physical extremes are ≈ -16700 / 72900; using ±120000 for headroom.
+    position_limit_min: -120000
+    position_limit_max:  120000
 
     # ── Startup-relative guard ──
     # When > 0, the effective limits are computed RELATIVE to the motor's
@@ -86,14 +78,16 @@ com_position_node:
     amplitude_counts: 5000.0
 
     # Max jog speed in SETUP mode (counts/second).
-    setup_slew: 500000.0
+    # Reduced from 500000 — aggressive moves cause drive following-error faults.
+    setup_slew: 100000.0
 
     # Max slew rate in RUN mode (counts/second).
     run_slew: 500000.0
 
     # Slide-in speed when deadman is re-armed in RUN mode (counts/second).
     # Also used as park speed (autonomous return to home).
-    rearm_slew: 200000.0
+    # Set low for a smooth, fault-free PARK.
+    rearm_slew: 50000.0
 
     # ── Joystick deadband ──
     # Normalised steer values below this threshold are treated as zero.
