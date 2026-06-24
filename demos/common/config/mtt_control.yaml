@@ -4,7 +4,7 @@ mtt_operator_input_node:
     # Physical CAN scaling is set separately by mtt_can_node.max_linear_speed_ms.
     max_linear_speed: 4.2
     max_angular_command: 0.4
-    linear_deadband: 0.03
+    linear_deadband: 0.08   # 0.03→0.08: wider dead zone prevents accidental axis crossing
     angular_deadband: 0.05
     linear_expo: 1.0
     angular_expo: 1.1
@@ -15,6 +15,7 @@ mtt_operator_input_node:
     articulation_hold_button_index: 10
     steer_mode_switch_button_index: 4
     enable_steering_mode_switch: true
+    use_software_pid: true
     linear_axis_index: 1
     angular_axis_index: 3
     brake_axis_index: 5
@@ -29,10 +30,9 @@ mtt_operator_input_node:
     brake_axis_released: 1.0
     brake_axis_pressed: -1.0
     brake_full_fraction: 0.6
-    joy_timeout_s: 0.25
+    joy_timeout_s: 1.0
     articulation_hold_mode_default: false
     articulation_hold_enabled: false
-    parking_brake_dither_amplitude: 0.30
     articulation_hold_reset_on_deadman_release: true
     # ---- COM motor — bouton 7 actions (durée d'appui) ----
     # Appui court  (< 1.5s)        → toggle COM ON/OFF (stick droit ↔ moteur COM)
@@ -50,14 +50,21 @@ mtt_manual_cmd_filter_node:
     output_topic: cmd_vel/manual
     input_timeout_s: 0.4
     publish_rate_hz: 50.0
-    linear_rise_rate: 2.1
+    linear_rise_rate: 1.5
     linear_fall_rate: 3.5
     angular_rise_rate: 2.0
     angular_fall_rate: 3.0
     immediate_angular_zero: true
+    # Direction-reversal guard: block forward→reverse or reverse→forward while
+    # the filtered output exceeds this threshold (m/s). Protects against the
+    # motor controller relay-direction bug (flipping relay under load causes
+    # the requested direction to be applied in the wrong sense → forward kick).
+    # Operator must reduce speed below this value before reversal is accepted.
+    # Set to 0.0 to disable.
+    reversal_guard_threshold: 0.30
     # Feedforward decel: when stick released, briefly command
     # -gain * current_output to create motor counter-thrust.
-    # No tachometer needed. 0.35 → ~35% reverse throttle at max speed.
+    # No tachometer needed. 0.20 → ~20% reverse throttle at max speed.
     decel_brake_gain: 0.20
     decel_brake_threshold: 0.05
     enable_dynamic_filter: false
