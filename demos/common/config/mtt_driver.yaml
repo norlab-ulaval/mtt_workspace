@@ -1,6 +1,6 @@
 mtt_can_node:
   ros__parameters:
-    steer_control_mode: closed_loop
+    steer_control_mode: open_loop
     cmd_angular_mode: normalized_steer
     tachometer_mode: real
     invert_inferred_tachometer_direction: false
@@ -30,10 +30,10 @@ mtt_can_node:
     steer_deadband: 0.05
     min_steer_speed_ms: 0.1
     model_wheelbase_m: 2.4
-    model_max_articulation_deg: 60.0
+    model_max_articulation_deg: 45.0
     model_speed_response_gain: 3.0
     model_articulation_response_gain: 0.8
-    model_brake_gain: 1.0
+    model_brake_gain: 10.0
     model_use_slip_heuristic: true
     model_yaw_slip_base: 0.10
     model_yaw_slip_speed_gain: 0.05
@@ -50,9 +50,10 @@ mtt_can_node:
 
 mtt_articulation_sensor_node:
   ros__parameters:
-    serial_port: "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066EFF373146363143225155-if02"
+    serial_port: "/dev/serial/by-id/usb-STMicroelectronics_STM32_STLink_066FFF373146363143224542-if02"
     baud_rate: 921600
     publish_rate_hz: 50.0
+    data_timeout_s: 0.25
     filter_window_size: 50
     # Convention: positive = LEFT turn (CCW/REP-103), negative = RIGHT.
     # The LUT (low bits≈+48°, high bits≈-49°) already follows this convention.
@@ -68,18 +69,22 @@ mtt_articulation_sensor_node:
 
 mtt_odometry_node:
   ros__parameters:
-    steer_control_mode: closed_loop
+    steer_control_mode: open_loop
     cmd_angular_mode: normalized_steer
     pivot_turn_enabled: false
     min_turn_speed_ms: 0.05
     yaw_slip_factor: 1.0
-    max_articulation_deg: 60.0
+    max_articulation_deg: 45.0
     hardware_articulation_topic: /hardware/articulation_angle
     hardware_articulation_timeout_seconds: 0.5
     articulation_state_topic: ""
-    use_articulation_state_lidar: false
+    use_articulation_state_lidar: true
+    prefer_lidar_articulation: true
+    lidar_articulation_topic: /trailer/articulation_angle
+    lidar_articulation_detected_topic: /trailer/articulation_detected
+    lidar_articulation_timeout_seconds: 0.5
     model_wheelbase_m: 2.4
-    model_max_articulation_deg: 60.0
+    model_max_articulation_deg: 45.0
     model_speed_response_gain: 3.0
     model_articulation_response_gain: 0.8
     model_brake_gain: 1.0
@@ -105,7 +110,14 @@ mtt_odometry_node:
     # (measure with scripts/analyze_imu_bias.py).
     imu_yaw_rate_bias_rad_s: 0.0
     imu_complementary_alpha: 0.7
-    use_imu_heading: true
+    # false: heading is integrated smoothly from IMU yaw rate (eff_ang), matching
+    # the bag_replay runtime_odometry override. true previously let the Madgwick
+    # absolute orientation overwrite the heading outright (odometry_calculator.cpp:122);
+    # an IMU data gap > 0.2s freezes that heading, then snaps up to 47° in one tick
+    # when the IMU resumes — this fed directly into the ICP mapper's odom prior on
+    # the live robot (bag_replay/compose.yaml:202-210 documents the same bug fixed
+    # there but never backported here).
+    use_imu_heading: false
 
 mtt_joint_state_builder_node:
   ros__parameters:
@@ -113,11 +125,11 @@ mtt_joint_state_builder_node:
     articulation_topic: /hardware/articulation_angle
     tachometer_topic: mtt_tachometer
     joint_state_topic: joint_states
-    pitch_rest_rad: -1.5707963267948966
+    pitch_rest_rad: 0.0
     yaw_rest_rad: 0.0
-    roll_rest_rad: -1.5707963267948966
+    roll_rest_rad: 0.0
     articulation_sign: 1.0
-    max_articulation_deg: 60.0
+    max_articulation_deg: 45.0
     trailer_left_link_rest_rad: 0.0
     trailer_right_link_rest_rad: 0.0
     drive_joint_radius_m: 0.0202
@@ -125,3 +137,41 @@ mtt_joint_state_builder_node:
     trailer_wheel_radius_m: 0.0508
     left_wheel_rotation_sign: 1.0
     right_wheel_rotation_sign: 1.0
+
+mtt_articulation_servo_node:
+  ros__parameters:
+    # Operating mode:
+    #   "position" — accept /mtt_articulation_setpoint (rad), hold with PD
+    #   "velocity" — accept /mtt_articulation_velocity_cmd (rad/s), integrate to setpoint
+    #   "disabled" — node does nothing (safe default)
+    mode: "position"
+
+    control_frequency_hz: 50.0
+
+    feedback_topic: "/hardware/articulation_angle"
+    # PID steering uses the STM32 potentiometer directly.  The LiDAR-fused
+    # /mtt/articulation_state remains available for odometry and diagnostics.
+    prefer_state_feedback: false
+    state_feedback_topic: "/mtt/articulation_state"
+    position_cmd_topic: "/mtt_articulation_setpoint"
+    velocity_cmd_topic: "/mtt_articulation_velocity_cmd"
+
+    # ── PD gains ──
+    kp: 6.0             # normalized_steer / rad (Augmenté pour une réponse immédiate et rapide)
+    kd: 0.25            # normalized_steer·s / rad (Augmenté pour freiner le moteur avant la butée et éviter l'overshoot)
+    ki: 0.0             # disabled
+    integrator_limit: 0.30
+
+    # ── Limits ──
+    max_steer: 1.0
+    max_articulation_rad: 0.733   # ±42° (Sécurité renforcée pour éviter les butées physiques à 45°)
+    max_velocity_rad_s: 0.50      # velocity mode rate limit (~29°/s)
+
+    # ── Safety ──
+    feedback_timeout_s: 0.30
+    command_timeout_s: 0.25
+    feedback_watchdog.enabled: true
+    feedback_watchdog.min_error_rad: 0.05
+    feedback_watchdog.min_effort: 0.15
+    feedback_watchdog.movement_epsilon_rad: 0.005
+    feedback_watchdog.stuck_timeout_s: 0.75
