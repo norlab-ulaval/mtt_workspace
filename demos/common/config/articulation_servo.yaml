@@ -9,20 +9,28 @@ mtt_articulation_servo_node:
     control_frequency_hz: 50.0
 
     feedback_topic: "/hardware/articulation_angle"
+    # Use the STM32 potentiometer directly for the steering PID.
+    prefer_state_feedback: false
+    state_feedback_topic: "/mtt/articulation_state"
     position_cmd_topic: "/mtt_articulation_setpoint"
     velocity_cmd_topic: "/mtt_articulation_velocity_cmd"
 
     # ── PD gains ──
-    kp: 2.0             # normalized_steer / rad
-    kd: 0.05            # normalized_steer·s / rad
+    kp: 6.0             # normalized_steer / rad (Augmenté pour une réponse immédiate et rapide)
+    kd: 0.25            # normalized_steer·s / rad (Augmenté pour freiner le moteur avant la butée et éviter l'overshoot)
     ki: 0.0             # disabled
     integrator_limit: 0.30
 
     # ── Limits ──
     max_steer: 1.0
-    max_articulation_rad: 1.047   # ±60°
+    max_articulation_rad: 0.733   # ±42° (Sécurité renforcée pour éviter les butées physiques à 45°)
     max_velocity_rad_s: 0.50      # velocity mode rate limit (~29°/s)
 
     # ── Safety ──
     feedback_timeout_s: 0.30
     command_timeout_s: 0.25
+    feedback_watchdog.enabled: true
+    feedback_watchdog.min_error_rad: 0.05
+    feedback_watchdog.min_effort: 0.15
+    feedback_watchdog.movement_epsilon_rad: 0.005
+    feedback_watchdog.stuck_timeout_s: 0.75
