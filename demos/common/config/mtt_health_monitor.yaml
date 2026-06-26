@@ -12,9 +12,9 @@ mtt_health_monitor_node:
     steer_control_mode: closed_loop
     cmd_angular_mode: normalized_steer
     min_steer_speed_ms: 0.1
-    max_articulation_deg: 60.0
+    max_articulation_deg: 45.0
     model_wheelbase_m: 2.4
-    model_max_articulation_deg: 60.0
+    model_max_articulation_deg: 45.0
     model_speed_response_gain: 3.0
     model_articulation_response_gain: 0.8
     model_brake_gain: 1.0
