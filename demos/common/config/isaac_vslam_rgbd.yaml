@@ -1,0 +1,35 @@
+# Isaac Visual SLAM RGB-D profile for MTT ZED2i.
+# The node is launched by the live_robot isaac_vslam compose service.
+---
+/**:
+  ros__parameters:
+    use_sim_time: false
+    num_cameras: 1
+    min_num_images: 1
+    tracking_mode: 2
+    rectified_images: true
+    enable_localization_n_mapping: true
+    enable_ground_constraint_in_odometry: true
+    enable_ground_constraint_in_slam: true
+    depth_scale_factor: 1000.0
+    map_frame: "isaac_map"
+    odom_frame: "isaac_odom"
+    base_frame: "zed_camera_link"
+    camera_optical_frames: ["zed_left_camera_frame_optical"]
+    imu_frame: "zed_imu_link"
+    publish_map_to_odom_tf: true
+    publish_odom_to_base_tf: true
+    invert_map_to_odom_tf: false
+    invert_odom_to_base_tf: false
+    enable_slam_visualization: true
+    enable_observations_view: true
+    enable_landmarks_view: true
+    path_max_size: 20000
+    verbosity: 1
+    image_buffer_size: 120
+    imu_buffer_size: 400
+    image_qos: "SENSOR_DATA"
+    imu_qos: "SENSOR_DATA"
+    image_jitter_threshold_ms: 45.0
+    imu_jitter_threshold_ms: 15.0
+    save_map_folder_path: "/data/isaac_ros/vslam_map"
