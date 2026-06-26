@@ -1,0 +1,21 @@
+# Isaac Nvblox profile for MTT ZED depth + optional lidar pointcloud.
+---
+/**:
+  ros__parameters:
+    use_sim_time: false
+    global_frame: "isaac_map"
+    pose_frame: "zed_camera_link"
+    use_tf_transforms: true
+    num_cameras: 1
+    voxel_size: 0.08
+    esdf_mode: "2d"
+    esdf_update_rate_hz: 5.0
+    mesh_update_rate_hz: 2.0
+    color_mesh: true
+    static_occupancy_publication_rate_hz: 2.0
+    slice_visualization_attachment_frame_id: "zed_camera_link"
+    esdf_2d_min_height: -0.40
+    esdf_2d_max_height: 1.50
+    workspace_bounds_type: "unbounded"
+    max_tsdf_distance_for_occupancy_m: 0.20
+    max_unobserved_to_keep_consecutive_occupancy_ms: 1000
