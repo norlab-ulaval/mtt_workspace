@@ -1,10 +1,16 @@
 wiln_teach_node:
   ros__parameters:
-    smoothing_window_size: 15
-    min_dist_between_poses: 0.10
-    min_angle_between_poses: 0.05
-    max_record_jump_m: 1.0
+    # Half-window W=3 => 7 samples (~35 cm total at 5 cm/sample). W=9 was
+    # actually a 19-sample/~95 cm window and rounded away taught corners.
+    smoothing_window_size: 3
+    min_dist_between_poses: 0.05   # 2× denser than before → 20 poses/m, robust to ICP drops
+    min_angle_between_poses: 0.03  # record turning in place with less gap
+    max_record_jump_m: 2.5
     max_record_yaw_jump_rad: 0.8
+    # Geodesic arc-length resampling after smoothing.
+    # Produces evenly-spaced poses using SE(3) SLERP: T(t)=T1·Exp(t·Log(T1⁻¹·T2)).
+    # Set to 0.0 to disable (keeps raw filtered+smoothed poses).
+    resample_spacing_m: 0.05       # retain taught geometry; controller uses metric lookahead
 
 wiln_route_node:
   ros__parameters:
@@ -17,34 +23,87 @@ wiln_route_node:
 
 wiln_replay_node:
   ros__parameters:
+    odom_topic: /mapping/icp_measurement
+    # The follower has a dedicated low-speed capture phase, so the robot may
+    # start a few metres from an endpoint without pretending it is already on it.
+    max_start_distance_m: 3.0
     trajectory_speed: 1.50
     control_local_plan_topic: /wiln/control/local_plan
     robot_model: mtt
     kappa_max: 0.70
-    articulation_limit_rad: 1.047
+    articulation_limit_rad: 0.733  # same ±42° limit as the active articulation servo
     enable_mapping_service: /mapping/enable_mapping
+    # IMPORTANT: use the real disable_mapping service.
+    # Replay waits for this service response before allowing motion. The mapper
+    # then keeps ICP localization running while map insertion remains disabled.
+    # Pointing this to a non-existent service lets SLAM run during replay → map grows
+    # → each ICP scan-to-map is slower → ICP rate degrades from ~10 to <1 Hz → stop.
     disable_mapping_service: /mapping/disable_mapping
+    reenable_mapping_on_stop: false  # keep the taught map immutable; next teach_start re-enables insertion
+    enable_deformation: false  # skip deformer — PathFollower already follows global trajectory
+    debug: false               # set true to enable verbose [DBG] replay logs
 
 wiln_path_follower:
   ros__parameters:
-    odom_topic: /mapping/icp_odom
-    local_plan_topic: /wiln/control/local_plan
+    # Accepted registrations only. /mapping/icp_odom can also contain mapper
+    # odom-bridge predictions, which must not masquerade as an ICP correction.
+    odom_topic: /mapping/icp_measurement
+    fallback_odom_topic: /mtt_odometry  # encoder-based dead-reckoning if ICP stale (Phase 1c)
+    fallback_max_s: 10.0                 # max seconds on fallback before safe stop
+    # ICP can arrive several seconds after its scan. Keep encoder history so the
+    # correction is anchored at the scan timestamp before propagating to now.
+    fallback_history_s: 20.0
+    fallback_anchor_max_skew_s: 0.15
+    # Deadman gate: PathFollower outputs zero cmd_vel until operator holds deadman (RB).
+    # This is the physical guard that allows "press A to arm, hold deadman to move."
+    require_deadman: true
+    deadman_topic: mtt_control/teleop_deadman
+    debug: false                          # set true to enable verbose [DBG] follower logs
+    local_plan_topic: /wiln/control/local_plan_disabled  # bypass deformer — follow raw trajectory
     trajectory_topic: /wiln/trajectory
     command_topic: /wiln/command
     replay_state_topic: /wiln/replay/state
     state_topic: /wiln/follower/state
     cmd_vel_topic: controller/cmd_vel
+    # Keep the proven direct Repeat chain by default. Future obstacle-avoidance
+    # activation must change this to true together with cmd_vel_topic remapping;
+    # WILN then emits one canonical signed-speed + normalized-articulation
+    # command and stops publishing actuator setpoints directly.
+    external_command_mux: false
     obstacle_stop_topic: /mtt_obstacle/stop_requested
     obstacle_slowdown_topic: /mtt_obstacle/slowdown_scale
     obstacle_gate_timeout_s: 0.5
-    default_speed_ms: 1.20
+    tracking_error_grace_s: 2.0
+    max_lateral_error_m: 1.0
+    max_heading_error_rad: 0.80
+    max_target_distance_m: 3.0
+    # Monotone nearest-progress + metric lookahead. This prevents a missed
+    # 10-cm route sample from remaining behind the robot and causing a U-turn.
+    advance_distance_m: 0.20  # legacy compatibility; no longer gates progress
+    lookahead_distance_m: 1.00
+    waypoint_search_ahead_points: 50
+    # Conservative articulated tracking gains. The previous k_y=0.6 saturated
+    # the ±42° articulation for a normal 0.58 m start offset and overshot badly.
+    k_y: 0.20
+    k_theta: 0.90
+    kappa_max: 0.35
+    join_max_lateral_error_m: 3.0
+    join_max_heading_error_rad: 1.20
+    join_capture_lateral_m: 0.35
+    join_capture_heading_rad: 0.30
+    join_speed_ms: 0.45
+    join_timeout_s: 35.0
+    default_speed_ms: 0.70
     max_speed_ms: 1.60
-    min_speed_ms: 0.70
-    slowdown_alpha: 0.80
+    min_speed_ms: 0.35  # curved sections slow down, but no 0.25 m/s crawl at saturation
+    slowdown_alpha: 0.60
+    articulation_recenter_s: 8.0
+    articulation_feedback_topic: /hardware/articulation_angle
+    articulation_feedback_timeout_s: 0.5
+    articulation_center_tolerance_rad: 0.05
     robot_model: mtt
-    kappa_max: 0.70
     l_eq_m: 2.40
-    psi_max_rad: 1.047
+    psi_max_rad: 0.733  # match mtt_articulation_servo_node.max_articulation_rad
     model_use_slip_heuristic: true
     model_yaw_slip_base: 0.10
     model_yaw_slip_speed_gain: 0.05
@@ -66,7 +125,9 @@ wiln_path_follower:
     #   - Start with kp: 1.0, kd: 0.02 in articulation_servo.yaml (half defaults)
     #   - Test stationary articulation commands before driving
     #   - Set use_articulation_servo: true here, rebuild, test at 0.5 m/s
-    use_articulation_servo: false
+    # AUTO owns the software articulation servo. The operator input node is
+    # mode-gated and stops publishing manual setpoints while selected_mode=AUTO.
+    use_articulation_servo: true
     use_speed_servo: false
 
 wiln_obstacle_node:
@@ -74,7 +135,7 @@ wiln_obstacle_node:
     odom_topic: /mapping/icp_odom
     obstacles_topic: /wiln/obstacles
     lidar_topics:
-      - /hesai_lidar/points
+      - /nonexistent_lidar_disabled  # obstacle detection disabled — node stays alive but sees nothing
     target_frame: map
     publish_rate_hz: 10.0
     obstacle_max_age_s: 0.5
@@ -95,14 +156,14 @@ wiln_obstacle_node:
     # points are published back in map frame.
     enable_self_filter: true
     self_filter_chassis_box: [-1.00, 0.80, -0.50, 0.50, -0.30, 0.90]
-    self_filter_lidar_cage_box: [-0.35, 0.25, -0.30, 0.30, 0.50, 1.20]
+    self_filter_lidar_cage_box: [-0.35, 0.90, -0.35, 0.35, 0.30, 1.30]
     self_filter_rsairy_box: [-0.30, 0.25, 0.55, 1.05, 0.50, 1.20]
     self_filter_trailer_box: [-4.20, -0.75, -1.35, 1.35, -0.40, 2.50]
 
 wiln_safety_monitor:
   ros__parameters:
-    odom_topic: /mapping/icp_odom
-    # 5.0s last-resort kill — mtt_repeat_supervisor (2.0s) fires first.
-    # Robot already stops at PathFollower odom_timeout_s=2.5s (PathFollower.cpp:41).
-    odom_timeout_s: 5.0
+    odom_topic: /mapping/icp_measurement
+    # Pure-ICP watchdog. Encoder propagation keeps control continuous through
+    # short gaps; this watchdog cancels if accepted registrations stop entirely.
+    odom_timeout_s: 8.0
     check_rate_hz: 5.0
