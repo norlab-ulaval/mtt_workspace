@@ -2,7 +2,9 @@
   mtt_repeat_supervisor:
     ros__parameters:
       health_topic: /mtt_health
-      icp_odom_topic: /mapping/icp_odom
+      # Accepted ICP only; bridge predictions on /mapping/icp_odom do not reset
+      # the localization watchdog.
+      icp_odom_topic: /mapping/icp_measurement
       teleop_topic: cmd_vel/manual
       deadman_topic: mtt_control/teleop_deadman
       controller_cmd_vel_topic: controller/cmd_vel
@@ -12,16 +14,25 @@
       state_topic: mtt_repeat/state
       ready_topic: mtt_repeat/ready
       wiln_command_topic: /wiln/command
+      replay_state_topic: /wiln/replay/state
+      follower_state_topic: /wiln/follower/state
+      replay_ack_timeout_s: 4.0
       request_auto_service: mtt_control/request_auto
       request_manual_service: mtt_control/request_manual
+      enable_mapping_service: /mapping/enable_mapping
+      disable_mapping_service: /mapping/disable_mapping
+      mapping_service_timeout_s: 5.0
       health_timeout_s: 1.0
-      # 2.0s gives the mapper time to recover from a short rejection burst
-      # (2-3 scans at 10 Hz = 0.2-0.3s). The path follower still stops at
-      # odom_timeout_s=2.5s (PathFollower.cpp) — robot halts; only replay
-      # cancel is delayed to avoid killing the mission prematurely.
-      icp_timeout_s: 2.0
+      # Uses the measurement header stamp, so delayed registrations consume this
+      # budget too. The follower bridges from the last accepted ICP with wheel
+      # odom, while the supervisor cancels if no accepted correction is recent.
+      icp_timeout_s: 8.0
       teleop_override_linear_threshold: 0.05
       teleop_override_angular_threshold: 0.05
       replay_idle_timeout_s: 1.0
-      replay_startup_timeout_s: 5.0
+      # Includes the mapper service acknowledgement when a long registration is
+      # already in flight; PathFollower holds zero until that acknowledgement.
+      replay_startup_timeout_s: 12.0
       monitor_rate_hz: 10.0
+      armed_timeout_s: 300.0  # auto-disarm if operator doesn't press A within 5 min
+      debug: false  # set true to enable verbose [SUP] logs during replay
