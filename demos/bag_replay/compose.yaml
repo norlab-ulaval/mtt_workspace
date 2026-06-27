@@ -25,6 +25,12 @@ x-replay-base: &replay_base
     REPLAY_START_OFFSET: ${REPLAY_START_OFFSET:-0}
     REPLAY_KEEP_ZED_ODOM: ${REPLAY_KEEP_ZED_ODOM:-false}
     REPLAY_USE_RECORDED_MAPPING: ${REPLAY_USE_RECORDED_MAPPING:-false}
+    # Sensor cage calibration version:
+    #   v1 — cage BEFORE displacement (hesai rpy=π/2, X=LEFT frame). Use for all bags up to 2026-06-24.
+    #   v2 — cage AFTER displacement  (hesai rpy=π,   X=BACKWARD frame). Use for bags from 2026-06-25+.
+    # Each version carries its own sensor mount values (rsairy, ZED, IMU) in the matching frame.
+    #   CALIBRATION=v2 BAG_PATH=/path/to/new_bag docker compose up
+    CALIBRATION: ${CALIBRATION:-v1}
     # Path to the bag to replay — set in .env or on the command line:
     #   BAG_PATH=/path/to/bag dcr up
     BAG_PATH: ${BAG_PATH:-}
@@ -106,6 +112,7 @@ services:
         fi
         exec ros2 bag play \
           --clock \
+          --delay ${REPLAY_DELAY:-3} \
           --loop \
           --read-ahead-queue-size 10000 \
           --rate ${REPLAY_RATE:-1.0} \
@@ -133,9 +140,7 @@ services:
     command:
       - ros2
       - launch
-      - ${WORKSPACE}/src/external/norlab_robot/launch/include/description.launch.py
-      - use_joint_state_publisher:=false
-      - use_sim_time:=true
+      - ${WORKSPACE}/demos/bag_replay/launch/description_calib.launch.py
 
   # ── ZED detections → Foxglove markers ──
   # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray so
@@ -251,8 +256,80 @@ services:
       - rotation_only:=${IMU_ODOM_ROTATION_ONLY:-true}
       - -p
       - real_time:=false
+      - -p
+      - use_altitude:=${IMU_ODOM_USE_ALTITUDE:-false}
       - -r
       - imu_topic:=${IMU_ODOM_TOPIC:-/mti100/data}
+      - -r
+      - icp_odom:=${IMU_ODOM_ICP_TOPIC:-/mapping/icp_odom}
+
+  # ── KISS-ICP prior odometry ──
+  # Independent IMU prior for KISS. It intentionally does NOT subscribe to
+  # /mapping/icp_odom, because that is KISS' own output in this profile.
+  # Feeding KISS output back into imu_odom and then using imu_odom as the KISS
+  # prior creates a positive feedback loop: KISS → imu_odom TF → KISS.
+  imu_odom_kiss:
+    <<: [*replay_base]
+    profiles: ["kissicp"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - ros2
+      - run
+      - imu_odom
+      - imu_odom_node
+      - --ros-args
+      - -p
+      - use_sim_time:=true
+      - -p
+      - odom_frame:=${KISS_IMU_ODOM_FRAME:-odom}
+      - -p
+      - robot_frame:=${KISS_IMU_ODOM_ROBOT_FRAME:-base_footprint}
+      - -p
+      - imu_frame:=${KISS_IMU_ODOM_IMU_FRAME:-imu_link}
+      - -p
+      - rotation_only:=${KISS_IMU_ODOM_ROTATION_ONLY:-true}
+      - -p
+      - real_time:=false
+      - -p
+      - use_altitude:=${KISS_IMU_ODOM_USE_ALTITUDE:-false}
+      - -r
+      - imu_topic:=${KISS_IMU_ODOM_TOPIC:-/mti100/data}
+      - -r
+      - icp_odom:=${KISS_IMU_ODOM_ICP_TOPIC:-/kiss_icp/no_icp_feedback}
+
+  # ── Mathis COM-shift replay odometry ──
+  # Same odom principle as demos/mathis_com_shift:
+  #   - imu_odom owns odom → base_footprint
+  #   - no runtime_odometry at the same time
+  #   - no altitude input unless this service is explicitly changed later
+  #   - mapper feeds /mapping/icp_odom back into imu_odom
+  imu_odom_mathis:
+    <<: [*replay_base]
+    profiles: ["mathis_mapping"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        exec ros2 run imu_odom imu_odom_node --ros-args \
+          -p use_sim_time:=true \
+          -p odom_frame:="$${IMU_ODOM_FRAME:-odom}" \
+          -p robot_frame:="$${IMU_ODOM_ROBOT_FRAME:-base_footprint}" \
+          -p imu_frame:="$${IMU_ODOM_IMU_FRAME:-imu_link}" \
+          -p rotation_only:="$${IMU_ODOM_ROTATION_ONLY:-false}" \
+          -p real_time:=false \
+          -p use_altitude:=false \
+          -r imu_topic:="$${IMU_ODOM_TOPIC:-/mti100/data}" \
+          -r imu_odom:="$${IMU_ODOM_OUTPUT_TOPIC:-/imu_odom}" \
+          -r icp_odom:="$${IMU_ODOM_ICP_TOPIC:-/mapping/icp_odom}"
 
   # ── ZED visual odometry → odom TF (replay-only odom prior) ──
   # Wheel odom translation diverges on the downhill segment (track slip at
@@ -285,6 +362,17 @@ services:
   # ── Joint-state reconstruction from replay-local articulation + tachometer ─
   # One shared builder owns the articulated visualization in replay and in
   # simulation. The bag keeps sensors and odometry, but not body TF/joint state.
+  #
+  # By default the visual mesh follows the HARDWARE/effective angle (via
+  # articulation_state_topic, which prefers hardware_rad over effective_rad
+  # whenever hardware is fresh — see mtt_joint_state_builder_node.cpp's
+  # on_articulation_state()). To instead drive the visual trailer with the
+  # LiDAR-DETECTED angle from trailer_detector_node — useful to visually verify
+  # /trailer/articulation_angle against the real trailer's rotation — override:
+  #   REPLAY_JOINT_ARTICULATION_TOPIC=/trailer/articulation_angle
+  #   REPLAY_JOINT_ARTICULATION_STATE_TOPIC=
+  # (empty string disables the higher-priority MttArticulationState path so it
+  # falls through to the plain Float64 articulation_topic above).
   joint_state_builder:
     <<: [*replay_base]
     depends_on:
@@ -303,9 +391,9 @@ services:
       - -p
       - joint_state_topic:=joint_states
       - -p
-      - articulation_topic:=mtt_articulation_angle/runtime
+      - articulation_topic:=${REPLAY_JOINT_ARTICULATION_TOPIC:-mtt_articulation_angle/runtime}
       - -p
-      - articulation_state_topic:=mtt/articulation_state/runtime
+      - articulation_state_topic:=${REPLAY_JOINT_ARTICULATION_STATE_TOPIC:-mtt/articulation_state/runtime}
       - -p
       - articulation_state_timeout_seconds:=1.0
       - -p
@@ -314,11 +402,24 @@ services:
   # ── Factor Graph localization in replay mode ──
   # Fuses all recorded sensor topics.
   # use_sim_time:=true ensures the graph runs on bag timestamps.
+  # track_odom_topic/articulation_topic MUST point at the /runtime-suffixed
+  # streams (recomputed by runtime_odometry) instead of the launch file's live
+  # defaults (raw bag-recorded topics) — same convention already used by the
+  # mapping/joint_state_builder services. Depends on runtime_odometry so those
+  # streams actually exist before factor_graph_node subscribes.
+  # REPLAY_LOCALIZATION_USE_GPS_HEADING: set to false for single-antenna sessions
+  # (check session_info.yaml's gps_antennas field) — a single-antenna bag's
+  # /gps/heading is not a valid measurement, and feeding it in as a tight rotation
+  # PriorFactor injects contradictory absolute-orientation constraints across
+  # keyframes as the robot turns, observed to manifest as
+  # IndeterminantLinearSystemException near the IMU bias.
   localization:
     <<: [*replay_base]
     profiles: ["localization"]
     depends_on:
       bag_player:
+        condition: service_started
+      runtime_odometry:
         condition: service_started
     command:
       - ros2
@@ -326,6 +427,10 @@ services:
       - mtt_localization
       - localization.launch.py
       - use_sim_time:=true
+      - track_odom_topic:=mtt_odometry/runtime
+      - articulation_topic:=mtt/articulation_state/runtime
+      - use_gps:=${REPLAY_LOCALIZATION_USE_GPS:-true}
+      - use_gps_heading:=${REPLAY_LOCALIZATION_USE_GPS_HEADING:-true}
 
   # ── Offline ICP rebuild for one session or a whole data directory ──
   # Replays the bag, rebuilds the merged cloud if both LiDARs are available,
@@ -355,6 +460,7 @@ services:
       OFFLINE_ICP_FORCE: ${OFFLINE_ICP_FORCE:-false}
       OFFLINE_ICP_QUALITY: ${OFFLINE_ICP_QUALITY:-standard}
       OFFLINE_ICP_SETTLE_S: ${OFFLINE_ICP_SETTLE_S:-4.0}
+      OFFLINE_ICP_MAX_REPLAY_RATE: ${OFFLINE_ICP_MAX_REPLAY_RATE:-0.25}
       OFFLINE_ICP_READY_TIMEOUT_S: ${OFFLINE_ICP_READY_TIMEOUT_S:-30.0}
       OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S: ${OFFLINE_ICP_PLAY_TIMEOUT_MARGIN_S:-90.0}
       OFFLINE_ICP_MAPPING_CONFIG: ${OFFLINE_ICP_MAPPING_CONFIG:-}
@@ -383,8 +489,11 @@ services:
   #                               /trailer/body_markers, /trailer/trailer_roi_cloud,
   #                               /trailer/articulation_angle (back-computed), TF map→trailer_body
   #
-  # Set REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR=false to use the legacy trailer_pose_node
-  # (V4.0) instead — useful for A/B comparison.
+  # trailer_pose_node (V4.0, legacy) is the default and the proven/stable reference.
+  # Set REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR=true to A/B against mtt_trailer_estimator_node
+  # (EKF V1.0) instead — that node is REGRESSED (two competing yaw models, dead ICP/RANSAC
+  # code, markers decoupled from filter state); do not use it as the default measurement
+  # source for anything downstream.
   #
   # Depends on description so robot_state_publisher has published TF before
   # cloud_merger_node tries to transform clouds (hesai_lidar → base_link).
@@ -407,12 +516,86 @@ services:
         sleep 3
         exec ros2 launch mtt_perception perception.launch.py \
           use_sim_time:=true \
-          enable_new_trailer_estimator:=${REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR:-true} \
+          enable_new_trailer_estimator:=${REPLAY_ENABLE_NEW_TRAILER_ESTIMATOR:-false} \
           publish_filtered:=true \
           cloud_merger_max_pair_dt:=0.120 \
           cloud_merger_tf_timeout:=0.100 \
           cloud_merger_publish_debug_inputs:=true \
           cloud_merger_enable_trailer_bbox_filter:=${REPLAY_FILTER_TRAILER_FROM_MAPPING:-true}
+
+  # ── Cloud merger only for KISS-ICP replay ──
+  # Publishes /merged_points_filtered without starting runtime_odometry or the
+  # trailer perception stack. This is safe to combine with the kissicp profile:
+  # imu_odom_kiss remains the only odom -> base_footprint TF source.
+  #
+  # Usage:
+  #   KISS_POINTS_TOPIC=/merged_points_filtered \
+  #   docker compose --profile kissicp --profile kissicp_merged up \
+  #     bag_player description imu_odom_kiss cloud_merger_kiss kiss_icp foxglove -d
+  cloud_merger_kiss:
+    <<: [*replay_base]
+    profiles: ["kissicp_merged"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        wait_for_topic() {
+          topic="$$1"
+          timeout_s="$$2"
+          echo "Waiting for $$topic..."
+          for i in $$(seq 1 "$$timeout_s"); do
+            ros2 topic info "$$topic" 2>/dev/null | grep -qE "Publisher count: [1-9]" && return 0
+            sleep 1
+          done
+          echo "ERROR: $$topic not available after $${timeout_s}s"
+          return 1
+        }
+        wait_for_tf() {
+          parent="$$1"
+          child="$$2"
+          timeout_s="$$3"
+          echo "Waiting for TF $$parent -> $$child..."
+          deadline=$$(( $$(date +%s) + timeout_s ))
+          while [ "$$(date +%s)" -lt "$$deadline" ]; do
+            if timeout 3 ros2 run tf2_ros tf2_echo "$$parent" "$$child" 2>&1 | grep -q "Translation"; then
+              return 0
+            fi
+            sleep 1
+          done
+          return 1
+        }
+
+        wait_for_topic /hesai_lidar/points 75 || exit 1
+        wait_for_topic /rsairy_ns/points 75 || {
+          echo "ERROR: /rsairy_ns/points absent; merged cloud needs the RS-Airy bag topic."
+          exit 1
+        }
+        wait_for_tf base_link hesai_lidar 45 || exit 2
+        wait_for_tf base_link rsairy 45 || exit 2
+
+        exec ros2 run mtt_perception cloud_merger_node --ros-args \
+          --params-file ${WORKSPACE}/src/mtt_core/mtt_perception/config/perception.yaml \
+          -p use_sim_time:=true \
+          -p publish_filtered:=true \
+          -p anchor_sensor:=${KISS_MERGER_ANCHOR_SENSOR:-hesai} \
+          -p max_pair_dt:=${KISS_MERGER_MAX_PAIR_DT:-0.120} \
+          -p tf_timeout:=${KISS_MERGER_TF_TIMEOUT:-0.100} \
+          -p publish_debug_inputs:=${KISS_MERGER_PUBLISH_DEBUG_INPUTS:-true} \
+          -p publish_reliable_raw_for_mapping:=${KISS_MERGER_PUBLISH_RELIABLE_RAW:-false} \
+          -p remove_invalid_points:=${KISS_MERGER_REMOVE_INVALID_POINTS:-false} \
+          -p hesai_stride:=${KISS_MERGER_HESAI_STRIDE:-1} \
+          -p rsairy_stride:=${KISS_MERGER_RSAIRY_STRIDE:-1} \
+          -p rsairy_inject_every_n:=${KISS_MERGER_RSAIRY_INJECT_EVERY_N:-1} \
+          -p enable_self_bbox_filter:=${KISS_MERGER_ENABLE_SELF_BBOX_FILTER:-true} \
+          -p enable_trailer_bbox_filter:=$${KISS_MERGER_ENABLE_TRAILER_BBOX_FILTER:-$${REPLAY_FILTER_TRAILER_FROM_MAPPING:-false}} \
+          -p bbox_trailer_x:="$${KISS_MERGER_TRAILER_BBOX_X:-[-4.80,-0.65]}" \
+          -p bbox_trailer_y:="$${KISS_MERGER_TRAILER_BBOX_Y:-[-2.20,2.20]}" \
+          -p bbox_trailer_z:="$${KISS_MERGER_TRAILER_BBOX_Z:-[-0.45,2.70]}"
 
   # ── ICP mapping in replay ──
   # Baseline: single LiDAR /hesai_lidar/points — pas de cloud fusionné.
@@ -436,10 +619,11 @@ services:
     volumes:
       - ${WORKSPACE}/scripts:${WORKSPACE}/scripts
     environment:
-      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/kiss_icp/input_points}
+      MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
       MAPPING_RAW_POINTS_TOPIC: ${MAPPING_RAW_POINTS_TOPIC:-/hesai_lidar/points}
-      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml}
+      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_hesai_wheel_replay.yaml}
       MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.50}
+      MAPPING_MAP_PUBLICATION_SOURCE: ${MAPPING_MAP_PUBLICATION_SOURCE:-local}
       MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-1.0}
       MAPPING_MAP_TF_PUBLISH_RATE: ${MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
       MAPPING_MIN_INPUT_POINTS: ${MAPPING_MIN_INPUT_POINTS:-200}
@@ -447,13 +631,13 @@ services:
       MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_ROTATION_CORRECTION_DEG:-35.0}
       MAPPING_MAX_VELOCITY_MS: ${MAPPING_MAX_VELOCITY_MS:-8.0}
       MAPPING_MAX_YAW_RATE_DEG_S: ${MAPPING_MAX_YAW_RATE_DEG_S:-80.0}
-      # Raised for replay: consecutive rejections during motion freeze
-      # lastAcceptedRobotToMap_ → when a scan finally passes quality gate
-      # the yaw/pos step against the stale baseline exceeds the original
-      # live limits (30°, 4m).  180° / 100 m accommodate any real motion
-      # between acceptances while still catching clearly-impossible jumps.
-      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MAPPING_MAX_POSE_YAW_STEP_DEG:-180.0}
-      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-100.0}
+      # Replay must stay tolerant to wheel-prior drift, but not accept a false
+      # ICP branch. 180°/100m allowed observed jumps 3°→54°→115° to be published
+      # and inserted, corrupting the map. Keep the absolute accepted-pose step
+      # bounded; use the odom residual gate below for longer motion gaps.
+      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MAPPING_MAX_POSE_YAW_STEP_DEG:-20.0}
+      MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG: ${MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG:-12.0}
+      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-8.0}
       # 2.0m default (vs 0.75m live): replayed odom can have a Z offset if the
       # sensor mount was recalibrated since recording. ICP with force4DOF=1
       # self-corrects Z after the first accepted scan; subsequent jumps <0.1m.
@@ -465,7 +649,7 @@ services:
       MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-60.0}
       MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.10}
       MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-1.0}
-      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.08}
+      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.15}
       MAPPING_DESKEW: ${MAPPING_DESKEW:-true}
       # IMU gyro deskew: avoids odom-error → swirl coupling.
       # deskew_source=imu uses MTi-100 angular velocity for per-point correction
@@ -474,23 +658,26 @@ services:
       # prior; only per-point deskew moves to IMU.
       MAPPING_DESKEW_SOURCE: ${MAPPING_DESKEW_SOURCE:-imu}
       MAPPING_DESKEW_IMU_TOPIC: ${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data}
-      # Map trimming exists to bound online ICP cost (live robot). In replay it
-      # is FATAL: trim radius 40m < sensorMaxRange 60m means after a trim the
-      # far ring of every scan can no longer match the map, the insertion
-      # overlap gate (0.30, compile-time) never passes again, the map freezes
-      # and every scan ends up rejected. Observed 2026-06-11 at map=632k pts.
+      # Keep ICP bounded by trimming the active/local matcher map, while preserving
+      # the full output map separately for revisit/export. /mapping/map publishes
+      # the local window by default so Foxglove does not receive all old points.
+      # Without this split the matcher
+      # grows past ~500k pts, map rebuilds take seconds, then the anti-jump gate
+      # rejects every delayed scan.
+      MAPPING_ENABLE_GLOBAL_OUTPUT_MAP: ${MAPPING_ENABLE_GLOBAL_OUTPUT_MAP:-true}
+      MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT: ${MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT:-0.12}
       MAPPING_ENABLE_MAP_TRIMMING: ${MAPPING_ENABLE_MAP_TRIMMING:-true}
-      MAPPING_MAP_TRIM_RADIUS_M: ${MAPPING_MAP_TRIM_RADIUS_M:-100.0}
-      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-150000}
+      MAPPING_MAP_TRIM_RADIUS_M: ${MAPPING_MAP_TRIM_RADIUS_M:-40.0}
+      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-70000}
       # Overlap gates, lowered for replay exploration. The live defaults
       # (pose 0.25/0.45, insertion 0.30/0.50) deadlock when the robot reaches a
       # spot where a large NEW area becomes visible: insertion is refused for
       # the very scans that would map it, the map freezes, and a few meters
       # later every scan is rejected — always at the same bag position.
-      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.10}
-      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.20}
-      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.10}
-      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.20}
+      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.40}
+      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.55}
+      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.35}
+      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.50}
       # Correction-size insertion limit measures PRIOR error, not alignment
       # quality. With wheel slip downhill the prior is 2-3 m off while ICP
       # still aligns fine — 4.0 m keeps the map alive (live default: 1.5 m).
@@ -499,28 +686,82 @@ services:
       # over 2-3 map updates. max_pose_yaw_step_deg (30°) is the backstop.
       MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M: ${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-4.0}
       MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-12.0}
-      MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-false}
+      MAPPING_ENABLE_MAP_RECOVERY: ${MAPPING_ENABLE_MAP_RECOVERY:-true}
+      MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS: ${MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS:-4}
+      MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS: ${MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS:-5}
+      MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M: ${MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M:-45.0}
+      MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS:-5000}
+      MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS:-80000}
+      MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS: ${MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS:-20}
+      MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M:-1.0}
+      MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG:-5.0}
+      MAPPING_ENABLE_MOTION_ADAPTIVE_GATE: ${MAPPING_ENABLE_MOTION_ADAPTIVE_GATE:-true}
+      MAPPING_ADAPTIVE_MAX_DT_S: ${MAPPING_ADAPTIVE_MAX_DT_S:-2.0}
+      MAPPING_ADAPTIVE_VELOCITY_GAIN: ${MAPPING_ADAPTIVE_VELOCITY_GAIN:-1.25}
+      MAPPING_ADAPTIVE_ACCELERATION_GAIN: ${MAPPING_ADAPTIVE_ACCELERATION_GAIN:-0.50}
+      MAPPING_ADAPTIVE_YAW_RATE_GAIN: ${MAPPING_ADAPTIVE_YAW_RATE_GAIN:-1.25}
+      MAPPING_AGGRESSIVE_SPEED_MS: ${MAPPING_AGGRESSIVE_SPEED_MS:-2.0}
+      MAPPING_AGGRESSIVE_YAW_RATE_DEG_S: ${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-35.0}
+      MAPPING_PIVOT_LINEAR_SPEED_MS: ${MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75}
+      MAPPING_PIVOT_YAW_RATE_DEG_S: ${MAPPING_PIVOT_YAW_RATE_DEG_S:-35.0}
+      MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-1.25}
+      MAPPING_ENABLE_ODOM_BRIDGE: ${MAPPING_ENABLE_ODOM_BRIDGE:-true}
+      MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS: ${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0}
+      MAPPING_ODOM_BRIDGE_MIN_SPEED_MS: ${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5}
+      MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT: ${MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT:-true}
+      MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M: ${MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M:-2.0}
+      MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-true}
+      MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE: ${MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE:-true}
+      MAPPING_MAP_PUBLISH_RADIUS_M: ${MAPPING_MAP_PUBLISH_RADIUS_M:-0.0}
+      MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER: ${MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER:-true}
+      MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC: ${MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC:-/mtt_articulation_angle}
+      MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S: ${MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S:-0.5}
+      MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD: ${MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD:-3.141592653589793}
+      MAPPING_DYNAMIC_TRAILER_YAW_SIGN: ${MAPPING_DYNAMIC_TRAILER_YAW_SIGN:--1.0}
+      MAPPING_DYNAMIC_TRAILER_HITCH_X: ${MAPPING_DYNAMIC_TRAILER_HITCH_X:--1.45}
+      MAPPING_DYNAMIC_TRAILER_HITCH_Y: ${MAPPING_DYNAMIC_TRAILER_HITCH_Y:--0.085}
+      MAPPING_DYNAMIC_TRAILER_FRONT_OFFSET_M: ${MAPPING_DYNAMIC_TRAILER_FRONT_OFFSET_M:--0.15}
+      MAPPING_DYNAMIC_TRAILER_REAR_OFFSET_M: ${MAPPING_DYNAMIC_TRAILER_REAR_OFFSET_M:-2.20}
+      MAPPING_DYNAMIC_TRAILER_HALF_WIDTH_M: ${MAPPING_DYNAMIC_TRAILER_HALF_WIDTH_M:-1.20}
+      MAPPING_DYNAMIC_TRAILER_Z_MIN_M: ${MAPPING_DYNAMIC_TRAILER_Z_MIN_M:--0.35}
+      MAPPING_DYNAMIC_TRAILER_Z_MAX_M: ${MAPPING_DYNAMIC_TRAILER_Z_MAX_M:-2.50}
+      MAPPING_MAP_TRIM_INTERVAL_SCANS: ${MAPPING_MAP_TRIM_INTERVAL_SCANS:-2}
       MAPPING_ODOM_FRAME: ${MAPPING_ODOM_FRAME:-odom}
       MAPPING_ROBOT_FRAME: ${MAPPING_ROBOT_FRAME:-base_footprint}
       MAPPING_TF_CONFLICT_CHECK: ${MAPPING_TF_CONFLICT_CHECK:-true}
       MAPPING_TF_CONFLICT_CHECK_SECONDS: ${MAPPING_TF_CONFLICT_CHECK_SECONDS:-8}
       MAPPING_TF_CONFLICT_YAW_ALERT_DEG: ${MAPPING_TF_CONFLICT_YAW_ALERT_DEG:-25}
-    command:
+    command: &mapping_command
       - bash
       - -lc
       - |
-        echo "Waiting for $${MAPPING_RAW_POINTS_TOPIC} before starting transform node..."
-        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_RAW_POINTS_TOPIC}"; do sleep 1; done' || {
-          echo "ERROR: $${MAPPING_RAW_POINTS_TOPIC} not available"
+        wait_for_cloud_topic() {
+          topic="$$1"
+          timeout_s="$$2"
+          echo "Waiting for $$topic before starting mapper..."
+          deadline=$$(( $$(date +%s) + timeout_s ))
+          while [ "$$(date +%s)" -lt "$$deadline" ]; do
+            if timeout 3 ros2 topic list 2>/dev/null | grep -qx "$$topic"; then
+              return 0
+            fi
+            if timeout 4 ros2 topic hz "$$topic" --window 2 2>/dev/null | grep -q "average rate"; then
+              echo "$$topic is publishing, even though ros2 topic list did not report it yet."
+              return 0
+            fi
+            sleep 1
+          done
+          return 1
+        }
+        wait_for_cloud_topic "$${MAPPING_POINTS_TOPIC}" 75 || {
+          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available"
           exit 1
         }
-        echo "Starting transform node (Y-forward hesai_lidar → X-forward base_footprint)..."
-        python3 $${WORKSPACE}/scripts/pointcloud_to_base_frame.py &
-        echo "Waiting for corrected points topic ($${MAPPING_POINTS_TOPIC})..."
-        timeout 45 bash -lc 'until ros2 topic list | grep -qx "$${MAPPING_POINTS_TOPIC}"; do sleep 1; done' || {
-          echo "ERROR: $${MAPPING_POINTS_TOPIC} not available (transform node may have failed)"
-          exit 1
-        }
+        case "$${MAPPING_CONFIG}" in
+          /*) ;;
+          *) MAPPING_CONFIG="$${WORKSPACE}/$${MAPPING_CONFIG}" ;;
+        esac
+        echo "Using mapping config $${MAPPING_CONFIG}"
+        echo "Using raw points topic $${MAPPING_POINTS_TOPIC}; mapper owns sensor→robot TF lookup."
         echo "Waiting for odom TF ($${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME})..."
         timeout 45 bash -lc 'until ros2 run tf2_ros tf2_echo "$${MAPPING_ODOM_FRAME}" "$${MAPPING_ROBOT_FRAME}" 2>&1 | grep -q "Translation"; do sleep 1; done' || {
           echo "WARN: $${MAPPING_ODOM_FRAME} → $${MAPPING_ROBOT_FRAME} TF not visible after 45s."
@@ -553,6 +794,7 @@ services:
           mapping_deskew_source:=$${MAPPING_DESKEW_SOURCE} \
           mapping_deskew_imu_topic:=$${MAPPING_DESKEW_IMU_TOPIC} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
+          mapping_map_publication_source:=$${MAPPING_MAP_PUBLICATION_SOURCE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
           mapping_min_input_points:=$${MAPPING_MIN_INPUT_POINTS} \
@@ -561,6 +803,7 @@ services:
           mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
           mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
           mapping_max_pose_yaw_step_deg:=$${MAPPING_MAX_POSE_YAW_STEP_DEG} \
+          mapping_max_pose_yaw_odom_residual_deg:=$${MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG} \
           mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
           mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
           mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
@@ -568,23 +811,170 @@ services:
           deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M} \
           deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG} \
           deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT} \
+          mapping_enable_global_output_map:=$${MAPPING_ENABLE_GLOBAL_OUTPUT_MAP} \
+          mapping_global_output_map_min_dist_new_point:=$${MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT} \
           mapping_enable_map_trimming:=$${MAPPING_ENABLE_MAP_TRIMMING} \
           mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M} \
           mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM} \
+          mapping_map_trim_interval_scans:=$${MAPPING_MAP_TRIM_INTERVAL_SCANS} \
           mapping_min_pose_overlap_near_ratio:=$${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO} \
           mapping_min_pose_overlap_loose_ratio:=$${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO} \
           mapping_min_map_overlap_near_ratio:=$${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO} \
           mapping_min_map_overlap_loose_ratio:=$${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO} \
           mapping_max_map_update_translation_correction_m:=$${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M} \
           mapping_max_map_update_rotation_correction_deg:=$${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG} \
+          mapping_enable_map_recovery:=$${MAPPING_ENABLE_MAP_RECOVERY} \
+          mapping_recovery_reload_after_rejections:=$${MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS} \
+          mapping_recovery_attempt_interval_scans:=$${MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS} \
+          mapping_recovery_local_map_radius_m:=$${MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M} \
+          mapping_recovery_local_map_min_points:=$${MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS} \
+          mapping_recovery_local_map_max_points:=$${MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS} \
+          mapping_snapshot_save_interval_scans:=$${MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS} \
+          mapping_snapshot_max_translation_correction_m:=$${MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M} \
+          mapping_snapshot_max_rotation_correction_deg:=$${MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG} \
+          mapping_enable_motion_adaptive_gate:=$${MAPPING_ENABLE_MOTION_ADAPTIVE_GATE} \
+          mapping_adaptive_max_dt_s:=$${MAPPING_ADAPTIVE_MAX_DT_S} \
+          mapping_adaptive_velocity_gain:=$${MAPPING_ADAPTIVE_VELOCITY_GAIN} \
+          mapping_adaptive_acceleration_gain:=$${MAPPING_ADAPTIVE_ACCELERATION_GAIN} \
+          mapping_adaptive_yaw_rate_gain:=$${MAPPING_ADAPTIVE_YAW_RATE_GAIN} \
+          mapping_aggressive_speed_ms:=$${MAPPING_AGGRESSIVE_SPEED_MS} \
+          mapping_aggressive_yaw_rate_deg_s:=$${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S} \
+          mapping_pivot_linear_speed_ms:=$${MAPPING_PIVOT_LINEAR_SPEED_MS} \
+          mapping_pivot_yaw_rate_deg_s:=$${MAPPING_PIVOT_YAW_RATE_DEG_S} \
+          mapping_pivot_max_translation_correction_m:=$${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M} \
+          mapping_enable_odom_bridge:=$${MAPPING_ENABLE_ODOM_BRIDGE} \
+          mapping_odom_bridge_after_rejections:=$${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS} \
+          mapping_odom_bridge_min_speed_ms:=$${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5} \
+          mapping_enable_planar_pose_constraint:=$${MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT} \
+          mapping_planar_pose_max_z_drift_m:=$${MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE} \
+          mapping_anchor_map_at_initial_robot_pose:=$${MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE} \
+          mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M} \
+          mapping_enable_dynamic_trailer_self_filter:=$${MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER} \
+          mapping_dynamic_trailer_articulation_topic:=$${MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC} \
+          mapping_dynamic_trailer_stale_timeout_s:=$${MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S} \
+          mapping_dynamic_trailer_yaw_offset_rad:=$${MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD} \
+          mapping_dynamic_trailer_yaw_sign:=$${MAPPING_DYNAMIC_TRAILER_YAW_SIGN} \
+          mapping_dynamic_trailer_hitch_x:=$${MAPPING_DYNAMIC_TRAILER_HITCH_X} \
+          mapping_dynamic_trailer_hitch_y:=$${MAPPING_DYNAMIC_TRAILER_HITCH_Y} \
+          mapping_dynamic_trailer_front_offset_m:=$${MAPPING_DYNAMIC_TRAILER_FRONT_OFFSET_M} \
+          mapping_dynamic_trailer_rear_offset_m:=$${MAPPING_DYNAMIC_TRAILER_REAR_OFFSET_M} \
+          mapping_dynamic_trailer_half_width_m:=$${MAPPING_DYNAMIC_TRAILER_HALF_WIDTH_M} \
+          mapping_dynamic_trailer_z_min_m:=$${MAPPING_DYNAMIC_TRAILER_Z_MIN_M} \
+          mapping_dynamic_trailer_z_max_m:=$${MAPPING_DYNAMIC_TRAILER_Z_MAX_M} \
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME}
 
+  # ── Mathis COM-shift mapping replay profile ──
+  # Starts the no-trailer snow/ice mapper with imu_odom_mathis as the only odom
+  # TF source. Keep runtime_odometry out of this profile.
+  mapping_mathis:
+    <<: [*replay_base]
+    profiles: ["mathis_mapping"]
+    depends_on:
+      bag_player:
+        condition: service_started
+      description:
+        condition: service_started
+      imu_odom_mathis:
+        condition: service_started
+    volumes:
+      - ${WORKSPACE}/scripts:${WORKSPACE}/scripts
+    environment:
+      MAPPING_POINTS_TOPIC: ${MATHIS_MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_RAW_POINTS_TOPIC: ${MATHIS_MAPPING_RAW_POINTS_TOPIC:-/hesai_lidar/points}
+      MAPPING_CONFIG: ${MATHIS_MAPPING_CONFIG:-demos/mathis_com_shift/config/mapper_snow_no_trailer.yaml}
+      MAPPING_COMPRESSION_VOXEL_SIZE: ${MATHIS_MAPPING_COMPRESSION_VOXEL_SIZE:-0.35}
+      MAPPING_MAP_PUBLICATION_SOURCE: ${MATHIS_MAPPING_MAP_PUBLICATION_SOURCE:-local}
+      MAPPING_MAP_PUBLISH_RATE: ${MATHIS_MAPPING_MAP_PUBLISH_RATE:-1.0}
+      MAPPING_MAP_TF_PUBLISH_RATE: ${MATHIS_MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
+      MAPPING_MIN_INPUT_POINTS: ${MATHIS_MAPPING_MIN_INPUT_POINTS:-150}
+      MAPPING_MAX_TRANSLATION_CORRECTION: ${MATHIS_MAPPING_MAX_TRANSLATION_CORRECTION:-5.00}
+      MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MATHIS_MAPPING_MAX_ROTATION_CORRECTION_DEG:-35.0}
+      MAPPING_MAX_VELOCITY_MS: ${MATHIS_MAPPING_MAX_VELOCITY_MS:-8.0}
+      MAPPING_MAX_YAW_RATE_DEG_S: ${MATHIS_MAPPING_MAX_YAW_RATE_DEG_S:-80.0}
+      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MATHIS_MAPPING_MAX_POSE_YAW_STEP_DEG:-30.0}
+      MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG: ${MATHIS_MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG:-12.0}
+      MAPPING_MAX_POSE_STEP_M: ${MATHIS_MAPPING_MAX_POSE_STEP_M:-4.0}
+      MAPPING_MAX_Z_JUMP_M: ${MATHIS_MAPPING_MAX_Z_JUMP_M:-1.5}
+      MAPPING_MAX_REGISTRATION_TIME_MS: ${MATHIS_MAPPING_MAX_REGISTRATION_TIME_MS:-3000.0}
+      MAPPING_MAX_IDLE_TIME: ${MATHIS_MAPPING_MAX_IDLE_TIME:-60.0}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MATHIS_MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MATHIS_MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5}
+      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MATHIS_MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03}
+      MAPPING_DESKEW: ${MATHIS_MAPPING_DESKEW:-true}
+      MAPPING_DESKEW_SOURCE: ${MATHIS_MAPPING_DESKEW_SOURCE:-imu}
+      MAPPING_DESKEW_IMU_TOPIC: ${MATHIS_MAPPING_DESKEW_IMU_TOPIC:-/mti100/data}
+      MAPPING_ENABLE_GLOBAL_OUTPUT_MAP: ${MATHIS_MAPPING_ENABLE_GLOBAL_OUTPUT_MAP:-false}
+      MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT: ${MATHIS_MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT:-0.12}
+      MAPPING_ENABLE_MAP_TRIMMING: ${MATHIS_MAPPING_ENABLE_MAP_TRIMMING:-false}
+      MAPPING_MAP_TRIM_RADIUS_M: ${MATHIS_MAPPING_MAP_TRIM_RADIUS_M:-40.0}
+      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MATHIS_MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000}
+      MAPPING_MAP_TRIM_INTERVAL_SCANS: ${MATHIS_MAPPING_MAP_TRIM_INTERVAL_SCANS:-10}
+      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MATHIS_MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.25}
+      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MATHIS_MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.45}
+      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MATHIS_MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.30}
+      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MATHIS_MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.50}
+      MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M: ${MATHIS_MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-1.50}
+      MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG: ${MATHIS_MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-12.0}
+      MAPPING_ENABLE_MAP_RECOVERY: ${MATHIS_MAPPING_ENABLE_MAP_RECOVERY:-true}
+      MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS: ${MATHIS_MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS:-4}
+      MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS: ${MATHIS_MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS:-5}
+      MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M: ${MATHIS_MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M:-24.0}
+      MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS: ${MATHIS_MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS:-5000}
+      MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS: ${MATHIS_MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS:-60000}
+      MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS: ${MATHIS_MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS:-20}
+      MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M: ${MATHIS_MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M:-1.0}
+      MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG: ${MATHIS_MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG:-5.0}
+      MAPPING_ENABLE_MOTION_ADAPTIVE_GATE: ${MATHIS_MAPPING_ENABLE_MOTION_ADAPTIVE_GATE:-true}
+      MAPPING_ADAPTIVE_MAX_DT_S: ${MATHIS_MAPPING_ADAPTIVE_MAX_DT_S:-2.0}
+      MAPPING_ADAPTIVE_VELOCITY_GAIN: ${MATHIS_MAPPING_ADAPTIVE_VELOCITY_GAIN:-1.25}
+      MAPPING_ADAPTIVE_ACCELERATION_GAIN: ${MATHIS_MAPPING_ADAPTIVE_ACCELERATION_GAIN:-0.50}
+      MAPPING_ADAPTIVE_YAW_RATE_GAIN: ${MATHIS_MAPPING_ADAPTIVE_YAW_RATE_GAIN:-1.25}
+      MAPPING_AGGRESSIVE_SPEED_MS: ${MATHIS_MAPPING_AGGRESSIVE_SPEED_MS:-2.0}
+      MAPPING_AGGRESSIVE_YAW_RATE_DEG_S: ${MATHIS_MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-15.0}
+      MAPPING_PIVOT_LINEAR_SPEED_MS: ${MATHIS_MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75}
+      MAPPING_PIVOT_YAW_RATE_DEG_S: ${MATHIS_MAPPING_PIVOT_YAW_RATE_DEG_S:-15.0}
+      MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M: ${MATHIS_MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-0.45}
+      MAPPING_ENABLE_ODOM_BRIDGE: ${MATHIS_MAPPING_ENABLE_ODOM_BRIDGE:-true}
+      MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS: ${MATHIS_MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0}
+      MAPPING_ODOM_BRIDGE_MIN_SPEED_MS: ${MATHIS_MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5}
+      MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT: ${MATHIS_MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT:-false}
+      MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M: ${MATHIS_MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M:-0.75}
+      MAPPING_INPUT_QOS_RELIABLE: ${MATHIS_MAPPING_INPUT_QOS_RELIABLE:-true}
+      MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE: ${MATHIS_MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE:-true}
+      MAPPING_MAP_PUBLISH_RADIUS_M: ${MATHIS_MAPPING_MAP_PUBLISH_RADIUS_M:-40.0}
+      MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER: ${MATHIS_MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER:-false}
+      MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC: ${MATHIS_MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC:-/mtt_articulation_angle}
+      MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S: ${MATHIS_MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S:-0.5}
+      MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD: ${MATHIS_MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD:-3.141592653589793}
+      MAPPING_DYNAMIC_TRAILER_YAW_SIGN: ${MATHIS_MAPPING_DYNAMIC_TRAILER_YAW_SIGN:--1.0}
+      MAPPING_DYNAMIC_TRAILER_HITCH_X: ${MATHIS_MAPPING_DYNAMIC_TRAILER_HITCH_X:--1.45}
+      MAPPING_DYNAMIC_TRAILER_HITCH_Y: ${MATHIS_MAPPING_DYNAMIC_TRAILER_HITCH_Y:--0.085}
+      MAPPING_DYNAMIC_TRAILER_FRONT_OFFSET_M: ${MATHIS_MAPPING_DYNAMIC_TRAILER_FRONT_OFFSET_M:--0.15}
+      MAPPING_DYNAMIC_TRAILER_REAR_OFFSET_M: ${MATHIS_MAPPING_DYNAMIC_TRAILER_REAR_OFFSET_M:-2.20}
+      MAPPING_DYNAMIC_TRAILER_HALF_WIDTH_M: ${MATHIS_MAPPING_DYNAMIC_TRAILER_HALF_WIDTH_M:-1.20}
+      MAPPING_DYNAMIC_TRAILER_Z_MIN_M: ${MATHIS_MAPPING_DYNAMIC_TRAILER_Z_MIN_M:--0.35}
+      MAPPING_DYNAMIC_TRAILER_Z_MAX_M: ${MATHIS_MAPPING_DYNAMIC_TRAILER_Z_MAX_M:-2.50}
+      MAPPING_ODOM_FRAME: ${MATHIS_MAPPING_ODOM_FRAME:-odom}
+      MAPPING_ROBOT_FRAME: ${MATHIS_MAPPING_ROBOT_FRAME:-base_footprint}
+      MAPPING_TF_CONFLICT_CHECK: ${MATHIS_MAPPING_TF_CONFLICT_CHECK:-true}
+      MAPPING_TF_CONFLICT_CHECK_SECONDS: ${MATHIS_MAPPING_TF_CONFLICT_CHECK_SECONDS:-8}
+      MAPPING_TF_CONFLICT_YAW_ALERT_DEG: ${MATHIS_MAPPING_TF_CONFLICT_YAW_ALERT_DEG:-25}
+    command: *mapping_command
+
   # ── KISS-ICP lightweight LiDAR odometry ──
   # Alternative to the norlab_icp_mapper_ros mapper above. Uses a different ICP
-  # pipeline (KISS-ICP) that may handle frame-alignment differently.
-  # Usage: BAG_PATH=... docker compose --profile kissicp up
+  # pipeline (KISS-ICP) with an independent IMU/TF prior. KISS still performs
+  # LiDAR registration; the external prior seeds its motion prediction and scan
+  # deskew through KISS-ICP's last_delta_.
+  #
+  # Default input is /hesai_lidar/points. To test a pre-filtered merged cloud,
+  # start/publish that cloud separately and set:
+  #   KISS_POINTS_TOPIC=/merged_points_filtered
+  #
+  # Usage:
+  #   BAG_PATH=... docker compose --profile kissicp up bag_player description kiss_icp foxglove
   kiss_icp:
     <<: [*replay_base]
     profiles: ["kissicp"]
@@ -593,32 +983,120 @@ services:
         condition: service_started
       description:
         condition: service_started
+      imu_odom_kiss:
+        condition: service_started
     volumes:
       - ${WORKSPACE}/scripts:${WORKSPACE}/scripts
+    environment:
+      KISS_POINTS_TOPIC: ${KISS_POINTS_TOPIC:-/hesai_lidar/points}
+      KISS_INPUT_POINTS_TOPIC: ${KISS_INPUT_POINTS_TOPIC:-/kiss_icp/input_points}
+      KISS_BASE_FRAME: ${KISS_BASE_FRAME:-base_footprint}
+      KISS_LIDAR_ODOM_FRAME: ${KISS_LIDAR_ODOM_FRAME:-map}
+      KISS_FIXED_PRIOR_FRAME: ${KISS_FIXED_PRIOR_FRAME:-odom}
+      KISS_MOVING_PRIOR_FRAME: ${KISS_MOVING_PRIOR_FRAME:-base_footprint}
+      KISS_USE_EXTERNAL_PRIOR: ${KISS_USE_EXTERNAL_PRIOR:-true}
+      KISS_EXTERNAL_PRIOR_MAX_DT_S: ${KISS_EXTERNAL_PRIOR_MAX_DT_S:-1.2}
+      KISS_EXTERNAL_PRIOR_LOOKUP_TIMEOUT_MS: ${KISS_EXTERNAL_PRIOR_LOOKUP_TIMEOUT_MS:-100}
+      KISS_PUBLISH_ODOM_TF: ${KISS_PUBLISH_ODOM_TF:-false}
+      KISS_PUBLISH_STATIC_MAP_TO_ODOM: ${KISS_PUBLISH_STATIC_MAP_TO_ODOM:-true}
+      KISS_DATA_DESKEW: ${KISS_DATA_DESKEW:-true}
+      KISS_PUBLISH_DEBUG_CLOUDS: ${KISS_PUBLISH_DEBUG_CLOUDS:-true}
+      KISS_PUBLISH_TRAJECTORY_PATH: ${KISS_PUBLISH_TRAJECTORY_PATH:-true}
+      KISS_FAIL_ON_RUNTIME_ODOM: ${KISS_FAIL_ON_RUNTIME_ODOM:-true}
+      KISS_POSITION_COVARIANCE: ${KISS_POSITION_COVARIANCE:-0.10}
+      KISS_ORIENTATION_COVARIANCE: ${KISS_ORIENTATION_COVARIANCE:-0.10}
+      KISS_MAPPING_VOXEL_SIZE: ${KISS_MAPPING_VOXEL_SIZE:-1.0}
+      KISS_MAX_RANGE: ${KISS_MAX_RANGE:-100.0}
+      KISS_MIN_RANGE: ${KISS_MIN_RANGE:-0.0}
+      KISS_ADAPTIVE_INITIAL_THRESHOLD: ${KISS_ADAPTIVE_INITIAL_THRESHOLD:-2.0}
+      KISS_ADAPTIVE_MIN_MOTION_TH: ${KISS_ADAPTIVE_MIN_MOTION_TH:-0.1}
+      KISS_MAX_NUM_ITERATIONS: ${KISS_MAX_NUM_ITERATIONS:-500}
+      KISS_CONVERGENCE_CRITERION: ${KISS_CONVERGENCE_CRITERION:-0.0001}
+      KISS_MAX_NUM_THREADS: ${KISS_MAX_NUM_THREADS:-0}
     command:
       - bash
       - -lc
       - |
-        echo "Waiting for /hesai_lidar/points before starting KISS-ICP..."
-        timeout 45 bash -lc '
-          until ros2 topic list | grep -qx "/hesai_lidar/points"; do sleep 1; done
-        ' || { echo "ERROR: /hesai_lidar/points not available"; exit 1; }
+        wait_for_topic() {
+          topic="$$1"
+          timeout_s="$$2"
+          echo "Waiting for $$topic..."
+          for i in $$(seq 1 "$$timeout_s"); do
+            ros2 topic info "$$topic" 2>/dev/null | grep -qE "Publisher count: [1-9]" && return 0
+            sleep 1
+          done
+          echo "ERROR: $$topic not available after $${timeout_s}s"
+          return 1
+        }
+        wait_for_tf() {
+          parent="$$1"
+          child="$$2"
+          timeout_s="$$3"
+          echo "Waiting for TF $$parent -> $$child..."
+          deadline=$$(( $$(date +%s) + timeout_s ))
+          while [ "$$(date +%s)" -lt "$$deadline" ]; do
+            if timeout 3 ros2 run tf2_ros tf2_echo "$$parent" "$$child" 2>&1 | grep -q "Translation"; then
+              return 0
+            fi
+            sleep 1
+          done
+          return 1
+        }
 
-        # Publish static map→odom identity so the TF tree works
-        ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom &
+        wait_for_topic "$${KISS_POINTS_TOPIC}" 75 || exit 1
+        if [ "$${KISS_FAIL_ON_RUNTIME_ODOM}" = "true" ]; then
+          if ros2 topic info /mtt_odometry/runtime 2>/dev/null | grep -qE "Publisher count: [1-9]"; then
+            echo "ERROR: /mtt_odometry/runtime is being published."
+            echo "KISS-ICP profile must not run with runtime_odometry; it conflicts with imu_odom_kiss on odom -> base_footprint."
+            echo "Run: docker compose stop runtime_odometry joint_state_builder"
+            exit 3
+          fi
+        fi
+        wait_for_tf "$${KISS_FIXED_PRIOR_FRAME}" "$${KISS_MOVING_PRIOR_FRAME}" 45 || {
+          echo "ERROR: external prior TF $${KISS_FIXED_PRIOR_FRAME} -> $${KISS_MOVING_PRIOR_FRAME} not available."
+          echo "Do not start runtime_odometry together with imu_odom."
+          exit 2
+        }
 
-        # Transform Hesai points (Y-forward intrinsic) → base_footprint (X-forward)
-        python3 ${WORKSPACE}/scripts/pointcloud_to_base_frame.py &
+        if [ "$${KISS_PUBLISH_STATIC_MAP_TO_ODOM}" = "true" ] && [ "$${KISS_LIDAR_ODOM_FRAME}" = "map" ]; then
+          # KISS publishes odometry in map frame; imu_odom owns odom -> base_footprint.
+          # Identity map -> odom lets imu_odom consume /mapping/icp_odom without
+          # KISS publishing a competing map/base TF.
+          ros2 run tf2_ros static_transform_publisher 0 0 0 0 0 0 map odom &
+        fi
+
+        # Transform input cloud (raw Hesai or externally merged cloud) to base frame.
+        python3 ${WORKSPACE}/scripts/pointcloud_to_base_frame.py \
+          --input-topic "$${KISS_POINTS_TOPIC}" \
+          --output-topic "$${KISS_INPUT_POINTS_TOPIC}" &
 
         exec ros2 run kiss_icp kiss_icp_node --ros-args \
-          -p base_frame:=base_footprint \
-          -p lidar_odom_frame:=odom \
-          -p publish_odom_tf:=true \
+          -p base_frame:=$${KISS_BASE_FRAME} \
+          -p lidar_odom_frame:=$${KISS_LIDAR_ODOM_FRAME} \
+          -p publish_odom_tf:=$${KISS_PUBLISH_ODOM_TF} \
           -p invert_odom_tf:=false \
-          -p publish_debug_clouds:=true \
+          -p publish_debug_clouds:=$${KISS_PUBLISH_DEBUG_CLOUDS} \
+          -p publish_trajectory_path:=$${KISS_PUBLISH_TRAJECTORY_PATH} \
           -p use_sim_time:=true \
-          -p data.deskew:=false \
-          --remap pointcloud_topic:=/kiss_icp/input_points
+          -p use_external_prior:=$${KISS_USE_EXTERNAL_PRIOR} \
+          -p external_prior_fixed_frame:=$${KISS_FIXED_PRIOR_FRAME} \
+          -p external_prior_moving_frame:=$${KISS_MOVING_PRIOR_FRAME} \
+          -p external_prior_max_dt_s:=$${KISS_EXTERNAL_PRIOR_MAX_DT_S} \
+          -p external_prior_lookup_timeout_ms:=$${KISS_EXTERNAL_PRIOR_LOOKUP_TIMEOUT_MS} \
+          -p position_covariance:=$${KISS_POSITION_COVARIANCE} \
+          -p orientation_covariance:=$${KISS_ORIENTATION_COVARIANCE} \
+          -p data.deskew:=$${KISS_DATA_DESKEW} \
+          -p data.max_range:=$${KISS_MAX_RANGE} \
+          -p data.min_range:=$${KISS_MIN_RANGE} \
+          -p mapping.voxel_size:=$${KISS_MAPPING_VOXEL_SIZE} \
+          -p adaptive_threshold.initial_threshold:=$${KISS_ADAPTIVE_INITIAL_THRESHOLD} \
+          -p adaptive_threshold.min_motion_th:=$${KISS_ADAPTIVE_MIN_MOTION_TH} \
+          -p registration.max_num_iterations:=$${KISS_MAX_NUM_ITERATIONS} \
+          -p registration.convergence_criterion:=$${KISS_CONVERGENCE_CRITERION} \
+          -p registration.max_num_threads:=$${KISS_MAX_NUM_THREADS} \
+          --remap pointcloud_topic:=$${KISS_INPUT_POINTS_TOPIC} \
+          --remap kiss/odometry:=/mapping/icp_odom \
+          --remap kiss/trajectory_path:=/mapping/trajectory_path
 
   # ── WILN obstacle cloud regenerated in replay map frame ──
   # The bag may contain /wiln/obstacles from the live run, but those points
@@ -739,14 +1217,24 @@ services:
       BAG_PATH: ${BAG_PATH:-}
       BAGS_ROOT: ${BAGS_ROOT:-/data/mtt_bags}
       DATA_DIR: ${DATA_DIR:-/data/mtt_bags}
-      POSTPROCESS_RUN_ICP: ${POSTPROCESS_RUN_ICP:-true}
+      POSTPROCESS_RUN_ICP: ${POSTPROCESS_RUN_ICP:-false}
+      POSTPROCESS_RUN_LIVE_ICP: ${POSTPROCESS_RUN_LIVE_ICP:-true}
       POSTPROCESS_RUN_PERCEPTION: ${POSTPROCESS_RUN_PERCEPTION:-true}
       POSTPROCESS_RUN_ENRICHED_BAG: ${POSTPROCESS_RUN_ENRICHED_BAG:-true}
       POSTPROCESS_FORCE_ICP: ${POSTPROCESS_FORCE_ICP:-false}
+      POSTPROCESS_FORCE_LIVE_ICP: ${POSTPROCESS_FORCE_LIVE_ICP:-false}
       POSTPROCESS_FORCE_PERCEPTION: ${POSTPROCESS_FORCE_PERCEPTION:-false}
       POSTPROCESS_FORCE_ENRICHED_BAG: ${POSTPROCESS_FORCE_ENRICHED_BAG:-false}
+      POSTPROCESS_PREFER_OFFLINE_LIVE_ICP: ${POSTPROCESS_PREFER_OFFLINE_LIVE_ICP:-true}
+      POSTPROCESS_LIVE_ICP_ODOM_SOURCE: ${POSTPROCESS_LIVE_ICP_ODOM_SOURCE:-auto}
+      DATASET_ROS_DOMAIN_ID: ${DATASET_ROS_DOMAIN_ID:-}
+      MAPPING_DATASET_MAP_PUBLISH_RATE: ${MAPPING_DATASET_MAP_PUBLISH_RATE:-0}
+      MAPPING_DATASET_MAP_PUBLISH_RADIUS_M: ${MAPPING_DATASET_MAP_PUBLISH_RADIUS_M:-40.0}
       POSTPROCESS_QUALITY: ${POSTPROCESS_QUALITY:-max}
       REPLAY_RATE: ${REPLAY_RATE:-1.0}
+      OFFLINE_ICP_MAX_REPLAY_RATE: ${OFFLINE_ICP_MAX_REPLAY_RATE:-0.25}
+      OFFLINE_ICP_PLAYBACK_POLICY: ${OFFLINE_ICP_PLAYBACK_POLICY:-auto}
+      OFFLINE_ICP_CLOUD_STRIDE: ${OFFLINE_ICP_CLOUD_STRIDE:-1}
     command:
       - bash
       - -lc
@@ -756,11 +1244,20 @@ services:
         if [ "$${POSTPROCESS_RUN_ICP}" = "true" ]; then
           ARGS+=("--run-icp")
         fi
+        if [ "$${POSTPROCESS_RUN_LIVE_ICP}" = "true" ]; then
+          ARGS+=("--run-live-icp" "--live-icp-odom-source" "$${POSTPROCESS_LIVE_ICP_ODOM_SOURCE}")
+        fi
         if [ "$${POSTPROCESS_RUN_ENRICHED_BAG}" = "true" ]; then
           ARGS+=("--run-enriched-bag")
         fi
         if [ "$${POSTPROCESS_FORCE_ICP}" = "true" ]; then
           ARGS+=("--force-icp")
+        fi
+        if [ "$${POSTPROCESS_FORCE_LIVE_ICP}" = "true" ]; then
+          ARGS+=("--force-live-icp")
+        fi
+        if [ "$${POSTPROCESS_PREFER_OFFLINE_LIVE_ICP}" = "true" ]; then
+          ARGS+=("--prefer-offline-live-icp")
         fi
         if [ "$${POSTPROCESS_FORCE_ENRICHED_BAG}" = "true" ]; then
           ARGS+=("--force-enriched-bag")
