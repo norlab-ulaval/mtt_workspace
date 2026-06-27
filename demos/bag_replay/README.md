@@ -59,6 +59,27 @@ Validate WILN teach-and-repeat on a clean ICP bag:
 BAG_PATH=/path/to/session REPLAY_RATE=0.5 docker compose --profile mapping --profile teach_repeat up bag_player description perception mapping foxglove teach_repeat
 ```
 
+Replay one bag with the Mathis COM-shift mapper profile:
+
+```bash
+./scripts/replay_bag.sh /path/to/session mathis
+```
+
+Equivalent command from `demos/bag_replay`:
+
+```bash
+BAG_PATH=/path/to/session docker compose --profile mathis_mapping up \
+  bag_player description imu_odom_mathis mapping_mathis foxglove
+```
+
+This profile keeps the normal bag replay config untouched. It runs
+`imu_odom_mathis` as the only `odom -> base_footprint` TF source, uses
+`demos/mathis_com_shift/config/mapper_snow_no_trailer.yaml`, disables the
+dynamic trailer self-filter, uses IMU deskew on `/mti100/data`, and keeps
+`use_altitude=false`. Do not use plain `docker compose --profile mathis_mapping up`
+for this mode: Compose also starts unprofiled services, including
+`runtime_odometry`, which would create a duplicate odom TF.
+
 During replay, call WILN services from another shell in the same Compose project:
 
 ```bash
