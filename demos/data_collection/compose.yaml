@@ -37,7 +37,7 @@ x-dc-base: &dc_base
     DOODLE_PC_IP: ${DOODLE_PC_IP:-192.168.50.101}
     ZENOH_FIELD_PORT: ${ZENOH_FIELD_PORT:-7447}
     FOXGLOVE_BIND_ADDRESS: ${FOXGLOVE_BIND_ADDRESS:-192.168.50.2}
-    FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml}
+    FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/demos/live_robot/config/foxglove_bridge.yaml}
     FOXGLOVE_FIELD_PARAMS_FILE: ${FOXGLOVE_FIELD_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge_field_light.yaml}
     # Data collection session metadata — set by annotate_session.sh → .env
     EXPERIMENT_NAME: ${EXPERIMENT_NAME:-exp}
@@ -60,6 +60,10 @@ x-dc-base: &dc_base
     ROUTE_MANAGER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_route_manager.yaml
     FRONT_OBSTACLE_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_front_obstacle_monitor.yaml
     WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
+    # Keep the proven direct command chain. Future avoidance activation changes
+    # the topic and WILN_EXTERNAL_COMMAND_MUX together after shadow validation.
+    WILN_FOLLOWER_CMD_TOPIC: ${WILN_FOLLOWER_CMD_TOPIC:-/controller/cmd_vel}
+    WILN_EXTERNAL_COMMAND_MUX: ${WILN_EXTERNAL_COMMAND_MUX:-false}
   volumes:
     - /dev:/dev
     - /run/udev:/run/udev:ro
@@ -125,6 +129,7 @@ services:
         echo "  teleop=$${ENABLE_TELEOP} joystick=$${ENABLE_JOYSTICK} joy_device=$${JOYSTICK_DEVICE}"
         exec ros2 launch norlab_robot live_robot.launch.py \
           warnings:=false \
+          enable_description:=false \
           enable_sensors:=false \
           enable_mapping:=false \
           enable_perception:=false \
@@ -137,6 +142,50 @@ services:
           control_params_file:=$${CONTROL_PARAMS_FILE} \
           joy_device:=$${JOYSTICK_DEVICE} \
           joy_deadzone:=$${JOYSTICK_DEADZONE}
+
+  # ── Robot description (URDF / TF) ──
+  # Uses source URDF + calibration xacro so TF is always up-to-date with mtt_core changes.
+  # CALIBRATION selects the cage position: v1 (pre-displacement) or v2 (post-displacement, current).
+  description:
+    <<: [*dc_base]
+    environment:
+      CALIBRATION: ${CALIBRATION:-v2}
+      USE_SIM_TIME: "false"
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - ${WORKSPACE}/demos/bag_replay/launch/description_calib.launch.py
+
+  # ── COM motor (CL86EC EtherCAT stepper + spring-return position controller) ──
+  # No profile → start on demand: docker compose up com_motor -d
+  # Stop:   docker compose stop com_motor
+  # Logs:   docker compose logs -f com_motor
+  #
+  # Requires: CL86EC drive powered + EtherCAT cable connected.
+  # COM_MOTOR_DRY_RUN=true  → test without hardware (echoes cmd→state, no EtherCAT)
+  # COM_ETHERCAT_IFACE=enp3s0 → override auto-detected NIC
+  com_motor:
+    <<: [*dc_base]
+    user: root
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "=== com_motor: CL86EC EtherCAT stepper driver + COM position controller ==="
+        echo "  dry_run=$${COM_MOTOR_DRY_RUN:-false}  iface=$${COM_ETHERCAT_IFACE:-auto}"
+        IFACE_ARG=""
+        [ -n "$${COM_ETHERCAT_IFACE:-}" ] && IFACE_ARG="ethercat_ifname:=$${COM_ETHERCAT_IFACE}"
+        exec ros2 launch mtt_motor_control com_motor.launch.py \
+          dry_run:=$${COM_MOTOR_DRY_RUN:-false} \
+          $$IFACE_ARG \
+          auto_enable:=$${COM_MOTOR_AUTO_ENABLE:-true} \
+          com_params:=$${COM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/com_motor.yaml}
 
   # ── Sensors (LiDAR + IMU + optional GPS/OAK) ──
   # Launches Hesai XT-32 + RS-Airy + MTi-100 and optional peripherals.
@@ -160,13 +209,22 @@ services:
       - |
         echo "=== sensors: LiDAR + IMU + optional peripherals ==="
         echo "  gps=$${ENABLE_GPS:-false} oak=$${ENABLE_OAK:-false} mti10=$${ENABLE_MTI10:-false}"
+        ZED_ARGS=()
+        if [ -n "$${ZED_PARAMS_OVERRIDE_PATH:-}" ]; then
+          ZED_ARGS+=(zed_params_override_path:="$${ZED_PARAMS_OVERRIDE_PATH}")
+          echo "  zed override: $${ZED_PARAMS_OVERRIDE_PATH}"
+        elif [ "$${ZED_PROFILE:-field}" = "isaac" ]; then
+          ZED_ARGS+=(zed_params_override_path:="$${WORKSPACE}/src/external/norlab_robot/config/_zed2i_isaac.yaml")
+          echo "  zed profile: isaac"
+        fi
         exec ros2 launch norlab_robot sensors.launch.py \
           warnings:=false \
           enable_gps:=$${ENABLE_GPS:-false} \
           enable_oak:=$${ENABLE_OAK:-false} \
           enable_mti10:=$${ENABLE_MTI10:-false} \
           gps_mode:=$${GPS_MODE} \
-          gps_antennas:=$${GPS_ANTENNAS}
+          gps_antennas:=$${GPS_ANTENNAS} \
+          "$${ZED_ARGS[@]}"
 
   # ── ICP Mapping ──
   # Norlab ICP mapper — restartable independently of sensors and driver.
@@ -186,7 +244,7 @@ services:
         echo "=== mapping: Norlab ICP mapper ==="
         echo "  points: $${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "  config: $${MAPPING_CONFIG:-default}"
-        echo "  deskew=$${MAPPING_DESKEW} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
+        echo "  deskew=$${MAPPING_DESKEW} source=$${MAPPING_DESKEW_SOURCE:-imu} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
         POINTS_TOPIC="$${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "Waiting for LiDAR ($${POINTS_TOPIC})..."
         for i in $$(seq 1 60); do
@@ -210,6 +268,8 @@ services:
         exec ros2 launch norlab_robot mapping.launch.py \
           use_sim_time:=false \
           mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_deskew_source:=$${MAPPING_DESKEW_SOURCE:-imu} \
+          mapping_deskew_imu_topic:=$${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
@@ -229,6 +289,17 @@ services:
           mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M:-40.0} \
           mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000} \
           mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M:-40.0} \
+          mapping_max_map_update_translation_correction_m:=$${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-1.50} \
+          mapping_max_map_update_rotation_correction_deg:=$${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-8.0} \
+          mapping_aggressive_speed_ms:=$${MAPPING_AGGRESSIVE_SPEED_MS:-2.0} \
+          mapping_aggressive_yaw_rate_deg_s:=$${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-15.0} \
+          mapping_pivot_linear_speed_ms:=$${MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75} \
+          mapping_pivot_yaw_rate_deg_s:=$${MAPPING_PIVOT_YAW_RATE_DEG_S:-15.0} \
+          mapping_pivot_max_translation_correction_m:=$${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-0.60} \
+          mapping_enable_odom_bridge:=$${MAPPING_ENABLE_ODOM_BRIDGE:-true} \
+          mapping_odom_bridge_after_rejections:=$${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0} \
+          mapping_odom_bridge_min_speed_ms:=$${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5} \
+          mapping_allow_odom_bridge_map_insertion:=$${MAPPING_ALLOW_ODOM_BRIDGE_MAP_INSERTION:-false} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
@@ -238,11 +309,10 @@ services:
   # ── Perception (trailer detector + cloud merger) ──
   # Launches trailer_detector_node + trailer_pose_node.
   # cloud_merger_node is included only if ENABLE_CLOUD_MERGER=true (default: false).
-  # Optional — start with:  docker compose up --profile perception
+  # Starts automatically with docker compose up -d.
   # ZED visualization scripts are separate services: zed_markers, zed_pose_viz
   perception:
     <<: [*dc_base]
-    profiles: ["perception"]
     depends_on:
       robot_driver:
         condition: service_started
@@ -347,6 +417,12 @@ services:
         condition: service_started
       sensors:
         condition: service_started
+    volumes:
+      - /dev:/dev
+      - /dev/bus/usb:/dev/bus/usb
+      - /run/udev:/run/udev:ro
+      - /usr/local/zed/settings:/usr/local/zed/settings:rw
+      - /usr/local/zed/resources:/usr/local/zed/resources:rw
     environment:
       HEALTH_CHECK_DURATION: "15"
     command:
@@ -511,7 +587,7 @@ services:
         wait_for_topic /tf 20 "dynamic TF" || true
         wait_for_topic /tf_static 20 "static TF" || true
         wait_for_topic /robot_description 20 "robot description" || true
-        wait_for_topic /joint_states 20 "joint states" || true
+        wait_for_topic /runtime_joint_states 20 "joint states" || true
 
         echo "Checking optional camera/GPS topics before record..."
         if [ "$${ENABLE_PERCEPTION:-true}" = "true" ]; then
@@ -529,8 +605,20 @@ services:
           echo "  OAK skipped (ENABLE_OAK=false)"
         fi
         if [ "$${ENABLE_GPS:-true}" = "true" ]; then
-          wait_for_topic /gps/fix 15 "GPS fix" || true
-          wait_for_topic /gps/time_reference 15 "GPS time reference" || true
+          case "$${GPS_ANTENNAS:-front}" in
+            front)
+              wait_for_topic /gps_front/fix 15 "GPS front fix" || true
+              wait_for_topic /gps_front/time_reference 15 "GPS front time reference" || true
+              ;;
+            dual)
+              wait_for_topic /gps_left/fix 15 "GPS left fix" || true
+              wait_for_topic /gps_right/fix 15 "GPS right fix" || true
+              ;;
+            *)
+              wait_for_topic /gps/fix 15 "GPS fix" || true
+              wait_for_topic /gps/time_reference 15 "GPS time reference" || true
+              ;;
+          esac
         else
           echo "  GPS skipped (ENABLE_GPS=false)"
         fi
@@ -859,7 +947,29 @@ services:
           follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
           supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE} \
           route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE} \
-          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE}
+          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE} \
+          follower_cmd_vel_topic:=$${WILN_FOLLOWER_CMD_TOPIC} \
+          follower_external_command_mux:=$${WILN_EXTERNAL_COMMAND_MUX}
+
+  # Optional obstacle-avoidance stack in observation-only mode. It is not part
+  # of the default or wiln profiles and cannot publish to controller/cmd_vel.
+  avoidance_shadow:
+    <<: [*dc_base]
+    profiles: ["avoidance"]
+    depends_on:
+      mapping:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - mtt_avoidance
+      - avoidance_shadow.launch.py
+      - enabled:=true
+      - shadow_mode:=true
+      - execution_enabled:=false
+      - reverse_recovery_enabled:=false
+      - command_output_topic:=/mtt_avoidance/selected_articulated_cmd
+      - hardware_output_enabled:=false
 
   # ── WILN control (one-shot) ──
   # Run with:  dc run --rm wiln_teach_start
