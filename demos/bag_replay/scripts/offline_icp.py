@@ -34,6 +34,7 @@ MERGED_RELIABLE_TOPIC = "/merged_points_reliable"
 
 REBUILT_MAPPING_TOPICS = [
     "/mapping/icp_odom",
+    "/mapping/status",
     "/mapping/map",
     "/mapping/scan_after_deskew",
     "/mapping/scan_after_input_filters",
@@ -374,7 +375,7 @@ def candidate_pipelines(counts: dict[str, int], requested_mode: str) -> list[Pip
     return deduped
 
 
-def start_process(command: list[str], log_path: Path) -> subprocess.Popen:
+def start_process(command: list[str], log_path: Path, env: dict[str, str] | None = None) -> subprocess.Popen:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_file = log_path.open("w", encoding="utf-8")
     return subprocess.Popen(
@@ -383,6 +384,7 @@ def start_process(command: list[str], log_path: Path) -> subprocess.Popen:
         stderr=subprocess.STDOUT,
         text=True,
         start_new_session=True,
+        env=env,
     )
 
 
@@ -426,13 +428,19 @@ def terminate_process(process: subprocess.Popen | None, grace_s: float = 10.0) -
         return
 
 
-def run_capture(command: list[str], output_path: Path, timeout_s: float | None = None) -> subprocess.CompletedProcess:
+def run_capture(
+    command: list[str],
+    output_path: Path,
+    timeout_s: float | None = None,
+    env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess:
     result = subprocess.run(
         command,
         check=False,
         capture_output=True,
         text=True,
         timeout=timeout_s,
+        env=env,
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(result.stdout, encoding="utf-8")
@@ -441,7 +449,12 @@ def run_capture(command: list[str], output_path: Path, timeout_s: float | None =
     return result
 
 
-def wait_for_service(service_name: str, timeout_s: float, log_dir: Path) -> bool:
+def wait_for_service(
+    service_name: str,
+    timeout_s: float,
+    log_dir: Path,
+    env: dict[str, str] | None = None,
+) -> bool:
     deadline = time.time() + timeout_s
     while time.time() < deadline:
         result = subprocess.run(
@@ -449,6 +462,7 @@ def wait_for_service(service_name: str, timeout_s: float, log_dir: Path) -> bool
             check=False,
             capture_output=True,
             text=True,
+            env=env,
         )
         (log_dir / "service_list.txt").write_text(result.stdout, encoding="utf-8")
         if result.returncode == 0 and service_name in result.stdout.splitlines():
@@ -463,11 +477,13 @@ def call_save_service(
     request: str,
     log_path: Path,
     timeout_s: float = 300.0,
+    env: dict[str, str] | None = None,
 ) -> bool:
     result = run_capture(
         ["ros2", "service", "call", service_name, service_type, request],
         log_path,
         timeout_s=timeout_s,
+        env=env,
     )
     return result.returncode == 0
 
@@ -480,6 +496,7 @@ def save_mapping_outputs(
     duration_s: float,
     *,
     label: str = "",
+    env: dict[str, str] | None = None,
 ) -> tuple[bool, list[str]]:
     """Save mapper outputs while the mapper is still alive.
 
@@ -500,6 +517,7 @@ def save_mapping_outputs(
         map_request,
         log_dir / f"save_map_{pipeline_mode}{suffix}.txt",
         timeout_s=save_timeout_s,
+        env=env,
     ):
         errors.append("save_map_service_failed")
 
@@ -509,6 +527,7 @@ def save_mapping_outputs(
         trajectory_request,
         log_dir / f"save_trajectory_{pipeline_mode}{suffix}.txt",
         timeout_s=60.0,
+        env=env,
     ):
         errors.append("save_trajectory_service_failed")
 
@@ -848,7 +867,7 @@ def run_pipeline(
     if args.offline_quality == "max":
         mapping_compression_voxel_size = "0.10"
         mapping_config = Path(args.mapping_config).expanduser() if args.mapping_config else dense_mapping_config
-        max_replay_rate = float(os.environ.get("OFFLINE_ICP_MAX_REPLAY_RATE", "0.05"))
+        max_replay_rate = float(os.environ.get("OFFLINE_ICP_MAX_REPLAY_RATE", "0.25"))
         if replay_rate > max_replay_rate:
             replay_rate = max_replay_rate
         result["quality_profile_notes"] = [
@@ -1079,9 +1098,9 @@ def run_pipeline(
                 args.checkpoint_interval_s,
             )
 
-        # Record high-quality icp_odom during replay → real sim-time timestamps + SE(3).
-        # /mapping/icp_odom is excluded from bag play (REBUILT_MAPPING_TOPICS) so only
-        # the fresh offline mapper output lands here.
+        # Record high-quality icp_odom and per-scan mapper status during replay.
+        # /mapping/icp_odom and /mapping/status are excluded from bag play
+        # (REBUILT_MAPPING_TOPICS), so only the fresh offline mapper output lands here.
         # ros2 bag record requires the output dir to NOT exist — it creates it itself.
         shutil.rmtree(icp_odom_bag_dir, ignore_errors=True)  # clean stale data before re-run
         record_proc = start_process(
@@ -1089,7 +1108,7 @@ def run_pipeline(
                 "ros2", "bag", "record",
                 "--output", str(icp_odom_bag_dir),
                 "--storage", "mcap",
-                "--topics", "/mapping/icp_odom",
+                "--topics", "/mapping/icp_odom", "/mapping/status",
             ],
             log_dir / f"record_icp_odom_{pipeline.mode}.log",
         )
