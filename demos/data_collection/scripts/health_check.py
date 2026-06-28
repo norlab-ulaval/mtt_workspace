@@ -18,10 +18,15 @@ Environment variables:
   HEALTH_CHECK_DURATION     Measurement window in seconds (default 15)
   HEALTH_CHECK_WAIT_TIMEOUT Max seconds to wait for sensors to appear (default 40)
   GPS_MODE                  serial | tcp (default serial)
-  GPS_ANTENNAS              single | dual (default single)
+  GPS_ANTENNAS              front | single | dual (default front)
+  REACH_FRONT_DEV           Front Reach serial device (default /dev/reach_front)
+  REACH_ROVER_DEV           Rover Reach serial device (default /dev/reach_rover)
+  REACH_FRONT_IP            Front Reach IP for tcp mode (default 192.168.2.59)
+  REACH_FRONT_TCP_PORT      Front Reach TCP port (default 9001)
   REACH_ROVER_IP            Reach RS rover IP (default 192.168.2.59)
   REACH_ROVER_TCP_PORT      Reach RS rover TCP port (default 9001)
   HESAI_IP                  Hesai LiDAR IP (default 192.168.2.201)
+  RS_IP                     RoboSense/RS-Airy LiDAR IP (default 192.168.1.200)
 """
 
 import glob
@@ -54,11 +59,16 @@ RESET  = "\033[0m"
 DURATION        = float(os.environ.get("HEALTH_CHECK_DURATION",    "15"))
 WAIT_TIMEOUT    = float(os.environ.get("HEALTH_CHECK_WAIT_TIMEOUT","40"))
 GPS_MODE        = os.environ.get("GPS_MODE", "serial")
-GPS_ANTENNAS    = os.environ.get("GPS_ANTENNAS", "single")
+GPS_ANTENNAS    = os.environ.get("GPS_ANTENNAS", "front")
 OAK_MODE        = os.environ.get("OAK_MODE", "stable")
+FRONT_DEV       = os.environ.get("REACH_FRONT_DEV", "/dev/reach_front")
+ROVER_DEV       = os.environ.get("REACH_ROVER_DEV", "/dev/reach_rover")
+FRONT_IP        = os.environ.get("REACH_FRONT_IP", "192.168.2.59")
+FRONT_PORT      = int(os.environ.get("REACH_FRONT_TCP_PORT", "9001"))
 ROVER_IP        = os.environ.get("REACH_ROVER_IP",       "192.168.2.59")
 ROVER_PORT      = int(os.environ.get("REACH_ROVER_TCP_PORT", "9001"))
 HESAI_IP        = os.environ.get("HESAI_IP",          "192.168.2.201")
+RS_IP           = os.environ.get("RS_IP",             "192.168.1.200")
 OAK_RATE_HZ     = 10.0 if OAK_MODE.strip().lower() == "max" else 5.0
 
 
@@ -70,7 +80,7 @@ def env_bool(name: str, default: bool = True) -> bool:
 
 
 ENABLE_GPS = env_bool("ENABLE_GPS", True)
-ENABLE_OAK = env_bool("ENABLE_OAK", True)
+ENABLE_OAK = env_bool("ENABLE_OAK", False)
 ENABLE_MTI10 = env_bool("ENABLE_MTI10", True)
 
 GPS_FIX_LABELS = {-1: "NO FIX", 0: "GPS SPP", 1: "SBAS", 2: "RTK", 3: "RTK Float", 4: "RTK Fixed"}
@@ -109,7 +119,7 @@ def build_topics() -> list[TopicSpec]:
     # ── Infrastructure ──
     TopicSpec("/tf",           "TF",           50.0, 90.0,  group="infra"),
     TopicSpec("/tf_static",    "TF Static",     1.0, 300.0, group="infra"),
-    TopicSpec("/joint_states", "Joint States", 50.0, 90.0,  group="infra"),
+    TopicSpec("/runtime_joint_states", "Runtime Joint States", 50.0, 90.0,  group="infra"),
 
     # ── MTT CAN driver ──
     TopicSpec("/mtt_odometry",           "MTT Odometry",   50.0, 90.0, group="can"),
@@ -179,19 +189,24 @@ def build_topics() -> list[TopicSpec]:
         ])
 
     if ENABLE_GPS:
-        topics.extend([
-            # ── GPS — Emlid Reach RS single rover (rear-right mast, default) ──
-            # RTK corrections flow internally between rover and base via LoRa/TCP.
-            # GGA @ 5 Hz gives position; RMC @ 1 Hz gives date for GPS-UTC timestamps.
-            TopicSpec("/gps/fix", "GPS Rover fix", 1.0, 80.0, group="gps"),
-            TopicSpec("/gps/nmea_sentence", "GPS Rover NMEA", 5.0, 80.0, required=False, group="gps"),
-            TopicSpec("/gps/time_reference", "GPS Rover TimeRef", 1.0, 80.0, required=False, group="gps"),
-
-            # ── GPS — Dual-antenna legacy (only active with gps_antennas:=dual) ─
-            TopicSpec("/gps_left/fix", "GPS Left fix", 1.0, 80.0, required=False, group="gps"),
-            TopicSpec("/gps_right/fix", "GPS Right fix", 1.0, 80.0, required=False, group="gps"),
-            TopicSpec("/gps/heading", "GPS Heading", 1.0, 80.0, required=False, group="gps"),
-        ])
+        if GPS_ANTENNAS == "front":
+            topics.extend([
+                TopicSpec("/gps_front/fix", "GPS Front fix", 1.0, 80.0, group="gps"),
+                TopicSpec("/gps_front/nmea_sentence", "GPS Front NMEA", 5.0, 80.0, required=False, group="gps"),
+                TopicSpec("/gps_front/time_reference", "GPS Front TimeRef", 1.0, 80.0, required=False, group="gps"),
+            ])
+        elif GPS_ANTENNAS == "dual":
+            topics.extend([
+                TopicSpec("/gps_left/fix", "GPS Left fix", 1.0, 80.0, group="gps"),
+                TopicSpec("/gps_right/fix", "GPS Right fix", 1.0, 80.0, group="gps"),
+                TopicSpec("/gps/heading", "GPS Heading", 1.0, 80.0, required=False, group="gps"),
+            ])
+        else: # single
+            topics.extend([
+                TopicSpec("/gps/fix", "GPS Rover fix", 1.0, 80.0, group="gps"),
+                TopicSpec("/gps/nmea_sentence", "GPS Rover NMEA", 5.0, 80.0, required=False, group="gps"),
+                TopicSpec("/gps/time_reference", "GPS Rover TimeRef", 1.0, 80.0, required=False, group="gps"),
+            ])
 
     if ENABLE_OAK:
         topics.extend([
@@ -232,22 +247,22 @@ TOPICS: list[TopicSpec] = build_topics()
 GROUP_HINTS = {
     "gps": (
         f"GPS mode='{GPS_MODE}' antennas='{GPS_ANTENNAS}'. "
-        "Serial: check /dev/reach_rover exists inside container "
-        "(run: sudo bash scripts/setup_udev_reach_rs.sh on the robot). "
-        f"TCP: rover at {ROVER_IP}:{ROVER_PORT} — check ReachView3 TCP output enabled. "
+        f"Serial: check the expected Reach symlink exists inside container "
+        f"(front={FRONT_DEV}, rover={ROVER_DEV}; run: sudo bash scripts/setup_udev_reach_rs.sh --front on the robot). "
+        f"TCP: front at {FRONT_IP}:{FRONT_PORT} or rover at {ROVER_IP}:{ROVER_PORT} — check ReachView3 TCP output enabled. "
         "If /gps/nmea_sentence is alive but /gps/fix stays at 0, the Reach is connected "
         "but GGA is missing or rejected. Verify GGA 5 Hz + RMC 1 Hz on the rover USB output."
     ),
     "camera": (
-        "ZED 0 images: check /usr/local/zed/settings/SN*.conf exists (ZED calibration). "
-        "If missing: connect robot to internet and run ZED_Diagnostic once, "
-        "or copy SN<serial>.conf from another machine. "
-        "OAK: check USB cable and strain relief after vibrations, then verify RGBD + /oak/points "
-        "are enabled in oak.launch.py."
+        "ZED 0 images right after startup is often a timing issue: the SDK can take several seconds "
+        "to open the camera and initialize AI/depth. Check /usr/local/zed/settings/SN*.conf, "
+        "ZED_Diagnostic, and rerun the health check after sensors has fully started. "
+        "OAK is only checked when ENABLE_OAK=true."
     ),
     "lidar": (
         f"Hesai: check {HESAI_IP} on the network (ping). "
-        "RS Bpearl: check 192.168.1.102 / USB config."
+        f"RS Bpearl: check {RS_IP} on the RoboSense/RS-Airy link "
+        "(robot host address is 192.168.1.102)."
     ),
     "imu": "XSens MTi-100: check /dev/serial/by-id/usb-Xsens_MTi-100* USB device.",
     "can": (
@@ -316,17 +331,22 @@ def run_filesystem_prechecks() -> bool:
     print(f"\n{BOLD}{CYAN}── Phase 0: Filesystem pre-check ───────────────────{RESET}")
     any_error = False
 
-    # /dev/reach_rover — required for single-antenna GPS only when GPS is enabled.
-    rover_dev = "/dev/reach_rover"
+    gps_devices = {
+        "front": [FRONT_DEV],
+        "single": [ROVER_DEV],
+        "dual": ["/dev/reach_left", "/dev/reach_right"],
+    }.get(GPS_ANTENNAS, [FRONT_DEV])
     if not ENABLE_GPS:
-        print(f"  {DIM}–  GPS disabled by ENABLE_GPS=false; skipping {rover_dev} check{RESET}")
-    elif os.path.exists(rover_dev):
-        print(f"  {GREEN}✓{RESET}  {rover_dev}  exists (GPS serial device OK)")
+        print(f"  {DIM}–  GPS disabled by ENABLE_GPS=false; skipping Reach serial device check{RESET}")
     else:
-        print(f"  {RED}✗{RESET}  {rover_dev}  MISSING")
-        print(f"      {YELLOW}→ GPS driver will retry silently, 0 messages in bag.{RESET}")
-        print(f"      {YELLOW}  Fix: sudo bash scripts/setup_udev_reach_rs.sh  (on robot host){RESET}")
-        any_error = True
+        for gps_dev in gps_devices:
+            if os.path.exists(gps_dev):
+                print(f"  {GREEN}✓{RESET}  {gps_dev}  exists (GPS serial device OK)")
+            else:
+                print(f"  {RED}✗{RESET}  {gps_dev}  MISSING")
+                print(f"      {YELLOW}→ GPS driver will retry silently, 0 messages in bag.{RESET}")
+                print(f"      {YELLOW}  Fix: sudo bash scripts/setup_udev_reach_rs.sh --{GPS_ANTENNAS}  (on robot host){RESET}")
+                any_error = True
 
     # ZED calibration file — /usr/local/zed/settings/SN*.conf
     zed_settings_dir = "/usr/local/zed/settings"
@@ -368,32 +388,41 @@ def run_network_prechecks() -> bool:
     if not ok:
         any_net_warn = True
 
+    # RoboSense / RS-Airy LiDAR
+    ok = _ping(RS_IP)
+    s = f"{GREEN}✓{RESET}" if ok else f"{YELLOW}⚠{RESET}"
+    detail = "reachable" if ok else (
+        f"no response — RS-Airy at {RS_IP} may be off, wrong IP, or on the wrong interface"
+    )
+    print(f"  {s}  RS-Airy       {DIM}{RS_IP}{RESET}  {detail}")
+    if not ok:
+        any_net_warn = True
+
     # GPS connectivity
     if not ENABLE_GPS:
         print(f"  {DIM}GPS disabled by ENABLE_GPS=false — network/serial checks skipped{RESET}")
     elif GPS_MODE == "tcp":
-        print(f"  {DIM}GPS mode=tcp — testing TCP connection to rover{RESET}")
-        ping_ok = _ping(ROVER_IP)
+        gps_ip = FRONT_IP if GPS_ANTENNAS == "front" else ROVER_IP
+        gps_port = FRONT_PORT if GPS_ANTENNAS == "front" else ROVER_PORT
+        gps_label = "GPS Front" if GPS_ANTENNAS == "front" else "GPS Rover"
+        print(f"  {DIM}GPS mode=tcp — testing TCP connection to Reach receiver{RESET}")
+        ping_ok = _ping(gps_ip)
         if ping_ok:
-            tcp_ok, msg = _tcp_connect(ROVER_IP, ROVER_PORT)
+            tcp_ok, msg = _tcp_connect(gps_ip, gps_port)
             if tcp_ok:
-                print(f"  {GREEN}✓{RESET}  GPS Rover     {DIM}{ROVER_IP}:{ROVER_PORT}{RESET}  {msg}")
+                print(f"  {GREEN}✓{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
             else:
-                print(f"  {RED}✗{RESET}  GPS Rover     {DIM}{ROVER_IP}:{ROVER_PORT}{RESET}  {msg}")
-                print(f"      {YELLOW}→ Reach RS reachable but port {ROVER_PORT} refused. "
+                print(f"  {RED}✗{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
+                print(f"      {YELLOW}→ Reach receiver reachable but port {gps_port} refused. "
                       f"Enable TCP output in ReachView3.{RESET}")
                 any_net_warn = True
         else:
-            print(f"  {RED}✗{RESET}  GPS Rover     {DIM}{ROVER_IP}:{ROVER_PORT}{RESET}  "
-                  f"host unreachable — Reach RS not on network?")
+            print(f"  {RED}✗{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  "
+                  f"host unreachable — Reach receiver not on network?")
             any_net_warn = True
     else:
-        print(f"  {DIM}GPS mode=serial (/dev/reach_rover) — TCP not checked{RESET}")
-        # Optionally ping rover WiFi IP to confirm it's powered on
-        ping_ok = _ping(ROVER_IP)
-        s = f"{GREEN}✓{RESET}" if ping_ok else f"{DIM}–{RESET}"
-        detail = "reachable (WiFi)" if ping_ok else "not on WiFi (normal if LoRa only)"
-        print(f"  {s}  GPS Rover WiFi  {DIM}{ROVER_IP}{RESET}  {detail}")
+        gps_dev = FRONT_DEV if GPS_ANTENNAS == "front" else ROVER_DEV
+        print(f"  {DIM}GPS mode=serial ({gps_dev}) — TCP not checked{RESET}")
 
     print()
     return not any_net_warn
@@ -431,6 +460,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         "/gps/fix":       +99,   # single rover (primary)
         "/gps_left/fix":  +99,   # dual legacy
         "/gps_right/fix": +99,   # dual legacy
+        "/gps_front/fix": +99,   # front (Emlid on ZED)
     }
     lock = threading.Lock()
     subs = []
@@ -611,19 +641,34 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     gps_quality_ok = True
     if ENABLE_GPS:
         print(f"\n{BOLD}GPS fix quality (worst seen during window):{RESET}")
-        for gps_topic, worst_status in gps_fix_worst.items():
-            # Skip legacy dual-antenna topics if they have no data and we're in single mode
-            if worst_status == +99 and gps_topic != "/gps/fix":
-                continue   # dual topics absent in single-antenna mode — expected
+        expected_gps_topics = []
+        if GPS_ANTENNAS == "front":
+            expected_gps_topics = ["/gps_front/fix"]
+        elif GPS_ANTENNAS == "dual":
+            expected_gps_topics = ["/gps_left/fix", "/gps_right/fix"]
+        else:
+            expected_gps_topics = ["/gps/fix"]
+
+        for gps_topic in expected_gps_topics:
+            worst_status = gps_fix_worst.get(gps_topic, +99)
             label = {
                 "/gps/fix":       "Rover (single)",
                 "/gps_left/fix":  "Left  (dual)  ",
                 "/gps_right/fix": "Right (dual)  ",
+                "/gps_front/fix": "Front (ZED)   ",
             }.get(gps_topic, gps_topic)
             if worst_status == +99:
                 fix_label = "no data"
                 color = RED
-                note = "no messages — /dev/reach_rover missing or driver not connected"
+                expected_dev = FRONT_DEV if GPS_ANTENNAS == "front" else ROVER_DEV
+                nmea_topic = gps_topic.rsplit("/", 1)[0] + "/nmea_sentence"
+                if counts.get(nmea_topic, 0) > 0:
+                    note = (
+                        f"NMEA is flowing on {nmea_topic}, but no valid GGA fix is being published. "
+                        "Check ReachView3 USB output: enable GGA and RMC, then verify sky view/fix."
+                    )
+                else:
+                    note = f"no messages — {expected_dev} missing, no NMEA output, or driver not connected"
                 gps_quality_ok = False
             elif worst_status >= 4:
                 fix_label = "RTK Fixed"
