@@ -9,6 +9,19 @@ x-build: &mtt_devel_build
     USER_UID: ${UID:-1000}
     USER_GID: ${GID:-1000}
 
+x-isaac-build: &isaac_build
+  context: ../..
+  dockerfile: docker/Dockerfile.isaac
+  args:
+    BASE_IMAGE: ${ISAAC_BASE_IMAGE:-${MTT_IMAGE:-mtt_workspace:devel}}
+    ROS_DISTRO: ${ROS_DISTRO:-jazzy}
+    USERNAME: mtt
+    ISAAC_ROS_APT_RELEASE: ${ISAAC_ROS_APT_RELEASE:-release-4.5}
+    ISAAC_ROS_APT_URL: ${ISAAC_ROS_APT_URL:-https://isaac.download.nvidia.com/isaac-ros}
+    NVIDIA_JETSON_APT_URL: ${NVIDIA_JETSON_APT_URL:-https://repo.download.nvidia.com/jetson/x86_64/noble}
+    NVIDIA_JETSON_APT_SUITE: ${NVIDIA_JETSON_APT_SUITE:-r38.4}
+    ISAAC_APT_PACKAGES: ${ISAAC_APT_PACKAGES:-}
+
 x-live-robot-base: &live_robot_base
   extends:
     file: ../../docker/common.yaml
@@ -34,16 +47,22 @@ x-live-robot-base: &live_robot_base
     DOODLE_PC_IP: ${DOODLE_PC_IP:-192.168.50.101}
     ZENOH_FIELD_PORT: ${ZENOH_FIELD_PORT:-7447}
     FOXGLOVE_BIND_ADDRESS: ${FOXGLOVE_BIND_ADDRESS:-192.168.50.2}
-    FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge.yaml}
+    FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/demos/live_robot/config/foxglove_bridge.yaml}
     FOXGLOVE_FIELD_PARAMS_FILE: ${FOXGLOVE_FIELD_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge_field_light.yaml}
     DRIVER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_driver.yaml
     HEALTH_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_health_monitor.yaml
     CONTROL_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_control.yaml
-    FOLLOWER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_path_follower.yaml
+    # FOLLOWER_PARAMS_FILE removed: wiln_path_follower (C++) reads wiln_params_file,
+    # not a separate follower config. mtt_path_follower.yaml is dead and would create
+    # a second controller/cmd_vel publisher if wired.
     SUPERVISOR_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_repeat_supervisor.yaml
     ROUTE_MANAGER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_route_manager.yaml
     FRONT_OBSTACLE_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_front_obstacle_monitor.yaml
     WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
+    # Keep the proven direct command chain. Future avoidance activation changes
+    # the topic and WILN_EXTERNAL_COMMAND_MUX together after shadow validation.
+    WILN_FOLLOWER_CMD_TOPIC: ${WILN_FOLLOWER_CMD_TOPIC:-/controller/cmd_vel}
+    WILN_EXTERNAL_COMMAND_MUX: ${WILN_EXTERNAL_COMMAND_MUX:-false}
   volumes:
     - /dev:/dev
     - /run/udev:/run/udev:ro
@@ -51,6 +70,31 @@ x-live-robot-base: &live_robot_base
     # The ZED SDK downloads models on first run (requires internet).
     - /usr/local/zed/settings:/usr/local/zed/settings:rw
     - /usr/local/zed/resources:/usr/local/zed/resources:rw
+
+x-isaac-base: &isaac_base
+  extends:
+    file: ../../docker/common.yaml
+    service: ros_runtime_base
+  env_file:
+    - ../../.env
+    - ./config/runtime.env
+  image: ${ISAAC_ROS_IMAGE:-mtt_workspace:isaac}
+  build: *isaac_build
+  pull_policy: never
+  privileged: true
+  environment:
+    ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
+    RMW_IMPLEMENTATION: ${ISAAC_RMW_IMPLEMENTATION:-rmw_zenoh_cpp}
+    ROBOT_NAME: ${ROBOT_NAME:-mtt-hl}
+    NORLAB_ROBOT_PATH: ${WORKSPACE}/src/external/norlab_robot
+    NVIDIA_VISIBLE_DEVICES: all
+    NVIDIA_DRIVER_CAPABILITIES: all
+  volumes:
+    - /dev:/dev
+    - /run/udev:/run/udev:ro
+    - /usr/local/zed/settings:/usr/local/zed/settings:rw
+    - /usr/local/zed/resources:/usr/local/zed/resources:rw
+    - ${WORKSPACE}/data:${WORKSPACE}/data
 
 services:
   bash:
@@ -113,6 +157,7 @@ services:
         echo "  teleop=$${ENABLE_TELEOP} joystick=$${ENABLE_JOYSTICK} joy_device=$${JOYSTICK_DEVICE}"
         exec ros2 launch norlab_robot live_robot.launch.py \
           warnings:=false \
+          enable_description:=false \
           enable_sensors:=false \
           enable_mapping:=false \
           enable_perception:=false \
@@ -125,6 +170,23 @@ services:
           control_params_file:=$${CONTROL_PARAMS_FILE} \
           joy_device:=$${JOYSTICK_DEVICE} \
           joy_deadzone:=$${JOYSTICK_DEADZONE}
+
+  # ── Robot description (URDF / TF) ──
+  # Uses source URDF + calibration xacro so TF is always up-to-date with mtt_core changes.
+  # CALIBRATION selects the cage position: v1 (pre-displacement) or v2 (post-displacement, current).
+  # Default is v2 — the cage has been permanently displaced since 2026-06-25.
+  description:
+    <<: [*live_robot_base]
+    environment:
+      CALIBRATION: ${CALIBRATION:-v2}
+      USE_SIM_TIME: "false"
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - ros2
+      - launch
+      - ${WORKSPACE}/demos/bag_replay/launch/description_calib.launch.py
 
   # ── Sensors (LiDAR + IMU + optional GPS/OAK) ──
   # Launches Hesai XT-32 + RS-Airy + MTi-100 and optional peripherals.
@@ -148,13 +210,192 @@ services:
       - |
         echo "=== sensors: LiDAR + IMU + optional peripherals ==="
         echo "  gps=$${ENABLE_GPS:-false} oak=$${ENABLE_OAK:-false} mti10=$${ENABLE_MTI10:-false}"
+        ZED_ARGS=()
+        if [ -n "$${ZED_PARAMS_OVERRIDE_PATH:-}" ]; then
+          ZED_ARGS+=(zed_params_override_path:="$${ZED_PARAMS_OVERRIDE_PATH}")
+          echo "  zed override: $${ZED_PARAMS_OVERRIDE_PATH}"
+        elif [ "$${ZED_PROFILE:-field}" = "isaac" ]; then
+          ZED_ARGS+=(zed_params_override_path:="$${WORKSPACE}/src/external/norlab_robot/config/_zed2i_isaac.yaml")
+          echo "  zed profile: isaac"
+        fi
         exec ros2 launch norlab_robot sensors.launch.py \
           warnings:=false \
           enable_gps:=$${ENABLE_GPS:-false} \
           enable_oak:=$${ENABLE_OAK:-false} \
           enable_mti10:=$${ENABLE_MTI10:-false} \
           gps_mode:=$${GPS_MODE} \
-          gps_antennas:=$${GPS_ANTENNAS}
+          gps_antennas:=$${GPS_ANTENNAS} \
+          "$${ZED_ARGS[@]}"
+
+  isaac_preflight:
+    <<: [*isaac_base]
+    profiles: ["isaac", "check"]
+    depends_on:
+      - sensors
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        [ -f "$${WORKSPACE}/install/setup.bash" ] && source "$${WORKSPACE}/install/setup.bash"
+        [ -f /opt/isaac_ros_ws/install/setup.bash ] && source /opt/isaac_ros_ws/install/setup.bash
+
+        echo "=== GPU ==="
+        if command -v nvidia-smi >/dev/null 2>&1; then
+          nvidia-smi || true
+        else
+          echo "nvidia-smi not installed in this container."
+          test -r /proc/driver/nvidia/version && cat /proc/driver/nvidia/version || true
+          ls -l /dev/nvidia* 2>/dev/null || true
+        fi
+        echo "NVIDIA_VISIBLE_DEVICES=$${NVIDIA_VISIBLE_DEVICES:-}"
+        echo "NVIDIA_DRIVER_CAPABILITIES=$${NVIDIA_DRIVER_CAPABILITIES:-}"
+
+        echo
+        echo "=== Isaac packages ==="
+        ros2 pkg list | grep -E 'isaac|nvblox' || true
+
+        echo
+        echo "=== Required input topics ==="
+        duration="$${ISAAC_AUDIT_DURATION:-5}"
+        for topic in \
+          /zed/zed_node/left/gray/rect/image \
+          /zed/zed_node/left/gray/rect/camera_info \
+          /zed/zed_node/rgb/color/rect/image \
+          /zed/zed_node/rgb/color/rect/camera_info \
+          /zed/zed_node/depth/depth_registered \
+          /zed/zed_node/depth/depth_registered/camera_info \
+          /zed/zed_node/imu/data \
+          /hesai_lidar/points
+        do
+          echo "--- $${topic}"
+          ros2 topic info "$${topic}" || true
+          timeout "$${duration}s" ros2 topic hz "$${topic}" || true
+        done
+
+        echo
+        echo "=== Isaac outputs ==="
+        for topic in /isaac/vslam/odometry /isaac/vslam/status /isaac/nvblox/static_map_slice /isaac/nvblox/mesh; do
+          echo "--- $${topic}"
+          ros2 topic info "$${topic}" || true
+        done
+
+  isaac_vslam:
+    <<: [*isaac_base]
+    profiles: ["isaac"]
+    depends_on:
+      - sensors
+      - description
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        [ -f "$${WORKSPACE}/install/setup.bash" ] && source "$${WORKSPACE}/install/setup.bash"
+        [ -f /opt/isaac_ros_ws/install/setup.bash ] && source /opt/isaac_ros_ws/install/setup.bash
+
+        params_file="$${ISAAC_VSLAM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/isaac_vslam_rgbd.yaml}"
+        image_topic="$${ISAAC_VSLAM_IMAGE_TOPIC:-/zed/zed_node/left/gray/rect/image}"
+        camera_info_topic="$${ISAAC_VSLAM_CAMERA_INFO_TOPIC:-/zed/zed_node/left/gray/rect/camera_info}"
+        depth_topic="$${ISAAC_VSLAM_DEPTH_TOPIC:-/zed/zed_node/depth/depth_registered}"
+        depth_info_topic="$${ISAAC_VSLAM_DEPTH_INFO_TOPIC:-/zed/zed_node/depth/depth_registered/camera_info}"
+        imu_topic="$${ISAAC_VSLAM_IMU_TOPIC:-/zed/zed_node/imu/data}"
+
+        if ! ros2 pkg prefix isaac_ros_visual_slam >/dev/null 2>&1; then
+          echo "ERROR: isaac_ros_visual_slam is not installed in this container."
+          echo "Set ISAAC_ROS_IMAGE to a sidecar image containing Isaac ROS Visual SLAM."
+          exit 42
+        fi
+        if ! ros2 pkg executables isaac_ros_visual_slam | grep -qE '(^| )isaac_ros_visual_slam$$'; then
+          echo "ERROR: isaac_ros_visual_slam executable not found."
+          ros2 pkg executables isaac_ros_visual_slam || true
+          exit 43
+        fi
+
+        echo "=== Isaac Visual SLAM RGB-D ==="
+        echo "params: $${params_file}"
+        echo "image:  $${image_topic}"
+        echo "depth:  $${depth_topic}"
+        echo "imu:    $${imu_topic}"
+        echo "Waiting for ZED topics to settle..."
+        sleep 5
+        exec ros2 run isaac_ros_visual_slam isaac_ros_visual_slam \
+          --ros-args \
+          --params-file "$${params_file}" \
+          -r visual_slam/image_0:="$${image_topic}" \
+          -r visual_slam/camera_info_0:="$${camera_info_topic}" \
+          -r visual_slam/depth_0:="$${depth_topic}" \
+          -r visual_slam/depth_camera_info_0:="$${depth_info_topic}" \
+          -r visual_slam/imu:="$${imu_topic}" \
+          -r visual_slam/tracking/odometry:=/isaac/vslam/odometry \
+          -r visual_slam/tracking/slam_path:=/isaac/vslam/slam_path \
+          -r visual_slam/tracking/vo_path:=/isaac/vslam/vo_path \
+          -r visual_slam/status:=/isaac/vslam/status \
+          -r visual_slam/vis/landmarks_cloud:=/isaac/vslam/landmarks_cloud \
+          -r visual_slam/vis/observations_cloud:=/isaac/vslam/observations_cloud
+
+  isaac_nvblox:
+    <<: [*isaac_base]
+    profiles: ["isaac"]
+    depends_on:
+      - sensors
+      - description
+      - isaac_vslam
+    command:
+      - bash
+      - -lc
+      - |
+        source /opt/ros/$${ROS_DISTRO:-jazzy}/setup.bash
+        [ -f "$${WORKSPACE}/install/setup.bash" ] && source "$${WORKSPACE}/install/setup.bash"
+        [ -f /opt/isaac_ros_ws/install/setup.bash ] && source /opt/isaac_ros_ws/install/setup.bash
+
+        params_file="$${ISAAC_NVBLOX_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/isaac_nvblox_zed.yaml}"
+        color_topic="$${ISAAC_NVBLOX_COLOR_TOPIC:-/zed/zed_node/rgb/color/rect/image}"
+        color_info_topic="$${ISAAC_NVBLOX_COLOR_INFO_TOPIC:-/zed/zed_node/rgb/color/rect/camera_info}"
+        depth_topic="$${ISAAC_NVBLOX_DEPTH_TOPIC:-/zed/zed_node/depth/depth_registered}"
+        depth_info_topic="$${ISAAC_NVBLOX_DEPTH_INFO_TOPIC:-/zed/zed_node/depth/depth_registered/camera_info}"
+        pointcloud_topic="$${ISAAC_NVBLOX_POINTCLOUD_TOPIC:-}"
+
+        if ! ros2 pkg prefix nvblox_ros >/dev/null 2>&1; then
+          echo "ERROR: nvblox_ros is not installed in this container."
+          echo "Set ISAAC_ROS_IMAGE to a sidecar image containing Isaac ROS Nvblox."
+          exit 44
+        fi
+        if ! ros2 pkg executables nvblox_ros | grep -qE '(^| )nvblox_node$$'; then
+          echo "ERROR: nvblox_node executable not found."
+          ros2 pkg executables nvblox_ros || true
+          exit 45
+        fi
+
+        remaps=(
+          -r camera_0/color/image:="$${color_topic}"
+          -r camera_0/color/camera_info:="$${color_info_topic}"
+          -r camera_0/depth/image:="$${depth_topic}"
+          -r camera_0/depth/camera_info:="$${depth_info_topic}"
+        )
+        if [ -n "$${pointcloud_topic}" ]; then
+          remaps+=(-r pointcloud:="$${pointcloud_topic}")
+        fi
+
+        echo "=== Isaac Nvblox ZED ==="
+        echo "params: $${params_file}"
+        echo "color:  $${color_topic}"
+        echo "depth:  $${depth_topic}"
+        [ -n "$${pointcloud_topic}" ] && echo "lidar:  $${pointcloud_topic}"
+        echo "Waiting for Isaac/ZED topics to settle..."
+        sleep 8
+        exec ros2 run nvblox_ros nvblox_node \
+          --ros-args \
+          --params-file "$${params_file}" \
+          "$${remaps[@]}" \
+          -r __node:=isaac_nvblox \
+          -r ~/mesh:=/isaac/nvblox/mesh \
+          -r ~/mesh_marker:=/isaac/nvblox/mesh_marker \
+          -r ~/tsdf_layer:=/isaac/nvblox/tsdf_layer \
+          -r ~/color_layer:=/isaac/nvblox/color_layer \
+          -r ~/static_esdf_pointcloud:=/isaac/nvblox/static_esdf_pointcloud \
+          -r ~/static_map_slice:=/isaac/nvblox/static_map_slice \
+          -r ~/back_projected_depth:=/isaac/nvblox/back_projected_depth
 
   # ── ICP Mapping ──
   # Norlab ICP mapper — restartable independently of sensors and driver.
@@ -174,7 +415,7 @@ services:
         echo "=== mapping: Norlab ICP mapper ==="
         echo "  points: $${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "  config: $${MAPPING_CONFIG:-default}"
-        echo "  deskew=$${MAPPING_DESKEW} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
+        echo "  deskew=$${MAPPING_DESKEW} source=$${MAPPING_DESKEW_SOURCE:-imu} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
         POINTS_TOPIC="$${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "Waiting for LiDAR ($${POINTS_TOPIC})..."
         for i in $$(seq 1 60); do
@@ -198,6 +439,8 @@ services:
         exec ros2 launch norlab_robot mapping.launch.py \
           use_sim_time:=false \
           mapping_deskew:=$${MAPPING_DESKEW} \
+          mapping_deskew_source:=$${MAPPING_DESKEW_SOURCE:-imu} \
+          mapping_deskew_imu_topic:=$${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
@@ -217,6 +460,17 @@ services:
           mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M:-40.0} \
           mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000} \
           mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M:-40.0} \
+          mapping_max_map_update_translation_correction_m:=$${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-1.50} \
+          mapping_max_map_update_rotation_correction_deg:=$${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-8.0} \
+          mapping_aggressive_speed_ms:=$${MAPPING_AGGRESSIVE_SPEED_MS:-2.0} \
+          mapping_aggressive_yaw_rate_deg_s:=$${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-15.0} \
+          mapping_pivot_linear_speed_ms:=$${MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75} \
+          mapping_pivot_yaw_rate_deg_s:=$${MAPPING_PIVOT_YAW_RATE_DEG_S:-15.0} \
+          mapping_pivot_max_translation_correction_m:=$${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-0.60} \
+          mapping_enable_odom_bridge:=$${MAPPING_ENABLE_ODOM_BRIDGE:-true} \
+          mapping_odom_bridge_after_rejections:=$${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0} \
+          mapping_odom_bridge_min_speed_ms:=$${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5} \
+          mapping_allow_odom_bridge_map_insertion:=$${MAPPING_ALLOW_ODOM_BRIDGE_MAP_INSERTION:-false} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
@@ -226,11 +480,10 @@ services:
   # ── Perception (trailer detector + cloud merger) ──
   # Launches trailer_detector_node + trailer_pose_node.
   # cloud_merger_node is included only if ENABLE_CLOUD_MERGER=true (default: false).
-  # Optional — start with:  docker compose up --profile perception
+  # Starts automatically with docker compose up -d.
   # ZED visualization scripts are separate services: zed_markers, zed_pose_viz
   perception:
     <<: [*live_robot_base]
-    profiles: ["perception"]
     depends_on:
       robot_driver:
         condition: service_started
@@ -460,7 +713,6 @@ services:
         echo "    dc run --rm wiln_replay_stop"
         echo ""
         echo "  WILN cfg:           $${WILN_PARAMS_FILE}"
-        echo "  Follower cfg:       $${FOLLOWER_PARAMS_FILE}"
         echo "  Supervisor cfg:     $${SUPERVISOR_PARAMS_FILE}"
         echo "  Route manager cfg:  $${ROUTE_MANAGER_PARAMS_FILE}"
         echo "  Front obstacle cfg: $${FRONT_OBSTACLE_PARAMS_FILE}"
@@ -468,10 +720,30 @@ services:
         exec ros2 launch norlab_robot teach_repeat.launch.py \
           use_sim_time:=false \
           wiln_params_file:=$${WILN_PARAMS_FILE} \
-          follower_params_file:=$${FOLLOWER_PARAMS_FILE} \
           supervisor_params_file:=$${SUPERVISOR_PARAMS_FILE} \
           route_manager_params_file:=$${ROUTE_MANAGER_PARAMS_FILE} \
-          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE}
+          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE} \
+          follower_cmd_vel_topic:=$${WILN_FOLLOWER_CMD_TOPIC} \
+          follower_external_command_mux:=$${WILN_EXTERNAL_COMMAND_MUX}
+
+  # Optional obstacle-avoidance stack in observation-only mode. It is not part
+  # of the default or wiln profiles and cannot publish to controller/cmd_vel.
+  avoidance_shadow:
+    <<: [*live_robot_base]
+    profiles: ["avoidance"]
+    depends_on:
+      - mapping
+    command:
+      - ros2
+      - launch
+      - mtt_avoidance
+      - avoidance_shadow.launch.py
+      - enabled:=true
+      - shadow_mode:=true
+      - execution_enabled:=false
+      - reverse_recovery_enabled:=false
+      - command_output_topic:=/mtt_avoidance/selected_articulated_cmd
+      - hardware_output_enabled:=false
 
   wiln_teach_start:
     <<: [*live_robot_base]
