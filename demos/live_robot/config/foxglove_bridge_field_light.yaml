@@ -18,6 +18,7 @@
         - "^/mtt/.*"
         - "^/trailer/.*"
         - "^/mapping/icp_odom$"
+        - "^/mapping/icp_measurement$"
         - "^/mapping/trajectory_path$"
         - "^/mapping/aligned_scan$"
         - "^/mtt_obstacle/(?:hazard_status|front_clearance_m|stop_requested|slowdown_scale)$"
