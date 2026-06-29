@@ -98,6 +98,7 @@ services:
       - mtt_driver
       - mtt_operator_teleop.launch.py
       - joy_device:=/dev/input/js0
+      - control_params_file:=${CONTROL_PARAMS_FILE:-${WORKSPACE}/demos/common/config/mtt_control.yaml}
 
   joy_pc:
     <<: [*monitor_base]
