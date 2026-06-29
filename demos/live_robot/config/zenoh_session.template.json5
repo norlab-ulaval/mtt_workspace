@@ -12,8 +12,8 @@
     ],
     exit_on_failure: { client: false },
     retry: {
-      period_init_ms: 1000,
-      period_max_ms: 4000,
+      period_init_ms: 500,
+      period_max_ms: 3000,
       period_increase_factor: 2,
     },
   },
@@ -41,9 +41,27 @@
   },
   queries_default_timeout: 10000,
   transport: {
+    unicast: {
+      open_timeout: 20000,
+      accept_timeout: 20000,
+    },
     link: {
       tx: {
+        sequence_number_resolution: "32bit",
+        lease: 20000,
+        keep_alive: 8,
+        batch_size: 65535,
         queue: {
+          size: {
+            control: 2,
+            real_time: 2,
+            interactive_high: 2,
+            interactive_low: 2,
+            data_high: 4,
+            data: 8,
+            data_low: 8,
+            background: 4,
+          },
           congestion_control: {
             // Drop sensor data fast (1ms) rather than blocking the TX queue.
             // RELIABLE topics (cmd_vel, services) use Block — unaffected.
@@ -58,6 +76,7 @@
         // 4MB RX buffer on the PC client — needs to absorb large lidar frames
         // (Hesai ~2MB/scan) and ZED images (~3MB/frame) arriving over TCP.
         buffer_size: 4194304,
+        max_message_size: 1073741824,
       },
     },
     // SHM is only useful for intra-machine zero-copy; disable it on the monitor
