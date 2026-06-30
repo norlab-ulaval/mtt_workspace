@@ -1,0 +1,153 @@
+input:
+  # ── Self-removal bboxes ── exprimees en base_link ──
+  # Le noeud applique ces filtres dans filtering_frame=base_link (transform
+  # hesai_lidar→base_link avant, puis retour apres BBox+VoxelGrid uniquement).
+  # IMPORTANT: ne pas ajouter de filtre qui calcule des descripteurs geometriques
+  # (normals, observationDirection) ici — ils resteraient en frame base_link
+  # apres le transform-retour et rendraient ICP incohérent.
+  # Les normales sont calculees en post: sur la map (reference ICP).
+
+  # ── Chassis tracteur ──
+  - BoundingBoxDataPointsFilter:
+      xMin: -0.90
+      xMax:  0.70
+      yMin: -0.40
+      yMax:  0.40
+      zMin: -0.10
+      zMax:  0.85
+      removeInside: 1
+
+  # ── Cage du Hesai XT-32 ──
+  - BoundingBoxDataPointsFilter:
+      xMin: -0.25
+      xMax:  0.15
+      yMin: -0.20
+      yMax:  0.20
+      zMin:  0.70
+      zMax:  1.10
+      removeInside: 1
+
+  # ── Housing RS-Airy ──
+  - BoundingBoxDataPointsFilter:
+      xMin: -0.20
+      xMax:  0.12
+      yMin:  0.65
+      yMax:  0.95
+      zMin:  0.70
+      zMax:  1.05
+      removeInside: 1
+
+  # No trailer for Mathis COM-shift sessions: keep rear terrain/snow returns.
+  # The live data_collection config removes the trailer volume here; do not copy
+  # that bbox back into this file unless a trailer is physically installed.
+
+  # RandomSampling: 25% → ~11k pts from ~44k raw (after BBox). VoxelGrid 0.10m removed
+  # because with deskewing enabled (absolute_ns timestamps in the times field), the
+  # VoxelGridDataPointsFilter takes ~850ms per scan (degenerate behavior with int64 overflow
+  # when averaging per-voxel timestamps). RandomSampling is O(n) and takes ~5ms.
+  # 0.25 → ~11k pts: achieves 30-50ms target (normals+ICP scale linearly with point count).
+  # ICP quality maintained: good odom prior (maxDist=1.0m) + TrimmedDist=0.75 handles sparse coverage.
+  - RandomSamplingDataPointsFilter:
+      # Snow fields can be sparse/low-texture. Keep more points than the
+      # trailer data-collection default while staying light enough for live use.
+      # 0.25 matches the Mathis zip live profile and keeps normals+ICP in the
+      # real-time budget on the NUC/Jetson.
+      prob: 0.25
+
+icp:
+  matcher:
+    KDTreeMatcher:
+      knn: 5
+      # 1.0 m: matches the Mathis zip live profile. Wider gates made live
+      # convergence slower and increased wrong correspondences in structured zones.
+      # 0.7 m (original): trop restrictif lors des virages (prior > 0.5m d'erreur → rien trouvé).
+      # 2.0 m (essai): trop large en environnement structuré (murs parallèles garage → faux matches).
+      # 1.0 m: absorbe les erreurs de prior outdoor sans permettre les faux matches en corridor.
+      maxDist: 1.0
+      epsilon: 1
+
+  outlierFilters:
+    - TrimmedDistOutlierFilter:
+        ratio: 0.75
+
+  errorMinimizer:
+    PointToPlaneErrorMinimizer: 
+      # Identity est un mode sans correction icp qui permet juste de voir les scans avec les poses du prior (odom) - utile pour debug.
+      # Identique à PointToPlane, mais avec une approximation de la matrice de covariance qui accélère la convergence.
+      # force4DOF=0: optimise les 6 DOF (x,y,z + roll, pitch, yaw). Avec un lidar 3D sans IMU, les DOF de rotation sont nécessaires pour compenser le pitch/roll en temps réel et corriger la distorsion géométrique des scans sur terrain vallonné. Cependant, cela rend l'optimisation plus lente et plus sujette aux divergences, surtout avec des scans peu structurés (ex: en forêt).
+      # force4DOF=1: optimise yaw + x,y,z. Roll et pitch suivent le prior (odom).
+      # Le TF base_footprint→hesai_lidar est STATIQUE (URDF). Sans capteur pitch/roll
+      # en temps réel, ICP ne peut pas corriger la distorsion géométrique due au pitch.
+      # Sur une pente 5% (2.86°), erreur Z ≈ sin(5°) × distance = 0.087 m/m.
+      # La translation Z (4ème DOF) peut compenser partiellement.
+      # Snow/COM-shift runs can pitch/roll the body; keep 6-DOF ICP here.
+      # Sur terrain plat/légèrement vallonné: force4DOF=1 est approprié.
+      # Sur terrain escarpé (>10%): envisager force4DOF=0 avec prior IMU pitch/roll.
+      force4DOF: 0
+
+  transformationCheckers:
+    - DifferentialTransformationChecker:
+        minDiffRotErr: 0.001
+        minDiffTransErr: 0.01
+        # smoothLength=4: la convergence est déclarée quand la MOYENNE glissante des
+        # 4 dernières itérations de différentiel (rotation + translation) passe sous le
+        # seuil. Ce n'est PAS 4 itérations consécutives sous le seuil — c'est une
+        # fenêtre glissante qui lisse les oscillations de l'optimiseur.
+        smoothLength: 4
+    - CounterTransformationChecker:
+        maxIterationCount: 20
+    - BoundTransformationChecker:
+        # maxRotationNorm est l'ANGLE de rotation en radians (Eigen::Quaternion::angularDistance),
+        # pas la norme d'un vecteur de Rodrigues.
+        # 0.80 rad = 45.8°. Pour une rotation pure en yaw: vecteur Rodrigues = [0,0,0.80]
+        # avec norme 0.80 rad — les deux coïncident pour rotations sur axe unique.
+        # Avec force4DOF=1, seul le yaw est optimisé: cette borne limite les corrections
+        # d'orientation à 45.8° par passe ICP — filet de sécurité contre les divergences.
+        maxRotationNorm: 0.80
+        # Match the Mathis zip live profile. This is an ICP optimizer bound,
+        # not a publication/insertion gate; mapper-level checks below still
+        # decide whether a large correction is safe to publish or insert.
+        maxTranslationNorm: 10.0
+
+  inspector: NullInspector
+  logger: NullLogger
+
+post:
+  - SurfaceNormalDataPointsFilter:
+      knn: 8
+
+mapper:
+  updateCondition:
+    # distance (not delay): the base library's own type only looks at XY
+    # translation norm (Mapper.cpp shouldUpdateMap), so it stalls during a
+    # pure pivot turn with ~0 XY displacement. That's fine — pivot coverage
+    # is handled by a separate, already-active gate: mapper_node.cpp's
+    # deterministicMapUpdateDue() ORs distance with yaw step
+    # (deterministic_map_update_yaw_deg, 0.5° live / 1.0° replay), so
+    # insertion still happens on every accepted scan while rotating.
+    # delay/1.0s here instead let up to 8 m (MAPPING_MAX_VELOCITY_MS=8.0)
+    # pass between insertions in a straight line — reverted for that reason.
+    type: distance
+    # 0.10 m: ICP tourne tous les 10 cm de déplacement.
+    # CPU à 6% → largement de la marge sans surcharge.
+    value: 0.10
+
+  mapperModule:
+    - PointDistanceMapperModule:
+        # 5 cm de résolution map (était 8 cm) — CPU le permet.
+        minDistNewPoint: 0.05
+
+  # 80 m: exploite le range utile outdoor du Hesai XT-32.
+  # Features lointaines (bâtiments, arbres à 50-80 m) donnent des contraintes
+  # d'orientation très stables — réduit le drift en yaw.
+  # Était 30 m: perdait 85% de la surface visible disponible.
+  #
+  # Densité de points à 80 m (Hesai XT-32):
+  #   Horizontal: résolution 0.33° → espacement = 80 * tan(0.33°) = 0.46 m
+  #   Vertical: 32 faisceaux / 31° FoV → 0.97° → 80 * tan(0.97°) = 1.35 m
+  #   Densité effective: ~1 pt / 0.62 m²
+  #   Avec minDistNewPoint=0.05 m: TOUS les points à 80 m sont acceptés dans la map
+  #   (densité << 1 pt/0.05²).
+  #   Croissance map ring 30→80 m: π×(80²−30²) × (1/0.62) ≈ 27 000 pts/révolution complète.
+  #   Le trimming périodique (mapper_node.cpp) borne la taille de la map ICP à 150K pts.
+  sensorMaxRange: 80.0
