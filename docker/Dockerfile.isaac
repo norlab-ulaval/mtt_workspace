@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1
+# Isaac ROS sidecar image for live_robot.
+#
+# This intentionally does not modify mtt_workspace:devel. Build it as a separate
+# image when the robot needs GPU visual SLAM / Nvblox:
+#   docker compose -f demos/live_robot/compose.yaml --profile isaac build isaac_vslam
+
+ARG BASE_IMAGE=mtt_workspace:devel
+ARG ROS_DISTRO=jazzy
+
+FROM ${BASE_IMAGE}
+
+USER root
+
+ARG ROS_DISTRO
+ARG ISAAC_ROS_APT_RELEASE=release-4.5
+ARG ISAAC_ROS_APT_URL=https://isaac.download.nvidia.com/isaac-ros
+ARG NVIDIA_JETSON_APT_URL=https://repo.download.nvidia.com/jetson/x86_64/noble
+ARG NVIDIA_JETSON_APT_SUITE=r38.4
+ARG ISAAC_APT_PACKAGES=""
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    set -eux; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends ca-certificates curl gnupg; \
+    mkdir -p /etc/apt/keyrings /usr/share/keyrings; \
+    isaac_keyring="/usr/share/keyrings/nvidia-isaac-ros.gpg"; \
+    curl -fsSL "${ISAAC_ROS_APT_URL}/repos.key" | gpg --dearmor > "${isaac_keyring}"; \
+    echo "deb [signed-by=${isaac_keyring}] ${ISAAC_ROS_APT_URL}/${ISAAC_ROS_APT_RELEASE} noble main" > /etc/apt/sources.list.d/nvidia-isaac-ros.list; \
+    jetson_keyring="/etc/apt/keyrings/nvidia-jetson.gpg"; \
+    curl -fsSL https://repo.download.nvidia.com/jetson/jetson-ota-public.asc | gpg --dearmor > "${jetson_keyring}"; \
+    echo "deb [signed-by=${jetson_keyring}] ${NVIDIA_JETSON_APT_URL} ${NVIDIA_JETSON_APT_SUITE} main" > /etc/apt/sources.list.d/nvidia-jetson-apt-source.list; \
+    apt-get update; \
+    if [ -z "${ISAAC_APT_PACKAGES}" ]; then \
+      ISAAC_APT_PACKAGES="ros-${ROS_DISTRO}-isaac-ros-visual-slam ros-${ROS_DISTRO}-nvblox-ros"; \
+    fi; \
+    apt-get install -y --no-install-recommends ${ISAAC_APT_PACKAGES}; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN bash -lc ' \
+    source /opt/ros/${ROS_DISTRO}/setup.bash && \
+    ros2 pkg prefix isaac_ros_visual_slam && \
+    ros2 pkg prefix nvblox_ros \
+'
+
+ARG USERNAME=mtt
+USER ${USERNAME}
