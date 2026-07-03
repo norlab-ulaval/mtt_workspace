@@ -12,7 +12,7 @@ Examples:
   ./scripts/autosync_ws
   ./scripts/autosync_ws --eth      # via Ethernet (192.168.3.102)
   ./scripts/autosync_ws --remote   # via Tailscale (100.77.55.41)
-  ./scripts/autosync_ws --doodle   # via Doodle radio (192.168.2.2)
+  ./scripts/autosync_ws --doodle   # via Doodle radio (192.168.50.2)
   ./scripts/autosync_ws <robot_user>@192.168.2.2
   ./scripts/autosync_ws --watch <robot_user>@192.168.2.2 /home/<robot_user>/Project/mtt_ws
 
@@ -71,7 +71,7 @@ done
 
 default_robot_user="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_USER "robot")"
 if [[ "${use_doodle}" == true ]]; then
-  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_DOODLE "192.168.2.2")"
+  default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_DOODLE "192.168.50.2")"
   default_robot_target="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_SSH_TARGET_DOODLE "${default_robot_user}@${default_robot_host}")"
 elif [[ "${use_remote}" == true ]]; then
   default_robot_host="$(mtt_env_or_file_or_default "$(pwd)" ROBOT_HOST_REMOTE "100.77.55.41")"
@@ -148,6 +148,7 @@ sync_entries=(
   demos
   documentations
   README.md
+  .dockerignore
 )
 
 prepare_remote_workspace() {
