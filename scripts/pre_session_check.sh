@@ -11,7 +11,7 @@
 #   4. Disk space
 #   5. Workspace / bag storage
 #
-# Usage: bash scripts/pre_session_check.sh [--gps-mode serial|tcp] [--gps-antennas single|dual]
+# Usage: bash scripts/pre_session_check.sh [--gps-mode serial|tcp] [--gps-antennas front|single|dual]
 
 set -uo pipefail
 
@@ -24,13 +24,18 @@ RESET="\033[0m"
 
 # ── Config (can be overridden by env vars) ────────────────────────────────────
 GPS_MODE="${GPS_MODE:-serial}"
-GPS_ANTENNAS="${GPS_ANTENNAS:-single}"
+GPS_ANTENNAS="${GPS_ANTENNAS:-front}"
+ENABLE_OAK="${ENABLE_OAK:-false}"
 TACHOMETER_MODE="${TACHOMETER_MODE:-real}"
 HESAI_IP="${HESAI_IP:-192.168.2.201}"
-# NOTE: enp8s0 on the robot is 192.168.1.102 — make sure RS_IP is the Bpearl's actual IP,
-# not the robot's own address (pinging yourself always succeeds, masking a real failure).
-RS_IP="${RS_IP:-192.168.1.102}"
-# Reach RS rover IP (single mode) and legacy dual-antenna IPs.
+# NOTE: enp8s0 on the robot is 192.168.1.102. RS_IP must be the RoboSense/RS-Airy
+# device address; pinging 192.168.1.102 only pings the robot itself and masks failures.
+RS_IP="${RS_IP:-192.168.1.200}"
+# Reach receiver devices/IPs.
+REACH_FRONT_DEV="${REACH_FRONT_DEV:-/dev/reach_front}"
+REACH_ROVER_DEV="${REACH_ROVER_DEV:-/dev/reach_rover}"
+REACH_FRONT_IP="${REACH_FRONT_IP:-192.168.2.59}"
+REACH_FRONT_TCP_PORT="${REACH_FRONT_TCP_PORT:-9001}"
 REACH_ROVER_IP="${REACH_ROVER_IP:-192.168.2.59}"
 REACH_ROVER_TCP_PORT="${REACH_ROVER_TCP_PORT:-9001}"
 REACH_LEFT_IP="${REACH_LEFT_IP:-192.168.2.59}"
@@ -148,8 +153,16 @@ check "Hesai XT-32 ($HESAI_IP)" "$r"
 r=$(ping_host "$RS_IP")
 check "RS Bpearl ($RS_IP)" "$r"
 
-# Reach RS devices expose a USB-ethernet interface — ping them directly.
-if [ "$GPS_ANTENNAS" = "single" ]; then
+# Reach devices may expose a network endpoint only when configured for TCP/WiFi.
+if [ "$GPS_ANTENNAS" = "front" ]; then
+    if [ "$GPS_MODE" = "tcp" ]; then
+        r=$(ping_host "$REACH_FRONT_IP")
+        check "Reach front ($REACH_FRONT_IP)" "$r" \
+            "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — check Reach network/TCP setup")"
+    else
+        check "Reach front network" "ok" "serial mode — USB device checked below"
+    fi
+elif [ "$GPS_ANTENNAS" = "single" ]; then
     r=$(ping_host "$REACH_ROVER_IP")
     check "Reach rover ($REACH_ROVER_IP)" "$r" \
         "$([ "$r" = "ok" ] && echo "device reachable" || echo "not reachable — USB not plugged in or rover not on WiFi?")"
@@ -186,7 +199,10 @@ PYEOF
 }
 
 if [ "$GPS_MODE" = "tcp" ]; then
-    if [ "$GPS_ANTENNAS" = "single" ]; then
+    if [ "$GPS_ANTENNAS" = "front" ]; then
+        gps_test_front=$(tcp_port_test "$REACH_FRONT_IP" "$REACH_FRONT_TCP_PORT" 2>/dev/null)
+        check "Reach front TCP $REACH_FRONT_IP:$REACH_FRONT_TCP_PORT" "${gps_test_front%%:*}" "${gps_test_front#*:}"
+    elif [ "$GPS_ANTENNAS" = "single" ]; then
         gps_test_rover=$(tcp_port_test "$REACH_ROVER_IP" "$REACH_ROVER_TCP_PORT" 2>/dev/null)
         check "Reach rover TCP $REACH_ROVER_IP:$REACH_ROVER_TCP_PORT" "${gps_test_rover%%:*}" "${gps_test_rover#*:}"
     else
@@ -206,18 +222,33 @@ echo ""
 echo -e "${BOLD}[3] USB devices${RESET}"
 
 # Reach RS serial devices:
+#   front mode  → /dev/reach_front
 #   single mode → /dev/reach_rover
 #   dual mode   → /dev/reach_left + /dev/reach_right
 if [ "$GPS_MODE" = "serial" ]; then
-    if [ "$GPS_ANTENNAS" = "single" ]; then
-        if [ -e /dev/reach_rover ]; then
-            check "GPS rover (/dev/reach_rover → udev symlink)" "ok"
+    if [ "$GPS_ANTENNAS" = "front" ]; then
+        if [ -e "$REACH_FRONT_DEV" ]; then
+            check "GPS front ($REACH_FRONT_DEV → udev symlink)" "ok"
+        else
+            first_emlid=$(ls /dev/serial/by-id/usb-Emlid* 2>/dev/null | head -n 1 || true)
+            first_acm=$(ls /dev/ttyACM* 2>/dev/null | head -n 1 || true)
+            if [ -n "$first_emlid" ]; then
+                check "GPS front ($first_emlid)" "warn" "udev symlink missing — run scripts/setup_udev_reach_rs.sh --front"
+            elif [ -n "$first_acm" ]; then
+                check "GPS front ($first_acm)" "warn" "udev symlink missing — run scripts/setup_udev_reach_rs.sh --front"
+            else
+                check "GPS front ($REACH_FRONT_DEV)" "fail" "not found — Emlid front receiver not plugged in"
+            fi
+        fi
+    elif [ "$GPS_ANTENNAS" = "single" ]; then
+        if [ -e "$REACH_ROVER_DEV" ]; then
+            check "GPS rover ($REACH_ROVER_DEV → udev symlink)" "ok"
         else
             first_acm=$(ls /dev/ttyACM* 2>/dev/null | head -n 1 || true)
             if [ -n "$first_acm" ]; then
-                check "GPS rover ($first_acm)" "warn" "udev symlink missing — prefer /dev/reach_rover"
+                check "GPS rover ($first_acm)" "warn" "udev symlink missing — prefer $REACH_ROVER_DEV"
             else
-                check "GPS rover (/dev/reach_rover)" "fail" "not found — Reach RS not plugged in"
+                check "GPS rover ($REACH_ROVER_DEV)" "fail" "not found — Reach RS not plugged in"
             fi
         fi
     else
@@ -296,14 +327,18 @@ else
 fi
 
 # OAK-D camera (Intel Movidius MyriadX)
-if command -v lsusb &>/dev/null; then
-    if lsusb 2>/dev/null | grep -qi "$OAK_USB_ID"; then
-        check "OAK-D camera ($OAK_USB_ID)" "ok"
+if [ "$ENABLE_OAK" = "true" ]; then
+    if command -v lsusb &>/dev/null; then
+        if lsusb 2>/dev/null | grep -qi "$OAK_USB_ID"; then
+            check "OAK-D camera ($OAK_USB_ID)" "ok"
+        else
+            check "OAK-D camera ($OAK_USB_ID)" "warn" "Not found — USB link likely loose after vibration, reseat both ends and add strain relief"
+        fi
     else
-        check "OAK-D camera ($OAK_USB_ID)" "warn" "Not found — USB link likely loose after vibration, reseat both ends and add strain relief"
+        check "OAK-D USB check" "warn" "lsusb not found"
     fi
 else
-    check "OAK-D USB check" "warn" "lsusb not found"
+    check "OAK-D camera" "ok" "disabled by ENABLE_OAK=false"
 fi
 
 # Optional local joystick for manual override during repeat
