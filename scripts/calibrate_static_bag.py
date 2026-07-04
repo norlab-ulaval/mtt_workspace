@@ -42,6 +42,11 @@ import sys
 from collections import defaultdict, deque
 from pathlib import Path
 
+import sys as _sys
+import types as _types
+# open3d.ml pulls sklearn/pandas compiled for NumPy 1.x — block it before import.
+_sys.modules.setdefault('open3d.ml', _types.ModuleType('open3d.ml'))
+
 import cv2
 import numpy as np
 import open3d as o3d
@@ -689,6 +694,8 @@ def refine_lidar_lidar_icp(
     target_pts: np.ndarray,
     T_init: np.ndarray,
     save_dir: Path | None = None,
+    max_drift_m: float = _MAX_SCALE_DRIFT_M,
+    max_drift_deg: float = _MAX_SCALE_DRIFT_DEG,
 ) -> tuple[np.ndarray, o3d.pipelines.registration.RegistrationResult]:
     """
     Multi-scale GICP refinement of T_target_source.
@@ -756,10 +763,10 @@ def refine_lidar_lidar_icp(
         # ── Per-scale drift guard ──
         # Discard any scale that moves the solution far from T_init —
         # signals a spurious local minimum from false cross-FoV correspondences.
-        if dt_m > _MAX_SCALE_DRIFT_M or dr_deg > _MAX_SCALE_DRIFT_DEG:
+        if dt_m > max_drift_m or dr_deg > max_drift_deg:
             print(
                 f"      ↳ DRIFT GUARD: exceeds "
-                f"[{_MAX_SCALE_DRIFT_M*100:.0f}cm / {_MAX_SCALE_DRIFT_DEG}°] "
+                f"[{max_drift_m*100:.0f}cm / {max_drift_deg}°] "
                 f"— discarded, keeping previous T."
             )
         else:
@@ -1084,6 +1091,27 @@ def mode_lidar_lidar(args):
     print(f"[LIDAR-LIDAR] source frame : {source_frame}")
 
     T_init = graph.lookup(target_frame, source_frame)
+
+    # Allow explicit override of the initial transform (useful when the bag TF
+    # was recorded with a different frame convention than the point-cloud data).
+    if args.init_xyz is not None or args.init_rpy is not None:
+        from scipy.spatial.transform import Rotation as _Rot
+        xyz = args.init_xyz if args.init_xyz is not None else [
+            T_init[0, 3], T_init[1, 3], T_init[2, 3]]
+        rpy = args.init_rpy if args.init_rpy is not None else \
+            _Rot.from_matrix(T_init[:3, :3]).as_euler("xyz").tolist()
+        T_override = np.eye(4)
+        T_override[:3, :3] = _Rot.from_euler("xyz", rpy).as_matrix()
+        T_override[:3,  3] = xyz
+        c_bag = matrix_to_components(T_init)
+        print(
+            f"[LIDAR-LIDAR] bag TF       : "
+            f"xyz=[{c_bag['xyz']['x']:+.4f} {c_bag['xyz']['y']:+.4f} {c_bag['xyz']['z']:+.4f}]  "
+            f"rpy=[{c_bag['rpy']['r']:+.4f} {c_bag['rpy']['p']:+.4f} {c_bag['rpy']['y']:+.4f}]"
+        )
+        T_init = T_override
+        print("[LIDAR-LIDAR] using override initial transform (--init-xyz / --init-rpy)")
+
     c = matrix_to_components(T_init)
     print(
         f"[LIDAR-LIDAR] initial TF   : "
@@ -1091,10 +1119,15 @@ def mode_lidar_lidar(args):
         f"rpy=[{c['rpy']['r']:+.4f} {c['rpy']['p']:+.4f} {c['rpy']['y']:+.4f}]"
     )
 
+    max_drift_m   = args.max_drift_m   if args.max_drift_m   is not None else _MAX_SCALE_DRIFT_M
+    max_drift_deg = args.max_drift_deg if args.max_drift_deg is not None else _MAX_SCALE_DRIFT_DEG
+
     out_path = Path(args.out)
     T_refined, reg = refine_lidar_lidar_icp(
         source_pts, target_pts, T_init,
         save_dir=out_path.parent,
+        max_drift_m=max_drift_m,
+        max_drift_deg=max_drift_deg,
     )
 
     quality = {
@@ -1251,6 +1284,22 @@ def main():
     g.add_argument("--target-frame", default=None,
                    help="Override frame_id from the PointCloud2 message")
     g.add_argument("--source-frame", default=None)
+    g.add_argument("--init-xyz", type=float, nargs=3, default=None,
+                   metavar=("X", "Y", "Z"),
+                   help="Override initial T_init translation [m]. Useful when the bag TF "
+                        "convention differs from the point-cloud data frame. "
+                        "E.g. for a bag recorded with hesai rpy=π/2: -0.8505 0.0603 -0.0203")
+    g.add_argument("--init-rpy", type=float, nargs=3, default=None,
+                   metavar=("R", "P", "Y"),
+                   help="Override initial T_init rotation as roll/pitch/yaw [rad]. "
+                        "E.g. for a bag recorded with hesai rpy=π/2: 3.1416 -1.2150 1.5708")
+    g.add_argument("--max-drift-m", type=float, default=None,
+                   help=f"Per-scale drift guard: max translation correction [m] "
+                        f"(default {_MAX_SCALE_DRIFT_M}). Increase if ICP "
+                        "rejects all scales from a good initial guess.")
+    g.add_argument("--max-drift-deg", type=float, default=None,
+                   help=f"Per-scale drift guard: max rotation correction [deg] "
+                        f"(default {_MAX_SCALE_DRIFT_DEG}).")
 
     # Camera-LiDAR
     g = p.add_argument_group("camera_lidar mode (MTT defaults: OAK ↔ RSAiry)")
