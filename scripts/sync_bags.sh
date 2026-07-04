@@ -40,6 +40,7 @@ dry_run=false
 list_only=false
 use_eth=false
 use_remote=false
+use_doodle=false
 filters=()
 
 for arg in "$@"; do
@@ -48,13 +49,15 @@ for arg in "$@"; do
     --list)      list_only=true ;;
     --eth)       use_eth=true ;;
     --remote)    use_remote=true ;;
+    --doodle)    use_doodle=true ;;
     --help|-h)
-      echo "Usage: bash scripts/sync_bags.sh [--dry-run] [--list] [--eth] [--remote] [session_pattern...]"
+      echo "Usage: bash scripts/sync_bags.sh [--dry-run] [--list] [--eth] [--remote] [--doodle] [session_pattern...]"
       echo ""
       echo "  --dry-run             Show what would be copied without transferring"
       echo "  --list                List sessions available on the robot"
       echo "  --eth                 Use Ethernet connection (ROBOT_HOST_ETH)"
       echo "  --remote              Use Tailscale remote connection (ROBOT_HOST_REMOTE)"
+      echo "  --doodle              Use Doodle mesh network (ROBOT_HOST_DOODLE)"
       echo "  session_pattern       Sync only matching sessions (e.g. mtt_nominal_exp_*)"
       echo ""
       echo "  ROBOT_HOST=${ROBOT_HOST:-192.168.2.2}   (override with env var)"
@@ -70,7 +73,16 @@ done
 
 # ── Connectivity Setup ────────────────────────────────────────────────────────
 # ROBOT_HOST and SSH_TARGET: env var > .env > hardcoded fallback
-if [[ "${use_remote}" == true ]]; then
+if [[ "${use_doodle}" == true ]]; then
+  ROBOT_HOST="${ROBOT_HOST_DOODLE:-192.168.50.2}"
+  if [[ -n "${ROBOT_SSH_TARGET_DOODLE:-}" ]]; then
+    SSH_TARGET="${ROBOT_SSH_TARGET_DOODLE}"
+  elif [[ -n "${ROBOT_USER:-}" ]]; then
+    SSH_TARGET="${ROBOT_USER}@${ROBOT_HOST}"
+  else
+    SSH_TARGET="${ROBOT_HOST}"
+  fi
+elif [[ "${use_remote}" == true ]]; then
   ROBOT_HOST="${ROBOT_HOST_REMOTE:-100.77.55.41}"
   if [[ -n "${ROBOT_SSH_TARGET_REMOTE:-}" ]]; then
     SSH_TARGET="${ROBOT_SSH_TARGET_REMOTE}"
