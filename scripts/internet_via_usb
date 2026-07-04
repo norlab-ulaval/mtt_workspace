@@ -19,9 +19,13 @@ ROBOT_USER="${ROBOT_USER:-robot}"
 ROBOT_HOST="${ROBOT_HOST:-192.168.2.2}"
 ROBOT_ROUTE_IFACE="${ROBOT_ROUTE_IFACE:-enp5s0}"
 ROBOT_SUBNET="${ROBOT_SUBNET:-192.168.2.0/24}"
+CLIENT_SUBNET="${CLIENT_SUBNET:-${ROBOT_SUBNET}}"
+ROBOT_UP_IFACE="${ROBOT_UP_IFACE:-}"
 UP_IFACE="${UP_IFACE:-}"
 DOWN_IFACE="${DOWN_IFACE:-}"
 DRY_RUN=false
+MODE="pc-to-robot"
+APPLY_ROUTE=false
 
 run() {
   if [[ "$DRY_RUN" == "true" ]]; then
@@ -56,28 +60,128 @@ ensure_rule() {
   fi
 }
 
-if [[ "${1:-}" == "--dry-run" ]]; then
-  DRY_RUN=true
-  shift
-fi
+shell_quote() {
+  printf "%q" "$1"
+}
+
+ssh_target() {
+  local target_host=""
+  if [[ -n "${ROBOT_SSH_TARGET:-}" ]]; then
+    target_host="$(mtt_target_host "${ROBOT_SSH_TARGET}" || true)"
+  fi
+  if [[ -n "${ROBOT_SSH_TARGET:-}" && "${target_host}" == "${ROBOT_HOST}" ]]; then
+    printf "%s" "$ROBOT_SSH_TARGET"
+  else
+    printf "%s@%s" "$ROBOT_USER" "$ROBOT_HOST"
+  fi
+}
+
+remote_shell() {
+  local target
+  target="$(ssh_target)"
+  if [[ "$DRY_RUN" == "true" ]]; then
+    echo "[DRY][robot ${target}] $*"
+  else
+    ssh -tt "$target" "$*"
+  fi
+}
+
+remote_read() {
+  local target
+  target="$(ssh_target)"
+  ssh "$target" "$*"
+}
+
+remote_ensure_nat() {
+  local src_subnet="$1"
+  local up_iface="$2"
+  local src_q up_q
+  src_q="$(shell_quote "$src_subnet")"
+  up_q="$(shell_quote "$up_iface")"
+  remote_shell "sudo iptables -t nat -C POSTROUTING -s ${src_q} -o ${up_q} -j MASQUERADE 2>/dev/null || sudo iptables -t nat -A POSTROUTING -s ${src_q} -o ${up_q} -j MASQUERADE"
+}
+
+remote_ensure_forward() {
+  local in_iface="$1"
+  local out_iface="$2"
+  local state="${3:-}"
+  local in_q out_q
+  in_q="$(shell_quote "$in_iface")"
+  out_q="$(shell_quote "$out_iface")"
+  if [[ -n "$state" ]]; then
+    remote_shell "sudo iptables -C FORWARD -i ${in_q} -o ${out_q} -m conntrack --ctstate ${state} -j ACCEPT 2>/dev/null || sudo iptables -A FORWARD -i ${in_q} -o ${out_q} -m conntrack --ctstate ${state} -j ACCEPT"
+  else
+    remote_shell "sudo iptables -C FORWARD -i ${in_q} -o ${out_q} -j ACCEPT 2>/dev/null || sudo iptables -A FORWARD -i ${in_q} -o ${out_q} -j ACCEPT"
+  fi
+}
+
+remote_configure_router() {
+  local src_subnet="$1"
+  local down_iface="$2"
+  local up_iface="$3"
+  local src_q down_q up_q cmd
+  src_q="$(shell_quote "$src_subnet")"
+  down_q="$(shell_quote "$down_iface")"
+  up_q="$(shell_quote "$up_iface")"
+  cmd="set -eu; sysctl -w net.ipv4.ip_forward=1 >/dev/null; iptables -t nat -C POSTROUTING -s ${src_q} -o ${up_q} -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${src_q} -o ${up_q} -j MASQUERADE; iptables -C FORWARD -i ${down_q} -o ${up_q} -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${down_q} -o ${up_q} -j ACCEPT; iptables -C FORWARD -i ${up_q} -o ${down_q} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT 2>/dev/null || iptables -A FORWARD -i ${up_q} -o ${down_q} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT"
+  remote_shell "sudo sh -c $(shell_quote "$cmd")"
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --dry-run)
+      DRY_RUN=true
+      shift
+      ;;
+    --pc-to-robot)
+      MODE="pc-to-robot"
+      shift
+      ;;
+    --robot-to-pc)
+      MODE="robot-to-pc"
+      shift
+      ;;
+    --apply-route)
+      APPLY_ROUTE=true
+      shift
+      ;;
+    -h|--help)
+      break
+      ;;
+    *)
+      echo "Option inconnue: $1"
+      echo "Use --help"
+      exit 1
+      ;;
+  esac
+done
 
 if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
   cat <<'EOF'
 Usage:
   bash internet_via_usb
+  bash internet_via_usb --pc-to-robot
+  bash internet_via_usb --robot-to-pc
   bash internet_via_usb --dry-run
 
-This script is for Linux laptops.
-It is fine with different phone tethering or Ethernet interface names,
-but it is not a macOS/Windows script.
+Modes:
+  --pc-to-robot   Share this PC's Internet to the robot. This is the historical default.
+  --robot-to-pc   Share the robot's Internet to this PC over the robot link.
+
+Safety:
+  The script enables NAT/forwarding on the machine that has Internet.
+  It does not change the client's default route unless --apply-route is passed.
+  Without --apply-route it prints the exact route command to run.
 
 Optional overrides:
   ROBOT_NAME         SSH alias or label shown in logs                (default: mtt-high-level)
   ROBOT_SSH_TARGET   remote target in user@host form
   ROBOT_USER         remote user                                     (default: from .env or robot)
   ROBOT_HOST         robot IP reachable from this laptop             (default: from .env or 192.168.2.2)
-  ROBOT_SUBNET       robot subnet to NAT                             (default: 192.168.2.0/24)
-  ROBOT_ROUTE_IFACE  robot interface to use for default route tip    (default: enp5s0)
+  ROBOT_SUBNET       subnet NATed in pc-to-robot mode                (default: 192.168.2.0/24)
+  CLIENT_SUBNET      subnet NATed in robot-to-pc mode                (default: ROBOT_SUBNET)
+  ROBOT_ROUTE_IFACE  robot interface toward PC/robot Wi-Fi           (default: enp5s0)
+  ROBOT_UP_IFACE     robot interface with Internet in robot-to-pc    (default: robot default route dev)
   DOWN_IFACE         local interface connected to the robot
   UP_IFACE           local interface that has Internet access
 
@@ -95,6 +199,17 @@ Examples:
   ./scripts/create_env --robot-target mohamed@192.168.2.2
   bash scripts/internet_via_usb
 
+  # Robot has Internet on Ethernet; PC reaches robot over norlab_mtt Wi-Fi.
+  # This configures NAT on the robot and prints the PC route command.
+  bash scripts/internet_via_usb --robot-to-pc
+
+  # Same, but also replace the PC default route immediately.
+  bash scripts/internet_via_usb --robot-to-pc --apply-route
+
+  # Doodle/radio style, if the PC reaches the robot over 192.168.50.0/24:
+  ROBOT_HOST=192.168.50.2 ROBOT_ROUTE_IFACE=enp0s31f6 CLIENT_SUBNET=192.168.50.0/24 \
+    bash scripts/internet_via_usb --robot-to-pc
+
 Useful checks before running:
   ip route show default
   ip route get <robot_ip>
@@ -107,6 +222,11 @@ for cmd in ip awk cut sysctl iptables sudo; do
   command -v "$cmd" >/dev/null 2>&1 || { echo "Commande manquante: $cmd"; exit 1; }
 done
 
+if [[ "$MODE" != "pc-to-robot" && "$MODE" != "robot-to-pc" ]]; then
+  echo "Mode invalide: $MODE"
+  exit 1
+fi
+
 # Interface that reaches the robot.
 DOWN="$DOWN_IFACE"
 if [[ -z "${DOWN:-}" ]]; then
@@ -116,6 +236,42 @@ if [[ -z "${DOWN:-}" ]]; then
   DOWN="$(ip -o -4 addr show | awk '$4 ~ /^192\.168\.2\./ {print $2; exit}')"
 fi
 [[ -n "${DOWN:-}" ]] || { echo "DOWN introuvable pour ${ROBOT_HOST}"; exit 1; }
+
+IP_PC="$(ip -o -4 addr show dev "$DOWN" | awk '{print $4}' | cut -d/ -f1)"
+[[ -n "${IP_PC:-}" ]] || { echo "IP locale introuvable sur $DOWN"; exit 1; }
+
+if [[ "$MODE" == "robot-to-pc" ]]; then
+  ROBOT_DOWN="$ROBOT_ROUTE_IFACE"
+  if [[ -z "${ROBOT_UP_IFACE:-}" ]]; then
+    ROBOT_UP_IFACE="$(remote_read "ip route show default | awk '{for(i=1;i<=NF;i++) if(\$i==\"dev\" && \$(i+1)!=\"${ROBOT_DOWN}\"){print \$(i+1); exit}}'")"
+  fi
+  [[ -n "${ROBOT_UP_IFACE:-}" ]] || { echo "ROBOT_UP_IFACE introuvable (pas de default route robot?)"; exit 1; }
+
+  echo "[INFO] Mode       = robot-to-pc"
+  echo "[INFO] Robot      = ${ROBOT_NAME} ($(ssh_target))"
+  echo "[INFO] PC link    = ${DOWN} (${IP_PC}) -> ${ROBOT_HOST}"
+  echo "[INFO] Robot DOWN = ${ROBOT_DOWN} (${ROBOT_HOST})"
+  echo "[INFO] Robot UP   = ${ROBOT_UP_IFACE}"
+  echo "[INFO] NAT subnet = ${CLIENT_SUBNET}"
+  echo "[INFO] Sudo       = mot de passe du compte ROBOT $(ssh_target), pas celui du PC"
+  [[ "$DRY_RUN" == "true" ]] && echo "[INFO] Mode       = dry-run (no system change)"
+
+  remote_configure_router "$CLIENT_SUBNET" "$ROBOT_DOWN" "$ROBOT_UP_IFACE"
+
+  echo "[OK] NAT actif sur le robot pour ${CLIENT_SUBNET} via ${ROBOT_UP_IFACE}"
+  if [[ "$APPLY_ROUTE" == "true" ]]; then
+    echo "[INFO] Sudo local = mot de passe de ce PC pour remplacer la route par défaut"
+    run sudo ip route replace default via "$ROBOT_HOST" dev "$DOWN"
+    echo "[OK] Route PC remplacée: default via ${ROBOT_HOST} dev ${DOWN}"
+    echo "[TIP] Retour arrière PC : sudo ip route del default via ${ROBOT_HOST} dev ${DOWN}"
+  else
+    echo "[TIP] Route PC : sudo ip route replace default via ${ROBOT_HOST} dev ${DOWN}"
+    echo "[TIP] Retour arrière PC : sudo ip route del default via ${ROBOT_HOST} dev ${DOWN}"
+  fi
+  echo "[TIP] Si DNS manque côté PC : resolvectl dns ${DOWN} 1.1.1.1 8.8.8.8"
+  echo "[TIP] Vérif PC : ip route show default; ping -c2 1.1.1.1; resolvectl query google.com"
+  exit 0
+fi
 
 # Internet-facing interface: first default route that is not the robot link.
 UP="$UP_IFACE"
@@ -128,12 +284,10 @@ fi
 [[ -n "${UP:-}" ]] || { echo "UP introuvable (pas d'interface internet)"; exit 1; }
 [[ "$UP" != "$DOWN" ]] || { echo "UP et DOWN pointent vers la meme interface ($UP)"; exit 1; }
 
-IP_PC="$(ip -o -4 addr show dev "$DOWN" | awk '{print $4}' | cut -d/ -f1)"
-[[ -n "${IP_PC:-}" ]] || { echo "IP locale introuvable sur $DOWN"; exit 1; }
-
 echo "[INFO] Robot      = ${ROBOT_NAME} (${ROBOT_USER}@${ROBOT_HOST})"
 echo "[INFO] DOWN robot = ${DOWN} (${IP_PC})"
 echo "[INFO] UP internet= ${UP}"
+echo "[INFO] Mode       = pc-to-robot"
 echo "[INFO] Hint       = use UP_IFACE=<internet_iface> DOWN_IFACE=<iface_to_robot> if autodetection is wrong"
 [[ "$DRY_RUN" == "true" ]] && echo "[INFO] Mode       = dry-run (no system change)"
 
