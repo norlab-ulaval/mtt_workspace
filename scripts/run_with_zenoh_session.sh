@@ -2,6 +2,16 @@
 set -euo pipefail
 
 template="${MTT_ZENOH_CONFIG_TEMPLATE:-/config/zenoh_session.template.json5}"
+
+# Auto-detect field/Doodle network mode.
+# When FIELD_NETWORK_MODE=true, override the Zenoh endpoint to the Doodle IP
+# so that every service (monitor, teleop_pc, bash, etc.) uses the Doodle link.
+if [ "${FIELD_NETWORK_MODE:-false}" = "true" ] && [ -n "${DOODLE_ROBOT_IP:-}" ]; then
+  doodle_port="${ZENOH_FIELD_PORT:-7447}"
+  export ROBOT_ZENOH_ENDPOINT="tcp/${DOODLE_ROBOT_IP}:${doodle_port}"
+  echo "[zenoh] FIELD_NETWORK_MODE=true — endpoint overridden to tcp/${DOODLE_ROBOT_IP}:${doodle_port}"
+fi
+
 zenoh_endpoint="${ROBOT_ZENOH_ENDPOINT:-${ZENOH_ROUTER_ENDPOINT:-tcp/192.168.2.2:7447}}"
 live_domain_id="${LIVE_ROBOT_DOMAIN_ID:-${ROS_DOMAIN_ID:-2}}"
 
