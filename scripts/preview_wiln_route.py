@@ -61,6 +61,8 @@ def read_ltr(path: Path) -> Tuple[str, List[List[Pose2D]]]:
             if line.startswith("frame_id"):
                 frame_id = line.split(":", 1)[1].strip()
                 continue
+            if line.startswith("direction"):
+                continue
             if line == "changing direction":
                 segments.append([])
                 continue
