@@ -97,6 +97,15 @@ CSV_FIELDS = [
     "model_x",
     "model_y",
     "model_yaw",
+    "model_x_aligned",
+    "model_y_aligned",
+    "model_yaw_aligned",
+    "error_x_m",
+    "error_y_m",
+    "error_xy_m",
+    "error_yaw_rad",
+    "error_v_ms",
+    "error_yaw_rate_rad_s",
 ]
 
 
@@ -304,6 +313,8 @@ def read_bag_samples(bag_dir: Path, wanted_topics: set[str]) -> tuple[dict[str, 
 
 def read_offline_icp(session_dir: Path) -> tuple[list[dict[str, Any]], str]:
     for label, replay in (
+        ("mapping_dataset_icp/icp_odom_replay", session_dir / "mapping_dataset_icp" / "icp_odom_replay"),
+        ("offline_live_icp/icp_odom_replay", session_dir / "offline_live_icp" / "icp_odom_replay"),
         ("offline_icp_canonical/icp_odom_replay", session_dir / "offline_icp_canonical" / "icp_odom_replay"),
         ("offline_icp/icp_odom_replay", session_dir / "offline_icp" / "icp_odom_replay"),
     ):
@@ -834,6 +845,113 @@ def apply_model(rows: list[dict[str, Any]], fit: dict[str, Any], *, wheelbase_m:
         prev_t = t
 
 
+def add_model_errors(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    valid = [
+        row
+        for row in rows
+        if finite(row.get("icp_x"))
+        and finite(row.get("icp_y"))
+        and finite(row.get("icp_yaw"))
+        and finite(row.get("model_x"))
+        and finite(row.get("model_y"))
+        and finite(row.get("model_yaw"))
+    ]
+    if not valid:
+        return {}
+
+    ref = valid[0]
+    icp_x0 = float(ref["icp_x"])
+    icp_y0 = float(ref["icp_y"])
+    icp_yaw0 = float(ref["icp_yaw"])
+    model_x0 = float(ref["model_x"])
+    model_y0 = float(ref["model_y"])
+    model_yaw0 = float(ref["model_yaw"])
+    yaw_offset = wrap_angle(icp_yaw0 - model_yaw0)
+    c = math.cos(yaw_offset)
+    s = math.sin(yaw_offset)
+
+    for row in rows:
+        if not (
+            finite(row.get("icp_x"))
+            and finite(row.get("icp_y"))
+            and finite(row.get("icp_yaw"))
+            and finite(row.get("model_x"))
+            and finite(row.get("model_y"))
+            and finite(row.get("model_yaw"))
+        ):
+            continue
+        mx = float(row["model_x"]) - model_x0
+        my = float(row["model_y"]) - model_y0
+        aligned_x = icp_x0 + c * mx - s * my
+        aligned_y = icp_y0 + s * mx + c * my
+        aligned_yaw = wrap_angle(float(row["model_yaw"]) + yaw_offset)
+        error_x = aligned_x - float(row["icp_x"])
+        error_y = aligned_y - float(row["icp_y"])
+        row["model_x_aligned"] = aligned_x
+        row["model_y_aligned"] = aligned_y
+        row["model_yaw_aligned"] = aligned_yaw
+        row["error_x_m"] = error_x
+        row["error_y_m"] = error_y
+        row["error_xy_m"] = math.hypot(error_x, error_y)
+        row["error_yaw_rad"] = wrap_angle(aligned_yaw - float(row["icp_yaw"]))
+        if finite(row.get("v_model_ms")) and finite(row.get("v_icp_ms")):
+            row["error_v_ms"] = float(row["v_model_ms"]) - float(row["v_icp_ms"])
+        if finite(row.get("yaw_rate_model_rad_s")) and finite(row.get("yaw_rate_icp_rad_s")):
+            row["error_yaw_rate_rad_s"] = float(row["yaw_rate_model_rad_s"]) - float(
+                row["yaw_rate_icp_rad_s"]
+            )
+
+    return {
+        "alignment": {
+            "icp_x0": icp_x0,
+            "icp_y0": icp_y0,
+            "icp_yaw0": icp_yaw0,
+            "model_x0": model_x0,
+            "model_y0": model_y0,
+            "model_yaw0": model_yaw0,
+            "yaw_offset_rad": yaw_offset,
+        },
+        "errors_all": error_stats(rows),
+        "errors_icp_quality_ok": error_stats([row for row in rows if row.get("icp_quality_ok")]),
+    }
+
+
+def percentile(sorted_values: list[float], ratio: float) -> float | None:
+    if not sorted_values:
+        return None
+    idx = max(0, min(len(sorted_values) - 1, int(round((len(sorted_values) - 1) * ratio))))
+    return sorted_values[idx]
+
+
+def metric_stats(rows: list[dict[str, Any]], key: str, *, absolute: bool = False) -> dict[str, float | int | None]:
+    vals = [float(row[key]) for row in rows if finite(row.get(key))]
+    if absolute:
+        vals = [abs(v) for v in vals]
+    vals_sorted = sorted(vals)
+    if not vals_sorted:
+        return {"count": 0, "mean": None, "mae": None, "rmse": None, "p95_abs": None, "max_abs": None}
+    abs_vals = [abs(v) for v in vals]
+    return {
+        "count": len(vals),
+        "mean": statistics.mean(vals),
+        "mae": statistics.mean(abs_vals),
+        "rmse": math.sqrt(sum(v * v for v in vals) / len(vals)),
+        "p95_abs": percentile(sorted(abs_vals), 0.95),
+        "max_abs": max(abs_vals),
+    }
+
+
+def error_stats(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "position_xy_m": metric_stats(rows, "error_xy_m", absolute=True),
+        "x_m": metric_stats(rows, "error_x_m"),
+        "y_m": metric_stats(rows, "error_y_m"),
+        "yaw_rad": metric_stats(rows, "error_yaw_rad"),
+        "speed_ms": metric_stats(rows, "error_v_ms"),
+        "yaw_rate_rad_s": metric_stats(rows, "error_yaw_rate_rad_s"),
+    }
+
+
 def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8", newline="") as stream:
@@ -891,7 +1009,9 @@ def write_plots(rows: list[dict[str, Any]], output_dir: Path, session_name: str)
     if rows:
         plt.figure(figsize=(9, 7))
         plt.plot(values(rows, "icp_x"), values(rows, "icp_y"), label="icp", linewidth=1.4)
-        plt.plot(values(rows, "model_x"), values(rows, "model_y"), label="command model", linewidth=1.4)
+        model_x_key = "model_x_aligned" if values(rows, "model_x_aligned") else "model_x"
+        model_y_key = "model_y_aligned" if values(rows, "model_y_aligned") else "model_y"
+        plt.plot(values(rows, model_x_key), values(rows, model_y_key), label="command model", linewidth=1.4)
         plt.axis("equal")
         plt.xlabel("x [m]")
         plt.ylabel("y [m]")
@@ -914,6 +1034,67 @@ def write_plots(rows: list[dict[str, Any]], output_dir: Path, session_name: str)
         plt.legend()
         plt.tight_layout()
         plt.savefig(output_dir / "residuals_time.png", dpi=140)
+        plt.close()
+
+        plt.figure(figsize=(11, 7))
+        plt.plot(ts, values(rows, "error_x_m"), label="x error", linewidth=1.0)
+        plt.plot(ts, values(rows, "error_y_m"), label="y error", linewidth=1.0)
+        plt.plot(ts, values(rows, "error_xy_m"), label="xy norm", linewidth=1.2)
+        plt.xlabel("time [s]")
+        plt.ylabel("position error [m]")
+        plt.title(f"{session_name} position error vs ICP")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / "position_error_time.png", dpi=140)
+        plt.close()
+
+        plt.figure(figsize=(11, 5))
+        plt.plot(ts, values(rows, "error_yaw_rad"), label="yaw error", linewidth=1.0)
+        plt.xlabel("time [s]")
+        plt.ylabel("yaw error [rad]")
+        plt.title(f"{session_name} yaw error vs ICP")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / "yaw_error_time.png", dpi=140)
+        plt.close()
+
+        plt.figure(figsize=(11, 7))
+        plt.plot(ts, values(rows, "v_icp_ms"), label="v_icp", linewidth=1.0)
+        plt.plot(ts, values(rows, "v_model_ms"), label="v_model", linewidth=1.0)
+        plt.plot(ts, values(rows, "error_v_ms"), label="v error", linewidth=1.0)
+        plt.xlabel("time [s]")
+        plt.ylabel("speed [m/s]")
+        plt.title(f"{session_name} speed model error")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / "speed_error_time.png", dpi=140)
+        plt.close()
+
+        plt.figure(figsize=(11, 7))
+        plt.plot(ts, values(rows, "yaw_rate_icp_rad_s"), label="yaw_rate_icp", linewidth=1.0)
+        plt.plot(ts, values(rows, "yaw_rate_model_rad_s"), label="yaw_rate_model", linewidth=1.0)
+        plt.plot(ts, values(rows, "error_yaw_rate_rad_s"), label="yaw_rate error", linewidth=1.0)
+        plt.xlabel("time [s]")
+        plt.ylabel("yaw rate [rad/s]")
+        plt.title(f"{session_name} yaw-rate model error")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / "yaw_rate_error_time.png", dpi=140)
+        plt.close()
+
+        plt.figure(figsize=(11, 5))
+        plt.plot(ts, values(rows, "icp_pose_step_m"), label="ICP pose step", linewidth=0.9)
+        plt.xlabel("time [s]")
+        plt.ylabel("step [m]")
+        plt.title(f"{session_name} ICP continuity check")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig(output_dir / "icp_pose_step_time.png", dpi=140)
         plt.close()
 
 
@@ -948,6 +1129,7 @@ def process_session(session_dir: Path, args: argparse.Namespace) -> dict[str, An
     )
     fit = fit_models(rows, args.wheelbase_m)
     apply_model(rows, fit, wheelbase_m=args.wheelbase_m)
+    error_summary = add_model_errors(rows)
 
     out_dir = session_dir / "motion_model_validation"
     write_csv(rows, out_dir / "model_dataset.csv")
@@ -958,6 +1140,7 @@ def process_session(session_dir: Path, args: argparse.Namespace) -> dict[str, An
         "skipped_topics": skipped,
         "stats": compact_stats(rows),
         "fit": fit,
+        "model_error": error_summary,
         "outputs": {
             "dataset": str(out_dir / "model_dataset.csv"),
             "summary": str(out_dir / "model_fit_summary.yaml"),
@@ -966,6 +1149,11 @@ def process_session(session_dir: Path, args: argparse.Namespace) -> dict[str, An
                 str(out_dir / "yaw_rate_model_vs_icp.png"),
                 str(out_dir / "trajectory_model_vs_icp.png"),
                 str(out_dir / "residuals_time.png"),
+                str(out_dir / "position_error_time.png"),
+                str(out_dir / "yaw_error_time.png"),
+                str(out_dir / "speed_error_time.png"),
+                str(out_dir / "yaw_rate_error_time.png"),
+                str(out_dir / "icp_pose_step_time.png"),
             ],
         },
     }
