@@ -35,9 +35,14 @@ TOPICS = {
     "/mtt_status",
     "/mtt_tachometer",
     "/mtt_odometry",
+    "/hardware/articulation_angle",
     "/mtt_articulation_angle",
+    "/trailer/articulation_angle",
     "/mapping/icp_odom",
 }
+
+DEFAULT_WHEELBASE_M = 2.4
+DEFAULT_MIN_TURN_SPEED_MS = 0.1
 
 NUMERIC_ROW_FIELDS = {
     "t",
@@ -58,6 +63,9 @@ NUMERIC_ROW_FIELDS = {
     "controller_linear_x",
     "controller_angular_z",
     "articulation_rad",
+    "mtt_articulation_rad",
+    "hardware_articulation_rad",
+    "trailer_articulation_rad",
     "status_speed_ms",
     "status_steer_normalized",
     "status_throttle_raw",
@@ -92,6 +100,8 @@ POSTPROCESS_NUMERIC_FIELDS = {
     "cmd_angular_z",
     "tach_speed_ms",
     "mtt_articulation_angle",
+    "hardware_articulation_angle",
+    "trailer_articulation_angle",
 }
 
 
@@ -128,6 +138,13 @@ def resolve_inputs(path_value: str) -> list[tuple[Path, Path]]:
 
 def wrap_angle(angle: float) -> float:
     return math.atan2(math.sin(angle), math.cos(angle))
+
+
+def tach_direction_sign(direction: float | str | bool | None) -> float:
+    text = str(direction or "").strip().lower()
+    if text in {"reverse", "backward", "rear", "rev", "-1"}:
+        return -1.0
+    return 1.0
 
 
 def quaternion_to_yaw(msg) -> float:
@@ -208,7 +225,7 @@ def extract_sample(topic: str, msg, bag_time_s: float) -> dict[str, float | str 
             "angular_z": float(msg.twist.twist.angular.z),
         }
 
-    if topic == "/mtt_articulation_angle":
+    if topic in {"/mtt_articulation_angle", "/hardware/articulation_angle", "/trailer/articulation_angle"}:
         return {"t": bag_time_s, "articulation_rad": float(msg.data)}
 
     raise ValueError(f"Unsupported topic: {topic}")
@@ -399,6 +416,14 @@ def detect_speed_sign(rows: list[dict[str, float | str | bool | None]]) -> float
     return -1.0 if dot < -0.5 else 1.0
 
 
+def has_real_tachometer(rows: list[dict[str, float | str | bool | None]]) -> bool:
+    return any(
+        str(row.get("tachometer_source") or "").strip().lower() == "real"
+        and row.get("tach_speed_ms") is not None
+        for row in rows
+    )
+
+
 def rmse(values_a: list[float], values_b: list[float]) -> float | None:
     if not values_a or len(values_a) != len(values_b):
         return None
@@ -410,15 +435,12 @@ def integrate_model_trajectory(
     rows: list[dict[str, float | str | bool | None]],
     speed_sign: float = 1.0,
 ) -> None:
-    """Integrate kinematic model trajectory from tachometer speed and yaw-rate.
+    """Integrate a 2D articulated motion model from the best available signals.
 
-    speed_sign controls the convention correction:
-      +1.0 (default): tach_model_speed_ms positive = physical forward.
-      -1.0: tach_model_speed_ms negative = physical forward.
-           Use when invert_linear_axis=true is in effect on the operator-input node,
-           which causes cmd_vel.linear.x (and thus model_speed_ms in cmd-sim mode) to
-           be negative for forward motion.  Both speed and yaw-rate are negated so the
-           full 2-D trajectory is correctly mirrored.
+    Priority:
+    1. tachometer embedded model fields when they are actually valid/non-zero;
+    2. real tachometer speed signed by tach_direction + measured articulation;
+    3. effective command speed + measured articulation.
     """
     model_x = 0.0
     model_y = 0.0
@@ -432,11 +454,10 @@ def integrate_model_trajectory(
         else:
             dt = max(0.0, min(t - previous_t, 1.0))
 
-        speed = row.get("tach_model_speed_ms")
-        yaw_rate = row.get("tach_model_yaw_rate_rad_s")
+        speed, yaw_rate = model_speed_and_yaw_rate(row, speed_sign=speed_sign)
         if speed is not None and yaw_rate is not None and dt > 0.0:
-            dtheta = float(yaw_rate) * speed_sign * dt
-            ds    = float(speed)    * speed_sign * dt
+            dtheta = float(yaw_rate) * dt
+            ds = float(speed) * dt
             heading_mid = model_heading + 0.5 * dtheta
             model_x += ds * math.cos(heading_mid)
             model_y += ds * math.sin(heading_mid)
@@ -448,6 +469,46 @@ def integrate_model_trajectory(
         previous_t = t
 
 
+def model_speed_and_yaw_rate(
+    row: dict[str, float | str | bool | None],
+    *,
+    speed_sign: float = 1.0,
+) -> tuple[float | None, float | None]:
+    model_speed = row.get("tach_model_speed_ms")
+    model_yaw_rate = row.get("tach_model_yaw_rate_rad_s")
+    model_valid = bool(row.get("tach_model_state_valid"))
+    if (
+        model_speed is not None
+        and model_yaw_rate is not None
+        and (model_valid or abs(float(model_speed)) > 1e-6 or abs(float(model_yaw_rate)) > 1e-6)
+    ):
+        return float(model_speed) * speed_sign, float(model_yaw_rate) * speed_sign
+
+    speed = row.get("tach_speed_ms")
+    if speed is not None:
+        signed_speed = float(speed) * tach_direction_sign(row.get("tach_direction"))
+    else:
+        cmd_speed = row.get("status_effective_linear_speed_command_ms")
+        if cmd_speed is None:
+            cmd_speed = row.get("cmd_linear_x")
+        signed_speed = float(cmd_speed) if cmd_speed is not None else None
+
+    articulation = row.get("articulation_rad")
+    if articulation is None:
+        articulation = row.get("tach_model_articulation_rad")
+    if articulation is None:
+        steer = row.get("status_steer_normalized")
+        articulation = float(steer) * math.radians(60.0) if steer is not None else None
+
+    if signed_speed is None or articulation is None:
+        return None, None
+    signed_speed *= speed_sign
+    if abs(signed_speed) < DEFAULT_MIN_TURN_SPEED_MS:
+        return signed_speed, 0.0
+    yaw_rate = signed_speed * math.tan(float(articulation)) / DEFAULT_WHEELBASE_M
+    return signed_speed, yaw_rate
+
+
 def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[dict[str, float | str | bool | None]]:
     odom_samples = samples.get("/mtt_odometry", [])
     icp_series = TimeSeries(derive_icp_kinematics(samples.get("/mapping/icp_odom", [])))
@@ -455,7 +516,9 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
     cmd_series = TimeSeries(samples.get("/cmd_vel", []))
     teleop_series = TimeSeries(samples.get("/cmd_vel/teleop", []))
     controller_series = TimeSeries(samples.get("/controller/cmd_vel", []))
-    articulation_series = TimeSeries(samples.get("/mtt_articulation_angle", []))
+    mtt_articulation_series = TimeSeries(samples.get("/mtt_articulation_angle", []))
+    hardware_articulation_series = TimeSeries(samples.get("/hardware/articulation_angle", []))
+    trailer_articulation_series = TimeSeries(samples.get("/trailer/articulation_angle", []))
     status_series = TimeSeries(samples.get("/mtt_status", []))
     reference_samples = odom_samples or samples.get("/mtt_tachometer", [])
     if not reference_samples:
@@ -469,9 +532,20 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
         teleop_sample = teleop_series.nearest(t, 0.1)
         controller_sample = controller_series.nearest(t, 0.1)
         icp_sample = icp_series.nearest(t, 0.2)
-        articulation_sample = articulation_series.nearest(t, 0.1)
+        mtt_articulation_sample = mtt_articulation_series.nearest(t, 0.1)
+        hardware_articulation_sample = hardware_articulation_series.nearest(t, 0.1)
+        trailer_articulation_sample = trailer_articulation_series.nearest(t, 0.1)
         status_sample = status_series.nearest(t, 0.1)
         odom_sample = reference_sample if odom_samples else None
+        if trailer_articulation_sample:
+            articulation_sample = trailer_articulation_sample
+            articulation_source = "trailer"
+        elif hardware_articulation_sample:
+            articulation_sample = hardware_articulation_sample
+            articulation_source = "hardware"
+        else:
+            articulation_sample = mtt_articulation_sample
+            articulation_source = "mtt" if mtt_articulation_sample else None
 
         row: dict[str, float | str | bool | None] = {
             "t": t,
@@ -492,6 +566,16 @@ def build_rows(samples: dict[str, list[dict[str, float | str | bool]]]) -> list[
             "controller_linear_x": float(controller_sample["linear_x"]) if controller_sample else None,
             "controller_angular_z": float(controller_sample["angular_z"]) if controller_sample else None,
             "articulation_rad": float(articulation_sample["articulation_rad"]) if articulation_sample else None,
+            "articulation_source": articulation_source,
+            "mtt_articulation_rad": (
+                float(mtt_articulation_sample["articulation_rad"]) if mtt_articulation_sample else None
+            ),
+            "hardware_articulation_rad": (
+                float(hardware_articulation_sample["articulation_rad"]) if hardware_articulation_sample else None
+            ),
+            "trailer_articulation_rad": (
+                float(trailer_articulation_sample["articulation_rad"]) if trailer_articulation_sample else None
+            ),
             "status_speed_ms": float(status_sample["speed_ms"]) if status_sample else None,
             "status_steer_normalized": float(status_sample["steer_normalized"]) if status_sample else None,
             "status_throttle_raw": int(status_sample["throttle_raw"]) if status_sample else None,
@@ -611,7 +695,25 @@ def build_rows_from_postprocess_csv(csv_path: Path) -> list[dict[str, float | st
             "teleop_angular_z": None,
             "controller_linear_x": None,
             "controller_angular_z": None,
-            "articulation_rad": _csv_float(source.get("mtt_articulation_angle")),
+            "articulation_rad": (
+                _csv_float(source.get("trailer_articulation_angle"))
+                if _csv_float(source.get("trailer_articulation_angle")) is not None
+                else _csv_float(source.get("hardware_articulation_angle"))
+                if _csv_float(source.get("hardware_articulation_angle")) is not None
+                else _csv_float(source.get("mtt_articulation_angle"))
+            ),
+            "articulation_source": (
+                "trailer"
+                if _csv_float(source.get("trailer_articulation_angle")) is not None
+                else "hardware"
+                if _csv_float(source.get("hardware_articulation_angle")) is not None
+                else "mtt"
+                if _csv_float(source.get("mtt_articulation_angle")) is not None
+                else None
+            ),
+            "mtt_articulation_rad": _csv_float(source.get("mtt_articulation_angle")),
+            "hardware_articulation_rad": _csv_float(source.get("hardware_articulation_angle")),
+            "trailer_articulation_rad": _csv_float(source.get("trailer_articulation_angle")),
             "status_speed_ms": None,
             "status_steer_normalized": None,
             "status_throttle_raw": None,
@@ -741,6 +843,846 @@ def write_xy_plot(rows: list[dict[str, float | str | bool | None]], plot_path: P
     return True
 
 
+def finite_float(row: dict[str, float | str | bool | None], key: str) -> float | None:
+    value = row.get(key)
+    if value is None:
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def trajectory_alignment(
+    rows: list[dict[str, float | str | bool | None]],
+    x_key: str,
+    y_key: str,
+    yaw_key: str,
+) -> tuple[float, float, float, float, float] | None:
+    for row in rows:
+        ix = finite_float(row, "icp_x")
+        iy = finite_float(row, "icp_y")
+        ih = finite_float(row, "icp_heading")
+        mx = finite_float(row, x_key)
+        my = finite_float(row, y_key)
+        mh = finite_float(row, yaw_key)
+        if None not in (ix, iy, ih, mx, my, mh):
+            assert ix is not None and iy is not None and ih is not None
+            assert mx is not None and my is not None and mh is not None
+            return ix, iy, mx, my, wrap_angle(ih - mh)
+    return None
+
+
+def aligned_pose(
+    row: dict[str, float | str | bool | None],
+    x_key: str,
+    y_key: str,
+    yaw_key: str,
+    alignment: tuple[float, float, float, float, float],
+) -> tuple[float, float, float] | None:
+    x = finite_float(row, x_key)
+    y = finite_float(row, y_key)
+    yaw = finite_float(row, yaw_key)
+    if None in (x, y, yaw):
+        return None
+    assert x is not None and y is not None and yaw is not None
+    ix0, iy0, x0, y0, dyaw = alignment
+    c = math.cos(dyaw)
+    s = math.sin(dyaw)
+    dx = x - x0
+    dy = y - y0
+    return ix0 + c * dx - s * dy, iy0 + s * dx + c * dy, wrap_angle(yaw + dyaw)
+
+
+def aligned_path_to_icp(
+    rows: list[dict[str, float | str | bool | None]],
+    x_key: str,
+    y_key: str,
+    yaw_key: str,
+) -> tuple[list[float], list[float], list[float], list[float]]:
+    alignment = trajectory_alignment(rows, x_key, y_key, yaw_key)
+    if alignment is None:
+        return [], [], [], []
+
+    icp_x: list[float] = []
+    icp_y: list[float] = []
+    aligned_x: list[float] = []
+    aligned_y: list[float] = []
+    prev_icp: tuple[float, float] | None = None
+    for row in rows:
+        ix = finite_float(row, "icp_x")
+        iy = finite_float(row, "icp_y")
+        pose = aligned_pose(row, x_key, y_key, yaw_key, alignment)
+        if ix is None or iy is None or pose is None:
+            continue
+        cur_icp = (ix, iy)
+        if cur_icp == prev_icp:
+            continue
+        prev_icp = cur_icp
+        icp_x.append(ix)
+        icp_y.append(iy)
+        aligned_x.append(pose[0])
+        aligned_y.append(pose[1])
+    return icp_x, icp_y, aligned_x, aligned_y
+
+
+def write_odom_vs_icp_plot(
+    rows: list[dict[str, float | str | bool | None]],
+    plot_path: Path,
+    title: str,
+) -> bool:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        print(f"warning: matplotlib is not available, skipping odom plot: {exc}", file=sys.stderr)
+        return False
+
+    icp_x, icp_y, odom_x, odom_y = aligned_path_to_icp(rows, "odom_x", "odom_y", "odom_heading")
+    if not icp_x or not odom_x:
+        return False
+
+    jumps = [
+        math.hypot(icp_x[idx] - icp_x[idx - 1], icp_y[idx] - icp_y[idx - 1])
+        for idx in range(1, len(icp_x))
+    ]
+    icp_max_jump = max(jumps) if jumps else 0.0
+
+    _, ax = plt.subplots(figsize=(10, 8))
+    ax.plot(icp_x, icp_y, label="ICP odom", color="tab:orange", linewidth=1.4)
+    ax.plot(odom_x, odom_y, label="MTT odom aligned to ICP start", color="tab:blue", linewidth=1.2)
+    ax.plot(icp_x[0], icp_y[0], "ko", markersize=5, label="start")
+
+    mid = len(icp_x) // 2
+    if mid + 1 < len(icp_x):
+        ax.annotate(
+            "",
+            xy=(icp_x[mid + 1], icp_y[mid + 1]),
+            xytext=(icp_x[mid], icp_y[mid]),
+            arrowprops=dict(arrowstyle="->", color="tab:orange", lw=1.4),
+        )
+    if mid + 1 < len(odom_x):
+        ax.annotate(
+            "",
+            xy=(odom_x[mid + 1], odom_y[mid + 1]),
+            xytext=(odom_x[mid], odom_y[mid]),
+            arrowprops=dict(arrowstyle="->", color="tab:blue", lw=1.2),
+        )
+
+    ax.set_title(f"{title} odom vs ICP\nICP max step: {icp_max_jump:.3f} m", fontsize=10)
+    ax.set_xlabel("x [m]")
+    ax.set_ylabel("y [m]")
+    ax.axis("equal")
+    ax.grid(True, linewidth=0.4, alpha=0.5)
+    ax.legend()
+    plt.tight_layout()
+    plot_path.parent.mkdir(parents=True, exist_ok=True)
+    plt.savefig(plot_path, dpi=150)
+    plt.close()
+    return True
+
+
+def summarize_errors(values: list[float]) -> dict[str, float | int | None]:
+    if not values:
+        return {"count": 0, "mean": None, "mae": None, "rmse": None, "p95_abs": None, "max_abs": None}
+    abs_values = sorted(abs(value) for value in values)
+    p95_idx = min(len(abs_values) - 1, max(0, int(round(0.95 * (len(abs_values) - 1)))))
+    return {
+        "count": len(values),
+        "mean": sum(values) / len(values),
+        "mae": sum(abs(value) for value in values) / len(values),
+        "rmse": math.sqrt(sum(value * value for value in values) / len(values)),
+        "p95_abs": abs_values[p95_idx],
+        "max_abs": abs_values[-1],
+    }
+
+
+def relative_pose(
+    x0: float,
+    y0: float,
+    yaw0: float,
+    x1: float,
+    y1: float,
+    yaw1: float,
+) -> tuple[float, float, float]:
+    dx = x1 - x0
+    dy = y1 - y0
+    c = math.cos(yaw0)
+    s = math.sin(yaw0)
+    return c * dx + s * dy, -s * dx + c * dy, wrap_angle(yaw1 - yaw0)
+
+
+def compute_rpe(
+    rows: list[dict[str, float | str | bool | None]],
+    *,
+    x_key: str,
+    y_key: str,
+    yaw_key: str,
+    horizons_s: tuple[float, ...] = (1.0, 3.0, 5.0, 10.0),
+    sample_period_s: float = 0.5,
+) -> dict[float, dict[str, float | int | None]]:
+    samples = [
+        row for row in rows
+        if finite_float(row, "t") is not None
+        and finite_float(row, "icp_x") is not None
+        and finite_float(row, "icp_y") is not None
+        and finite_float(row, "icp_heading") is not None
+        and finite_float(row, x_key) is not None
+        and finite_float(row, y_key) is not None
+        and finite_float(row, yaw_key) is not None
+    ]
+    samples.sort(key=lambda row: float(row["t"]))  # type: ignore[arg-type]
+    if len(samples) < 2:
+        return {
+            horizon: {
+                "count": 0,
+                "position_rmse_m": None,
+                "position_p95_m": None,
+                "yaw_rmse_rad": None,
+                "yaw_p95_rad": None,
+            }
+            for horizon in horizons_s
+        }
+
+    times = [float(row["t"]) for row in samples]  # type: ignore[arg-type]
+    results: dict[float, dict[str, float | int | None]] = {}
+    import bisect
+
+    for horizon in horizons_s:
+        next_start_t = times[0]
+        pos_errors: list[float] = []
+        yaw_errors: list[float] = []
+        for idx, row0 in enumerate(samples):
+            t0 = times[idx]
+            if t0 + horizon > times[-1]:
+                break
+            if t0 + 1e-9 < next_start_t:
+                continue
+            target_t = t0 + horizon
+            j = bisect.bisect_left(times, target_t)
+            if j >= len(samples):
+                break
+            if j > 0 and abs(times[j - 1] - target_t) < abs(times[j] - target_t):
+                j -= 1
+            row1 = samples[j]
+            actual_dt = times[j] - t0
+            if abs(actual_dt - horizon) > max(0.2, 0.25 * horizon):
+                continue
+
+            icp_rel = relative_pose(
+                float(row0["icp_x"]),  # type: ignore[arg-type]
+                float(row0["icp_y"]),  # type: ignore[arg-type]
+                float(row0["icp_heading"]),  # type: ignore[arg-type]
+                float(row1["icp_x"]),  # type: ignore[arg-type]
+                float(row1["icp_y"]),  # type: ignore[arg-type]
+                float(row1["icp_heading"]),  # type: ignore[arg-type]
+            )
+            other_rel = relative_pose(
+                float(row0[x_key]),  # type: ignore[arg-type]
+                float(row0[y_key]),  # type: ignore[arg-type]
+                float(row0[yaw_key]),  # type: ignore[arg-type]
+                float(row1[x_key]),  # type: ignore[arg-type]
+                float(row1[y_key]),  # type: ignore[arg-type]
+                float(row1[yaw_key]),  # type: ignore[arg-type]
+            )
+            pos_errors.append(math.hypot(other_rel[0] - icp_rel[0], other_rel[1] - icp_rel[1]))
+            yaw_errors.append(wrap_angle(other_rel[2] - icp_rel[2]))
+            next_start_t = t0 + sample_period_s
+
+        pos_stats = summarize_errors(pos_errors)
+        yaw_stats = summarize_errors(yaw_errors)
+        results[horizon] = {
+            "count": int(pos_stats["count"] or 0),
+            "position_rmse_m": pos_stats["rmse"],
+            "position_p95_m": pos_stats["p95_abs"],
+            "position_max_m": pos_stats["max_abs"],
+            "yaw_rmse_rad": yaw_stats["rmse"],
+            "yaw_p95_rad": yaw_stats["p95_abs"],
+            "yaw_max_rad": yaw_stats["max_abs"],
+        }
+    return results
+
+
+def write_rpe_summary_and_plot(
+    rows: list[dict[str, float | str | bool | None]],
+    output_dir: Path,
+    title: str,
+) -> dict[str, object]:
+    odom_rpe = compute_rpe(rows, x_key="odom_x", y_key="odom_y", yaw_key="odom_heading")
+    model_rpe = compute_rpe(rows, x_key="model_x", y_key="model_y", yaw_key="model_heading")
+    summary: dict[str, object] = {
+        "odom_vs_icp": odom_rpe,
+        "model_vs_icp": model_rpe,
+        "outputs": {},
+    }
+
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError:
+        pass
+    else:
+        horizons = sorted(odom_rpe)
+        plt.figure(figsize=(10, 5))
+        plt.plot(
+            horizons,
+            [float(odom_rpe[h]["position_rmse_m"] or 0.0) for h in horizons],
+            marker="o",
+            label="odom position RMSE",
+        )
+        plt.plot(
+            horizons,
+            [float(model_rpe[h]["position_rmse_m"] or 0.0) for h in horizons],
+            marker="o",
+            label="model position RMSE",
+        )
+        plt.xlabel("relative horizon [s]")
+        plt.ylabel("RPE position RMSE [m]")
+        plt.title(f"{title} relative pose error")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        path = output_dir / "rpe_position_rmse.png"
+        plt.savefig(path, dpi=140)
+        plt.close()
+        summary["outputs"] = {"rpe_position_rmse": str(path)}
+
+    summary_path = output_dir / "rpe_summary.yaml"
+    summary["outputs"] = {**dict(summary.get("outputs", {})), "summary": str(summary_path)}
+    summary_path.write_text(yaml.safe_dump(summary, sort_keys=False), encoding="utf-8")
+    return summary
+
+
+def write_diagnostic_plots(
+    rows: list[dict[str, float | str | bool | None]],
+    output_dir: Path,
+    title: str,
+) -> dict[str, object]:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        print(f"warning: matplotlib unavailable, skipping diagnostic plots: {exc}", file=sys.stderr)
+        return {}
+
+    if not rows:
+        return {}
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    t0 = finite_float(rows[0], "t") or 0.0
+    ts = [(finite_float(row, "t") or t0) - t0 for row in rows]
+    model_alignment = trajectory_alignment(rows, "model_x", "model_y", "model_heading")
+    odom_alignment = trajectory_alignment(rows, "odom_x", "odom_y", "odom_heading")
+
+    model_ex: list[float] = []
+    model_ey: list[float] = []
+    model_epos: list[float] = []
+    model_eyaw: list[float] = []
+    odom_epos: list[float] = []
+    odom_eyaw: list[float] = []
+    model_error_rows: list[tuple[float, float | None, float | None, float | None]] = []
+    odom_error_rows: list[tuple[float, float | None, float | None]] = []
+
+    for t, row in zip(ts, rows):
+        ix = finite_float(row, "icp_x")
+        iy = finite_float(row, "icp_y")
+        ih = finite_float(row, "icp_heading")
+        if None in (ix, iy, ih):
+            model_error_rows.append((t, None, None, None))
+            odom_error_rows.append((t, None, None))
+            continue
+        assert ix is not None and iy is not None and ih is not None
+        if model_alignment is not None:
+            pose = aligned_pose(row, "model_x", "model_y", "model_heading", model_alignment)
+            if pose is not None:
+                mx, my, mh = pose
+                ex = mx - ix
+                ey = my - iy
+                epos = math.hypot(ex, ey)
+                eyaw = wrap_angle(mh - ih)
+                model_ex.append(ex)
+                model_ey.append(ey)
+                model_epos.append(epos)
+                model_eyaw.append(eyaw)
+                model_error_rows.append((t, epos, ex, ey))
+            else:
+                model_error_rows.append((t, None, None, None))
+        if odom_alignment is not None:
+            pose = aligned_pose(row, "odom_x", "odom_y", "odom_heading", odom_alignment)
+            if pose is not None:
+                ox, oy, oh = pose
+                epos = math.hypot(ox - ix, oy - iy)
+                eyaw = wrap_angle(oh - ih)
+                odom_epos.append(epos)
+                odom_eyaw.append(eyaw)
+                odom_error_rows.append((t, epos, eyaw))
+            else:
+                odom_error_rows.append((t, None, None))
+
+    outputs: dict[str, str] = {}
+
+    if model_error_rows:
+        plt.figure(figsize=(11, 7))
+        plt.plot([r[0] for r in model_error_rows if r[1] is not None], [r[1] for r in model_error_rows if r[1] is not None], label="model xy norm", linewidth=1.1)
+        plt.plot([r[0] for r in model_error_rows if r[2] is not None], [r[2] for r in model_error_rows if r[2] is not None], label="model x", linewidth=0.9)
+        plt.plot([r[0] for r in model_error_rows if r[3] is not None], [r[3] for r in model_error_rows if r[3] is not None], label="model y", linewidth=0.9)
+        if odom_error_rows:
+            plt.plot([r[0] for r in odom_error_rows if r[1] is not None], [r[1] for r in odom_error_rows if r[1] is not None], label="odom xy norm", linewidth=0.9, alpha=0.8)
+        plt.xlabel("time [s]")
+        plt.ylabel("position error [m]")
+        plt.title(f"{title} position errors vs ICP")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        path = output_dir / "position_error_time.png"
+        plt.savefig(path, dpi=140)
+        plt.close()
+        outputs["position_error_time"] = str(path)
+
+    if model_eyaw or odom_eyaw:
+        plt.figure(figsize=(11, 5))
+        if model_alignment is not None:
+            model_yaw_rows = []
+            for t, row in zip(ts, rows):
+                ix_yaw = finite_float(row, "icp_heading")
+                pose = aligned_pose(row, "model_x", "model_y", "model_heading", model_alignment)
+                if ix_yaw is not None and pose is not None:
+                    model_yaw_rows.append((t, wrap_angle(pose[2] - ix_yaw)))
+            plt.plot([r[0] for r in model_yaw_rows], [r[1] for r in model_yaw_rows], label="model yaw", linewidth=1.0)
+        if odom_alignment is not None:
+            odom_yaw_rows = []
+            for t, row in zip(ts, rows):
+                ix_yaw = finite_float(row, "icp_heading")
+                pose = aligned_pose(row, "odom_x", "odom_y", "odom_heading", odom_alignment)
+                if ix_yaw is not None and pose is not None:
+                    odom_yaw_rows.append((t, wrap_angle(pose[2] - ix_yaw)))
+            plt.plot([r[0] for r in odom_yaw_rows], [r[1] for r in odom_yaw_rows], label="odom yaw", linewidth=1.0)
+        plt.xlabel("time [s]")
+        plt.ylabel("yaw error [rad]")
+        plt.title(f"{title} yaw errors vs ICP")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        path = output_dir / "yaw_error_time.png"
+        plt.savefig(path, dpi=140)
+        plt.close()
+        outputs["yaw_error_time"] = str(path)
+
+    def plot_series(filename: str, ylabel: str, series: list[tuple[str, str]]) -> None:
+        plt.figure(figsize=(11, 6))
+        plotted = False
+        all_values: list[float] = []
+        for label, key in series:
+            xs: list[float] = []
+            ys: list[float] = []
+            for t, row in zip(ts, rows):
+                value = finite_float(row, key)
+                if value is not None:
+                    xs.append(t)
+                    ys.append(value)
+                    all_values.append(value)
+            if xs:
+                plt.plot(xs, ys, label=label, linewidth=1.0)
+                plotted = True
+        if not plotted:
+            plt.close()
+            return
+        plt.xlabel("time [s]")
+        plt.ylabel(ylabel)
+        plt.title(f"{title} {ylabel}")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        if all_values:
+            abs_values = sorted(abs(value) for value in all_values)
+            p99 = abs_values[min(len(abs_values) - 1, max(0, int(0.99 * (len(abs_values) - 1))))]
+            if p99 > 0.0:
+                plt.ylim(-1.25 * p99, 1.25 * p99)
+        plt.tight_layout()
+        path = output_dir / filename
+        plt.savefig(path, dpi=140)
+        plt.close()
+        outputs[filename.removesuffix(".png")] = str(path)
+
+    plot_series(
+        "speed_sources_time.png",
+        "speed [m/s]",
+        [
+            ("icp", "icp_linear_x"),
+            ("odom", "odom_linear_x"),
+            ("tach", "tach_speed_ms"),
+            ("tach_model", "tach_model_speed_ms"),
+            ("cmd", "cmd_linear_x"),
+        ],
+    )
+    plot_series(
+        "yaw_rate_sources_time.png",
+        "yaw rate [rad/s]",
+        [
+            ("icp", "icp_angular_z"),
+            ("odom", "odom_angular_z"),
+            ("tach_model", "tach_model_yaw_rate_rad_s"),
+            ("cmd", "cmd_angular_z"),
+        ],
+    )
+    plot_series(
+        "articulation_time.png",
+        "articulation [rad]",
+        [
+            ("mtt", "articulation_rad"),
+            ("tach_model", "tach_model_articulation_rad"),
+            ("steer_norm", "status_steer_normalized"),
+        ],
+    )
+
+    speed_errors = {
+        "odom_minus_icp": [],
+        "tach_model_minus_icp": [],
+        "tach_minus_icp": [],
+    }
+    yaw_rate_errors = {
+        "odom_minus_icp": [],
+        "tach_model_minus_icp": [],
+    }
+    for row in rows:
+        icp_v = finite_float(row, "icp_linear_x")
+        if icp_v is not None:
+            for name, key in (
+                ("odom_minus_icp", "odom_linear_x"),
+                ("tach_model_minus_icp", "tach_model_speed_ms"),
+                ("tach_minus_icp", "tach_speed_ms"),
+            ):
+                value = finite_float(row, key)
+                if value is not None:
+                    speed_errors[name].append(value - icp_v)
+        icp_w = finite_float(row, "icp_angular_z")
+        if icp_w is not None:
+            for name, key in (
+                ("odom_minus_icp", "odom_angular_z"),
+                ("tach_model_minus_icp", "tach_model_yaw_rate_rad_s"),
+            ):
+                value = finite_float(row, key)
+                if value is not None:
+                    yaw_rate_errors[name].append(value - icp_w)
+
+    summary = {
+        "outputs": outputs,
+        "model_vs_icp": {
+            "x_m": summarize_errors(model_ex),
+            "y_m": summarize_errors(model_ey),
+            "position_m": summarize_errors(model_epos),
+            "yaw_rad": summarize_errors(model_eyaw),
+        },
+        "odom_vs_icp": {
+            "position_m": summarize_errors(odom_epos),
+            "yaw_rad": summarize_errors(odom_eyaw),
+        },
+        "speed_errors_ms": {key: summarize_errors(value) for key, value in speed_errors.items()},
+        "yaw_rate_errors_rad_s": {key: summarize_errors(value) for key, value in yaw_rate_errors.items()},
+    }
+    (output_dir / "diagnostic_summary.yaml").write_text(
+        yaml.safe_dump(summary, sort_keys=False),
+        encoding="utf-8",
+    )
+    return summary
+
+
+def windowed_motion_model_analysis(
+    rows: list[dict[str, float | str | bool | None]],
+    output_dir: Path,
+    title: str,
+    *,
+    window_s: float = 30.0,
+    max_icp_step_m: float = 1.0,
+    max_icp_gap_s: float = 0.5,
+    max_icp_speed_ms: float = 8.0,
+    max_icp_yaw_rate_rad_s: float = 2.5,
+    min_window_distance_m: float = 3.0,
+) -> dict[str, object]:
+    try:
+        import matplotlib
+
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+    except ImportError as exc:
+        print(f"warning: matplotlib unavailable, skipping windowed plots: {exc}", file=sys.stderr)
+        return {}
+
+    samples: list[dict[str, float | str | bool | None]] = []
+    prev_icp: tuple[float, float, float] | None = None
+    segment_id = 0
+    rejected_rows = 0
+    for row in rows:
+        t = finite_float(row, "t")
+        ix = finite_float(row, "icp_x")
+        iy = finite_float(row, "icp_y")
+        ih = finite_float(row, "icp_heading")
+        if None in (t, ix, iy, ih):
+            continue
+        assert t is not None and ix is not None and iy is not None and ih is not None
+        is_valid = True
+        if prev_icp is not None:
+            prev_t, prev_x, prev_y = prev_icp
+            step = math.hypot(ix - prev_x, iy - prev_y)
+            gap = max(0.0, t - prev_t)
+            if step > max_icp_step_m or gap > max_icp_gap_s:
+                is_valid = False
+                segment_id += 1
+        icp_v = finite_float(row, "icp_linear_x")
+        icp_w = finite_float(row, "icp_angular_z")
+        if icp_v is not None and abs(icp_v) > max_icp_speed_ms:
+            is_valid = False
+        if icp_w is not None and abs(icp_w) > max_icp_yaw_rate_rad_s:
+            is_valid = False
+        if not is_valid:
+            rejected_rows += 1
+            prev_icp = (t, ix, iy)
+            continue
+        sample = dict(row)
+        sample["_segment_id"] = segment_id
+        samples.append(sample)
+        prev_icp = (t, ix, iy)
+
+    grouped: dict[int, list[dict[str, float | str | bool | None]]] = {}
+    for sample in samples:
+        grouped.setdefault(int(sample["_segment_id"]), []).append(sample)
+
+    def stats(values: list[float]) -> dict[str, float | int | None]:
+        return summarize_errors(values)
+
+    window_rows: list[dict[str, float | int | None]] = []
+    window_traces: list[dict[str, object]] = []
+    for segment, segment_rows in sorted(grouped.items()):
+        if len(segment_rows) < 5:
+            continue
+        start_idx = 0
+        while start_idx < len(segment_rows):
+            start_t = finite_float(segment_rows[start_idx], "t")
+            if start_t is None:
+                start_idx += 1
+                continue
+            end_t = start_t + window_s
+            end_idx = start_idx
+            while end_idx < len(segment_rows):
+                t = finite_float(segment_rows[end_idx], "t")
+                if t is None or t > end_t:
+                    break
+                end_idx += 1
+            win = segment_rows[start_idx:end_idx]
+            if len(win) < 10:
+                start_idx = max(end_idx, start_idx + 1)
+                continue
+            duration = (finite_float(win[-1], "t") or start_t) - start_t
+            if duration < 5.0:
+                start_idx = max(end_idx, start_idx + 1)
+                continue
+
+            x = finite_float(win[0], "icp_x") or 0.0
+            y = finite_float(win[0], "icp_y") or 0.0
+            yaw = finite_float(win[0], "icp_heading") or 0.0
+            prev_t = finite_float(win[0], "t")
+            xy_errors: list[float] = []
+            yaw_errors: list[float] = []
+            speed_errors: list[float] = []
+            yaw_rate_errors: list[float] = []
+            icp_distance = 0.0
+            max_speed = 0.0
+            max_articulation = 0.0
+            pred_xy: list[tuple[float, float]] = []
+            icp_xy: list[tuple[float, float]] = []
+
+            prev_icp_xy: tuple[float, float] | None = None
+            for sample in win:
+                t = finite_float(sample, "t")
+                ix = finite_float(sample, "icp_x")
+                iy = finite_float(sample, "icp_y")
+                ih = finite_float(sample, "icp_heading")
+                if None in (t, ix, iy, ih):
+                    continue
+                assert t is not None and ix is not None and iy is not None and ih is not None
+                if prev_t is not None:
+                    dt = max(0.0, min(t - prev_t, 1.0))
+                    speed, yaw_rate = model_speed_and_yaw_rate(sample)
+                    if speed is not None and yaw_rate is not None and dt > 0.0:
+                        dtheta = yaw_rate * dt
+                        heading_mid = yaw + 0.5 * dtheta
+                        x += speed * dt * math.cos(heading_mid)
+                        y += speed * dt * math.sin(heading_mid)
+                        yaw = wrap_angle(yaw + dtheta)
+                        max_speed = max(max_speed, abs(speed))
+                        art = finite_float(sample, "articulation_rad")
+                        if art is not None:
+                            max_articulation = max(max_articulation, abs(art))
+                    icp_v = finite_float(sample, "icp_linear_x")
+                    icp_w = finite_float(sample, "icp_angular_z")
+                    if speed is not None and icp_v is not None:
+                        speed_errors.append(speed - icp_v)
+                    if yaw_rate is not None and icp_w is not None:
+                        yaw_rate_errors.append(yaw_rate - icp_w)
+                prev_t = t
+
+                if prev_icp_xy is not None:
+                    icp_distance += math.hypot(ix - prev_icp_xy[0], iy - prev_icp_xy[1])
+                prev_icp_xy = (ix, iy)
+                ex = x - ix
+                ey = y - iy
+                xy_errors.append(math.hypot(ex, ey))
+                yaw_errors.append(wrap_angle(yaw - ih))
+                pred_xy.append((x, y))
+                icp_xy.append((ix, iy))
+
+            if not xy_errors:
+                start_idx = max(end_idx, start_idx + 1)
+                continue
+            if icp_distance < min_window_distance_m:
+                start_idx = max(end_idx, start_idx + 1)
+                continue
+            row_out = {
+                "segment": segment,
+                "start_s": start_t - (finite_float(rows[0], "t") or start_t),
+                "duration_s": duration,
+                "sample_count": len(xy_errors),
+                "icp_distance_m": icp_distance,
+                "max_speed_ms": max_speed,
+                "max_articulation_rad": max_articulation,
+                "position_rmse_m": stats(xy_errors)["rmse"],
+                "position_mae_m": stats(xy_errors)["mae"],
+                "position_p95_m": stats(xy_errors)["p95_abs"],
+                "position_final_m": xy_errors[-1],
+                "yaw_rmse_rad": stats(yaw_errors)["rmse"],
+                "yaw_mae_rad": stats(yaw_errors)["mae"],
+                "speed_rmse_ms": stats(speed_errors)["rmse"],
+                "yaw_rate_rmse_rad_s": stats(yaw_rate_errors)["rmse"],
+            }
+            window_rows.append(row_out)
+            window_traces.append({"metrics": row_out, "icp": icp_xy, "pred": pred_xy})
+            start_idx = max(end_idx, start_idx + 1)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    csv_path = output_dir / "windowed_motion_model_errors.csv"
+    if window_rows:
+        import csv
+
+        with csv_path.open("w", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(stream, fieldnames=list(window_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(window_rows)
+
+    plot_outputs: dict[str, str] = {}
+    if window_rows:
+        starts = [float(row["start_s"] or 0.0) for row in window_rows]
+        pos_rmse = [float(row["position_rmse_m"] or 0.0) for row in window_rows]
+        yaw_rmse = [float(row["yaw_rmse_rad"] or 0.0) for row in window_rows]
+        final_err = [float(row["position_final_m"] or 0.0) for row in window_rows]
+        max_speed = [float(row["max_speed_ms"] or 0.0) for row in window_rows]
+        max_art = [float(row["max_articulation_rad"] or 0.0) for row in window_rows]
+
+        plt.figure(figsize=(11, 6))
+        plt.plot(starts, pos_rmse, label="position RMSE", linewidth=1.2)
+        plt.plot(starts, final_err, label="final position error", linewidth=1.0)
+        plt.xlabel("window start [s]")
+        plt.ylabel("error [m]")
+        plt.title(f"{title} local M0/M1 position error ({window_s:.0f}s windows, ICP jumps filtered)")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        path = output_dir / "windowed_position_error.png"
+        plt.savefig(path, dpi=140)
+        plt.close()
+        plot_outputs["windowed_position_error"] = str(path)
+
+        plt.figure(figsize=(11, 5))
+        plt.plot(starts, yaw_rmse, label="yaw RMSE", linewidth=1.2)
+        plt.xlabel("window start [s]")
+        plt.ylabel("yaw RMSE [rad]")
+        plt.title(f"{title} local yaw error")
+        plt.grid(True, alpha=0.4)
+        plt.legend()
+        plt.tight_layout()
+        path = output_dir / "windowed_yaw_error.png"
+        plt.savefig(path, dpi=140)
+        plt.close()
+        plot_outputs["windowed_yaw_error"] = str(path)
+
+        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        axes[0].scatter(max_speed, pos_rmse, s=18, alpha=0.8)
+        axes[0].set_xlabel("max |speed| [m/s]")
+        axes[0].set_ylabel("position RMSE [m]")
+        axes[0].grid(True, alpha=0.4)
+        axes[1].scatter(max_art, pos_rmse, s=18, alpha=0.8)
+        axes[1].set_xlabel("max |articulation| [rad]")
+        axes[1].set_ylabel("position RMSE [m]")
+        axes[1].grid(True, alpha=0.4)
+        fig.suptitle(f"{title} local error vs motion intensity")
+        fig.tight_layout()
+        path = output_dir / "windowed_error_vs_motion.png"
+        fig.savefig(path, dpi=140)
+        plt.close(fig)
+        plot_outputs["windowed_error_vs_motion"] = str(path)
+
+        selected = []
+        ordered = sorted(enumerate(window_traces), key=lambda item: float(item[1]["metrics"]["position_rmse_m"] or 0.0))
+        if ordered:
+            selected.append(("best", ordered[0][1]))
+            selected.append(("median", ordered[len(ordered) // 2][1]))
+            selected.append(("worst", ordered[-1][1]))
+        fig, axes = plt.subplots(1, len(selected), figsize=(5 * len(selected), 5), squeeze=False)
+        for ax, (label, trace) in zip(axes[0], selected):
+            icp_xy = trace["icp"]
+            pred_xy = trace["pred"]
+            metrics = trace["metrics"]
+            if icp_xy:
+                x0, y0 = icp_xy[0]
+                ax.plot([p[0] - x0 for p in icp_xy], [p[1] - y0 for p in icp_xy], label="icp", linewidth=1.2)
+                ax.plot([p[0] - x0 for p in pred_xy], [p[1] - y0 for p in pred_xy], label="model", linewidth=1.2)
+            ax.axis("equal")
+            ax.grid(True, alpha=0.4)
+            ax.set_title(
+                f"{label}\nstart={float(metrics['start_s'] or 0):.1f}s rmse={float(metrics['position_rmse_m'] or 0):.2f}m"
+            )
+            ax.legend()
+        fig.suptitle(f"{title} local trajectory windows")
+        fig.tight_layout()
+        path = output_dir / "windowed_trajectory_examples.png"
+        fig.savefig(path, dpi=140)
+        plt.close(fig)
+        plot_outputs["windowed_trajectory_examples"] = str(path)
+
+    rmse_values = [float(row["position_rmse_m"]) for row in window_rows if row.get("position_rmse_m") is not None]
+    yaw_values = [float(row["yaw_rmse_rad"]) for row in window_rows if row.get("yaw_rmse_rad") is not None]
+    summary = {
+        "settings": {
+            "window_s": window_s,
+            "max_icp_step_m": max_icp_step_m,
+            "max_icp_gap_s": max_icp_gap_s,
+            "max_icp_speed_ms": max_icp_speed_ms,
+            "max_icp_yaw_rate_rad_s": max_icp_yaw_rate_rad_s,
+            "min_window_distance_m": min_window_distance_m,
+        },
+        "input_rows": len(rows),
+        "valid_rows_after_icp_filter": len(samples),
+        "rejected_rows_by_icp_filter": rejected_rows,
+        "segments": len(grouped),
+        "windows": len(window_rows),
+        "position_rmse_m": summarize_errors(rmse_values),
+        "yaw_rmse_rad": summarize_errors(yaw_values),
+        "outputs": {
+            "csv": str(csv_path),
+            **plot_outputs,
+        },
+    }
+    summary_path = output_dir / "windowed_motion_model_summary.yaml"
+    summary_path.write_text(yaml.safe_dump(summary, sort_keys=False), encoding="utf-8")
+    summary["outputs"]["summary"] = str(summary_path)
+    return summary
+
+
 def compute_summary(rows: list[dict[str, float | str | bool | None]], session_dir: Path) -> dict[str, object]:
     speed_pred: list[float] = []
     speed_ref: list[float] = []
@@ -765,20 +1707,21 @@ def compute_summary(rows: list[dict[str, float | str | bool | None]], session_di
         if row["icp_linear_x"] is not None and row["odom_linear_x"] is not None:
             speed_pred.append(float(row["odom_linear_x"]))
             speed_ref.append(float(row["icp_linear_x"]))
-        elif row["icp_linear_x"] is not None and row["tach_model_speed_ms"] is not None:
-            speed_pred.append(float(row["tach_model_speed_ms"]))
-            speed_ref.append(float(row["icp_linear_x"]))
+        elif row["icp_linear_x"] is not None:
+            model_speed, _ = model_speed_and_yaw_rate(row)
+            if model_speed is not None:
+                speed_pred.append(model_speed)
+                speed_ref.append(float(row["icp_linear_x"]))
         if row["icp_angular_z"] is not None and row["odom_angular_z"] is not None:
             yaw_pred.append(float(row["odom_angular_z"]))
             yaw_ref.append(float(row["icp_angular_z"]))
-        elif row["icp_angular_z"] is not None and row["tach_model_yaw_rate_rad_s"] is not None:
-            yaw_pred.append(float(row["tach_model_yaw_rate_rad_s"]))
-            yaw_ref.append(float(row["icp_angular_z"]))
-        tach_or_model_speed = row["tach_model_speed_ms"]
-        if tach_or_model_speed is None:
-            tach_or_model_speed = row["tach_speed_ms"]
-        if tach_or_model_speed is not None and row["icp_linear_x"] is not None:
-            model_speed = float(tach_or_model_speed)
+        elif row["icp_angular_z"] is not None:
+            _, model_yaw_rate = model_speed_and_yaw_rate(row)
+            if model_yaw_rate is not None:
+                yaw_pred.append(model_yaw_rate)
+                yaw_ref.append(float(row["icp_angular_z"]))
+        model_speed, _ = model_speed_and_yaw_rate(row)
+        if model_speed is not None and row["icp_linear_x"] is not None:
             icp_speed = float(row["icp_linear_x"])
             if abs(model_speed) > 0.05 and abs(icp_speed) > 0.05:
                 sign_total += 1
@@ -943,6 +1886,11 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         help="Read postprocess_dataset/dataset.csv instead of decoding the original bag.",
     )
     parser.add_argument(
+        "--from-aligned-csv",
+        action="store_true",
+        help="Read motion_model_validation/aligned_samples.csv and regenerate plots without decoding bags.",
+    )
+    parser.add_argument(
         "--use-offline-icp",
         action="store_true",
         help=(
@@ -950,6 +1898,11 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
             "(offline_icp/trajectory.vtk). Gives higher-quality ground truth at the "
             "cost of linearly-interpolated timestamps."
         ),
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        help="Write validation CSV, plots, and summaries to this directory instead of the session directory.",
     )
     return parser.parse_args()
 
@@ -964,14 +1917,22 @@ def main() -> int:
         if len(inputs) > 1:
             print(f"\n[{index}/{len(inputs)}] {session_dir.name}")
 
-        output_dir = session_dir / "motion_model_validation"
+        output_dir = args.output_dir.expanduser() if args.output_dir else session_dir / "motion_model_validation"
         output_dir.mkdir(parents=True, exist_ok=True)
+        source_aligned_csv = session_dir / "motion_model_validation" / "aligned_samples.csv"
         csv_path = output_dir / "aligned_samples.csv"
         summary_path = output_dir / "summary.yaml"
         plot_path = output_dir / "trajectory_xy.png"
 
         try:
-            if args.from_postprocess_csv:
+            if args.from_aligned_csv:
+                if not source_aligned_csv.exists():
+                    raise FileNotFoundError(source_aligned_csv)
+                rows = read_csv(source_aligned_csv)
+                if not rows:
+                    raise RuntimeError(f"no rows in {source_aligned_csv}")
+                integrate_model_trajectory(rows)
+            elif args.from_postprocess_csv:
                 source_csv = session_dir / "postprocess_dataset" / "dataset.csv"
                 if not source_csv.exists():
                     raise FileNotFoundError(source_csv)
@@ -986,17 +1947,24 @@ def main() -> int:
                     # Priority 2: trajectory.vtk fallback — linearly interpolated timestamps,
                     #   position-only (no rotation). Use only when replay bag is absent.
                     icp_source = None
-                    replay_bag = session_dir / "offline_icp" / "icp_odom_replay"
-                    if (replay_bag / "metadata.yaml").exists():
+                    replay_candidates = [
+                        ("mapping_dataset_icp/icp_odom_replay", session_dir / "mapping_dataset_icp" / "icp_odom_replay"),
+                        ("offline_live_icp/icp_odom_replay", session_dir / "offline_live_icp" / "icp_odom_replay"),
+                        ("offline_icp_canonical/icp_odom_replay", session_dir / "offline_icp_canonical" / "icp_odom_replay"),
+                        ("offline_icp/icp_odom_replay", session_dir / "offline_icp" / "icp_odom_replay"),
+                    ]
+                    for label, replay_bag in replay_candidates:
+                        if icp_source is not None or not (replay_bag / "metadata.yaml").exists():
+                            continue
                         try:
                             replay_samples = read_topic_samples(replay_bag)
                             msgs = replay_samples.get("/mapping/icp_odom", [])
                             if msgs:
                                 samples["/mapping/icp_odom"] = msgs
-                                icp_source = "offline_icp/icp_odom_replay"
-                                print(f"  offline ICP: icp_odom_replay bag → {len(msgs)} poses (real timestamps)")
+                                icp_source = label
+                                print(f"  offline ICP: {label} → {len(msgs)} poses (real timestamps)")
                         except Exception as exc:
-                            print(f"  warning: could not read icp_odom_replay: {exc}", file=sys.stderr)
+                            print(f"  warning: could not read {label}: {exc}", file=sys.stderr)
                     if icp_source is None:
                         # Fallback: VTK with linear timestamp interpolation
                         all_times = [
@@ -1007,13 +1975,19 @@ def main() -> int:
                         if all_times:
                             t_start = min(all_times)
                             duration_s = max(all_times) - t_start
-                            vtk_path = session_dir / "offline_icp" / "trajectory.vtk"
-                            vtk_samples = parse_vtk_trajectory(vtk_path, duration_s, t_start)
-                            if vtk_samples:
-                                samples["/mapping/icp_odom"] = vtk_samples
-                                icp_source = "offline_icp/trajectory.vtk (interpolated)"
-                                print(f"  offline ICP: trajectory.vtk fallback → {len(vtk_samples)} poses (interpolated timestamps)")
-                            else:
+                            for label, vtk_path in (
+                                ("mapping_dataset_icp/trajectory.vtk", session_dir / "mapping_dataset_icp" / "trajectory.vtk"),
+                                ("offline_live_icp/trajectory.vtk", session_dir / "offline_live_icp" / "trajectory.vtk"),
+                                ("offline_icp_canonical/trajectory.vtk", session_dir / "offline_icp_canonical" / "trajectory.vtk"),
+                                ("offline_icp/trajectory.vtk", session_dir / "offline_icp" / "trajectory.vtk"),
+                            ):
+                                vtk_samples = parse_vtk_trajectory(vtk_path, duration_s, t_start)
+                                if vtk_samples:
+                                    samples["/mapping/icp_odom"] = vtk_samples
+                                    icp_source = f"{label} (interpolated)"
+                                    print(f"  offline ICP: {label} fallback → {len(vtk_samples)} poses (interpolated timestamps)")
+                                    break
+                            if icp_source is None:
                                 print("  warning: no offline ICP source found, using live bag icp_odom", file=sys.stderr)
                 rows = build_rows(samples)
             # ── Auto-correct speed sign convention ──
@@ -1021,7 +1995,7 @@ def main() -> int:
             # which makes cmd_vel.linear.x (and model_speed_ms in cmd-sim mode)
             # negative for physical forward motion.  Detect by comparing the
             # overall ICP and model displacement directions.
-            speed_sign = detect_speed_sign(rows)
+            speed_sign = 1.0 if has_real_tachometer(rows) else detect_speed_sign(rows)
             if speed_sign != 1.0:
                 integrate_model_trajectory(rows, speed_sign=speed_sign)
             summary = compute_summary(rows, session_dir)
@@ -1029,6 +2003,9 @@ def main() -> int:
             if args.from_postprocess_csv:
                 summary["input_source"] = "postprocess_dataset/dataset.csv"
                 summary["motion_model_fields_available"] = False
+            if args.from_aligned_csv:
+                summary["input_source"] = "motion_model_validation/aligned_samples.csv"
+                summary["motion_model_fields_available"] = True
             if getattr(args, "use_offline_icp", False) and not args.from_postprocess_csv:
                 summary["icp_source"] = icp_source or "bag_live"
             write_csv(rows, csv_path)
@@ -1044,12 +2021,32 @@ def main() -> int:
                 continue
 
         plot_written = write_xy_plot(rows, plot_path, session_dir.name)
+        odom_plot_path = output_dir / "odom_vs_icp_xy.png"
+        odom_plot_written = write_odom_vs_icp_plot(rows, odom_plot_path, session_dir.name)
+        diagnostic_summary = write_diagnostic_plots(rows, output_dir, session_dir.name)
+        rpe_summary = write_rpe_summary_and_plot(rows, output_dir, session_dir.name)
+        windowed_summary = windowed_motion_model_analysis(rows, output_dir, session_dir.name)
+        summary.setdefault("outputs", {})
+        if isinstance(summary["outputs"], dict):
+            summary["outputs"]["trajectory_xy"] = str(plot_path) if plot_written else None
+            summary["outputs"]["odom_vs_icp_xy"] = str(odom_plot_path) if odom_plot_written else None
+            summary["outputs"]["diagnostic_summary"] = str(output_dir / "diagnostic_summary.yaml") if diagnostic_summary else None
+            summary["outputs"]["rpe_summary"] = str(output_dir / "rpe_summary.yaml") if rpe_summary else None
+            summary["outputs"]["windowed_summary"] = str(output_dir / "windowed_motion_model_summary.yaml") if windowed_summary else None
+            summary_path.write_text(yaml.safe_dump(summary, sort_keys=False), encoding="utf-8")
 
         print(f"Session:      {session_dir}")
         print(f"Bag:          {bag_dir}")
         print(f"Aligned CSV:  {csv_path}")
         print(f"Summary YAML: {summary_path}")
         print(f"XY Plot:      {plot_path if plot_written else 'not written'}")
+        print(f"Odom/ICP:     {odom_plot_path if odom_plot_written else 'not written'}")
+        if diagnostic_summary:
+            print(f"Diagnostics:  {output_dir / 'diagnostic_summary.yaml'}")
+        if rpe_summary:
+            print(f"RPE:          {output_dir / 'rpe_summary.yaml'}")
+        if windowed_summary:
+            print(f"Windowed:     {output_dir / 'windowed_motion_model_summary.yaml'}")
         print(yaml.safe_dump(summary, sort_keys=False).strip())
 
     return 1 if failures else 0
