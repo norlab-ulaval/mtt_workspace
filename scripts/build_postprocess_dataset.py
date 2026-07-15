@@ -35,6 +35,7 @@ else:
 
 ORIGINAL_TOPICS = {
     "/mapping/icp_odom",
+    "/mapping/status",
     "/mtt_odometry",
     "/mtt_tachometer",
     "/mtt_articulation_angle",
@@ -140,6 +141,17 @@ CSV_FIELDS = [
     "icp_gap_s",
     "icp_step_m",
     "icp_yaw_rate_rad_s",
+    "has_icp_status",
+    "icp_validation_state",
+    "icp_ground_truth_ok",
+    "icp_status_message",
+    "icp_status_accepted",
+    "icp_status_translation_m",
+    "icp_status_rotation_deg",
+    "icp_status_registration_ms",
+    "icp_status_turn_recovery",
+    "icp_status_consecutive_rejections",
+    "icp_status_map_points",
     "icp_quality_ok",
     "sample_valid_for_motion_model",
     "odom_x",
@@ -273,6 +285,24 @@ def yaw_from_values(x: Any, y: Any, z: Any, w: Any) -> float:
     return math.atan2(siny_cosp, cosy_cosp)
 
 
+def diagnostic_values(msg: Any) -> dict[str, str]:
+    return {str(item.key): str(item.value) for item in getattr(msg, "values", [])}
+
+
+def diagnostic_float(values: dict[str, str], key: str, default: float = math.nan) -> float:
+    try:
+        return float(values.get(key, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def diagnostic_int(values: dict[str, str], key: str, default: int = 0) -> int:
+    try:
+        return int(float(values.get(key, default)))
+    except (TypeError, ValueError):
+        return default
+
+
 def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
     if topic in {"/mapping/icp_odom", "/mtt_odometry"}:
         pose = msg.pose.pose
@@ -286,6 +316,35 @@ def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
             "qz": float(pose.orientation.z),
             "qw": float(pose.orientation.w),
             "yaw": yaw_from_quaternion(pose.orientation),
+        }
+
+    if topic == "/mapping/status":
+        values = diagnostic_values(msg)
+        message = str(getattr(msg, "message", ""))
+        accepted = diagnostic_int(values, "accepted", 1 if int(getattr(msg, "level", 0)) == 0 else 0)
+        turn_recovery = diagnostic_int(values, "turn_recovery", 0)
+        is_odom_bridge = "odom_bridge" in message
+        is_rejected = accepted == 0
+        if is_rejected:
+            validation_state = "rejected"
+        elif is_odom_bridge:
+            validation_state = "odom_bridge"
+        elif turn_recovery:
+            validation_state = "icp_recovery"
+        else:
+            validation_state = "icp_accepted"
+        return {
+            "t": diagnostic_float(values, "stamp_s", bag_time_s),
+            "message": message,
+            "accepted": accepted,
+            "translation_m": diagnostic_float(values, "translation_m"),
+            "rotation_deg": diagnostic_float(values, "rotation_deg"),
+            "registration_ms": diagnostic_float(values, "registration_ms"),
+            "turn_recovery": turn_recovery,
+            "consecutive_rejections": diagnostic_int(values, "consecutive_rejections", 0),
+            "map_points": diagnostic_int(values, "map_points", 0),
+            "validation_state": validation_state,
+            "ground_truth_ok": 1 if accepted and not is_odom_bridge else 0,
         }
 
     if topic in {
@@ -682,6 +741,7 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
         times = [start]
 
     icp = Series(samples.get("/mapping/icp_odom", []))
+    icp_status = Series(samples.get("/mapping/status", []))
     odom = Series(samples.get("/mtt_odometry", []))
     tacho = Series(samples.get("/mtt_tachometer", []))
     imu_topic = next((topic for topic in ("/mti100/data", "/mti10/data", "/imu/data") if samples.get(topic)), "")
@@ -711,6 +771,7 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
     last_icp_row: dict[str, Any] | None = None
     for t in times:
         icp_row = icp.nearest(t, 0.20)
+        status_row = icp_status.nearest(t, 0.25)
         odom_row = odom.nearest(t, 0.10)
         tacho_row = tacho.nearest(t, 0.10)
         imu_row = imu.nearest(t, 0.10)
@@ -729,6 +790,7 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
                 "t": t,
                 "bag_time_offset_s": t - start if start is not None else "",
                 "has_icp": truth(icp_row is not None),
+                "has_icp_status": truth(status_row is not None),
                 "has_odom": truth(odom_row is not None),
                 "has_tacho": truth(tacho_row is not None),
                 "has_real_tacho": truth(tach_source == "real"),
@@ -765,8 +827,34 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
                 row["icp_gap_s"] = 0.0
                 row["icp_step_m"] = 0.0
                 row["icp_yaw_rate_rad_s"] = 0.0
-            row["icp_quality_ok"] = truth(float(row["icp_gap_s"]) <= 0.5 and float(row["icp_step_m"]) <= 0.75)
+            icp_motion_ok = float(row["icp_gap_s"]) <= 0.5 and float(row["icp_step_m"]) <= 0.75
+            if status_row is not None:
+                icp_status_gt_ok = int(status_row.get("ground_truth_ok", 0)) == 1
+            else:
+                # Backward-compatible for old offline_icp outputs recorded before /mapping/status.
+                # New runs should have status and will be classified explicitly.
+                icp_status_gt_ok = True
+                row["icp_validation_state"] = "status_missing"
+            row["icp_quality_ok"] = truth(icp_motion_ok and icp_status_gt_ok)
             last_icp_row = icp_row
+        elif status_row is not None:
+            row["icp_validation_state"] = str(status_row.get("validation_state", ""))
+            row["icp_quality_ok"] = 0
+        if status_row:
+            row.update(
+                {
+                    "icp_validation_state": status_row.get("validation_state", ""),
+                    "icp_ground_truth_ok": int(status_row.get("ground_truth_ok", 0)),
+                    "icp_status_message": status_row.get("message", ""),
+                    "icp_status_accepted": int(status_row.get("accepted", 0)),
+                    "icp_status_translation_m": status_row.get("translation_m", ""),
+                    "icp_status_rotation_deg": status_row.get("rotation_deg", ""),
+                    "icp_status_registration_ms": status_row.get("registration_ms", ""),
+                    "icp_status_turn_recovery": int(status_row.get("turn_recovery", 0)),
+                    "icp_status_consecutive_rejections": int(status_row.get("consecutive_rejections", 0)),
+                    "icp_status_map_points": int(status_row.get("map_points", 0)),
+                }
+            )
         if odom_row:
             row.update({"odom_x": odom_row["x"], "odom_y": odom_row["y"], "odom_yaw": odom_row["yaw"]})
         if imu_row:
@@ -807,6 +895,7 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
             and bool(row["has_tacho"])
             and bool(row["has_odom"])
             and str(row.get("icp_quality_ok", "0")) == "1"
+            and str(row.get("icp_validation_state", "")) not in {"odom_bridge", "rejected"}
             and row.get("mtt_articulation_angle", "") != ""
         )
         rows.append(row)
@@ -825,8 +914,28 @@ def build_dataset_rows(samples: dict[str, list[dict[str, Any]]], duration_s: flo
         "imu_rows": sum(int(row["has_imu"]) for row in rows),
         "trailer_pose_rows": sum(int(row["has_trailer_pose"]) for row in rows),
         "trailer_angle_rows": sum(int(row["has_trailer_angle"]) for row in rows),
+        "icp_status_rows": sum(int(row["has_icp_status"]) for row in rows),
+        "icp_ground_truth_rows": sum(
+            1 for row in rows
+            if str(row.get("icp_ground_truth_ok", "")) == "1"
+        ),
+        "icp_odom_bridge_rows": sum(
+            1 for row in rows
+            if str(row.get("icp_validation_state", "")) == "odom_bridge"
+        ),
+        "icp_rejected_status_rows": sum(
+            1 for row in rows
+            if str(row.get("icp_validation_state", "")) == "rejected"
+        ),
         "motion_model_valid_rows": sum(int(row["sample_valid_for_motion_model"]) for row in rows),
     }
+    state_counts: dict[str, int] = {}
+    for row in rows:
+        state = str(row.get("icp_validation_state", ""))
+        if not state:
+            continue
+        state_counts[state] = state_counts.get(state, 0) + 1
+    stats["icp_validation_state_counts"] = state_counts
     conf_values = [float(row["trailer_confidence"]) for row in rows if row["trailer_confidence"] != ""]
     stats["trailer_confidence_mean"] = sum(conf_values) / len(conf_values) if conf_values else None
     return rows, stats
@@ -841,7 +950,11 @@ def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
 
 
 def write_motion_model_csv(rows: list[dict[str, Any]], path: Path) -> None:
-    write_csv(rows, path)
+    valid_rows = [
+        row for row in rows
+        if str(row.get("sample_valid_for_motion_model", "0")) == "1"
+    ]
+    write_csv(valid_rows, path)
 
 
 def start_process(command: list[str], log_path: Path) -> ProcessHandle:
@@ -882,10 +995,30 @@ def run_offline_icp(session_dir: Path, args: argparse.Namespace, workspace_root:
         str(session_dir),
         "--offline-quality",
         args.quality,
+        "--replay-rate",
+        str(args.replay_rate),
     ]
     if args.force_icp:
         command.append("--force")
     return run_command(command, log_dir / "offline_icp.log", workspace_root)
+
+
+def run_mapping_dataset_icp(session_dir: Path, args: argparse.Namespace, workspace_root: Path, log_dir: Path) -> int:
+    script = workspace_root / "scripts" / "run_mapping_dataset.py"
+    command = [
+        sys.executable,
+        str(script),
+        str(session_dir),
+        "--replay-rate",
+        str(args.replay_rate),
+        "--odom-source",
+        args.live_icp_odom_source,
+    ]
+    if args.force_live_icp:
+        command.append("--force")
+    if not args.live_icp_global_output_map:
+        command.append("--no-global-output-map")
+    return run_command(command, log_dir / "mapping_dataset_icp.log", workspace_root)
 
 
 def run_enriched_bag(session_dir: Path, duration_s: float, args: argparse.Namespace, workspace_root: Path, log_dir: Path) -> dict[str, Any]:
@@ -1030,11 +1163,21 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         result["status"] = "skipped_missing_metadata"
         return result
 
+    if args.run_live_icp:
+        result["mapping_dataset_icp_returncode"] = run_mapping_dataset_icp(session_dir, args, workspace_root, log_dir)
     if args.run_icp:
         result["offline_icp_returncode"] = run_offline_icp(session_dir, args, workspace_root, log_dir)
+    mapping_dataset_icp_summary = load_yaml(session_dir / "mapping_dataset_icp" / "summary.yaml")
+    live_icp_summary = load_yaml(session_dir / "offline_live_icp" / "summary.yaml")
     canonical_icp_summary = load_yaml(session_dir / "offline_icp_canonical" / "summary.yaml")
     legacy_icp_summary = load_yaml(session_dir / "offline_icp" / "summary.yaml")
-    icp_summary = canonical_icp_summary if getattr(args, "canonical_icp", False) and canonical_icp_summary else legacy_icp_summary
+    prefer_live_icp = bool(getattr(args, "prefer_offline_live_icp", False) or args.run_live_icp)
+    if prefer_live_icp and mapping_dataset_icp_summary:
+        icp_summary = mapping_dataset_icp_summary
+    elif prefer_live_icp and live_icp_summary:
+        icp_summary = live_icp_summary
+    else:
+        icp_summary = canonical_icp_summary if getattr(args, "canonical_icp", False) and canonical_icp_summary else legacy_icp_summary
     result["icp"] = icp_summary
 
     if args.run_perception:
@@ -1057,26 +1200,47 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         except Exception as exc:  # noqa: BLE001
             skipped["enriched_bag"] = str(exc)
 
-    prefer_offline_icp = getattr(args, "prefer_offline_icp", False)
+    prefer_offline_icp = bool(getattr(args, "prefer_offline_icp", False) or args.run_icp)
     # Prefer the high-quality icp_odom recorded during offline replay (real timestamps + SE(3))
     # over the live bag icp_odom (lower quality, real-time config).
+    mapping_dataset_icp_odom_bag = session_dir / "mapping_dataset_icp" / "icp_odom_replay"
+    live_icp_odom_bag = session_dir / "offline_live_icp" / "icp_odom_replay"
     canonical_icp_odom_bag = session_dir / "offline_icp_canonical" / "icp_odom_replay"
     offline_icp_odom_bag = canonical_icp_odom_bag if getattr(args, "canonical_icp", False) else session_dir / "offline_icp" / "icp_odom_replay"
-    if prefer_offline_icp and (offline_icp_odom_bag / "metadata.yaml").exists():
+    if prefer_live_icp and (mapping_dataset_icp_odom_bag / "metadata.yaml").exists():
+        preferred_icp_odom_bag = mapping_dataset_icp_odom_bag
+    elif prefer_live_icp and (live_icp_odom_bag / "metadata.yaml").exists():
+        preferred_icp_odom_bag = live_icp_odom_bag
+    else:
+        preferred_icp_odom_bag = offline_icp_odom_bag
+    if (prefer_live_icp or prefer_offline_icp) and (preferred_icp_odom_bag / "metadata.yaml").exists():
         try:
-            offline_icp_samples, _, _ = read_bag_samples(offline_icp_odom_bag, {"/mapping/icp_odom"})
+            offline_icp_samples, _, _ = read_bag_samples(
+                preferred_icp_odom_bag,
+                {"/mapping/icp_odom", "/mapping/status"},
+            )
             if offline_icp_samples.get("/mapping/icp_odom"):
                 samples["/mapping/icp_odom"] = offline_icp_samples["/mapping/icp_odom"]
-                result["icp_trajectory_source"] = (
-                    "offline_icp_canonical/icp_odom_replay"
-                    if offline_icp_odom_bag == canonical_icp_odom_bag
-                    else "offline_icp/icp_odom_replay"
-                )
+                if offline_icp_samples.get("/mapping/status"):
+                    samples["/mapping/status"] = offline_icp_samples["/mapping/status"]
+                if preferred_icp_odom_bag == mapping_dataset_icp_odom_bag:
+                    result["icp_trajectory_source"] = "mapping_dataset_icp/icp_odom_replay"
+                elif preferred_icp_odom_bag == live_icp_odom_bag:
+                    result["icp_trajectory_source"] = "offline_live_icp/icp_odom_replay"
+                elif preferred_icp_odom_bag == canonical_icp_odom_bag:
+                    result["icp_trajectory_source"] = "offline_icp_canonical/icp_odom_replay"
+                else:
+                    result["icp_trajectory_source"] = "offline_icp/icp_odom_replay"
         except Exception as exc:  # noqa: BLE001
             pass  # fall through to VTK fallback
     if not samples.get("/mapping/icp_odom"):
         start = first_time(samples)
-        vtk_base = session_dir / "offline_icp_canonical" if getattr(args, "canonical_icp", False) else session_dir / "offline_icp"
+        if prefer_live_icp:
+            vtk_base = session_dir / "mapping_dataset_icp"
+            if not (vtk_base / "trajectory.vtk").exists():
+                vtk_base = session_dir / "offline_live_icp"
+        else:
+            vtk_base = session_dir / "offline_icp_canonical" if getattr(args, "canonical_icp", False) else session_dir / "offline_icp"
         vtk_rows = parse_vtk_points(vtk_base / "trajectory.vtk", duration_s, start)
         if not vtk_rows:
             vtk_rows = parse_vtk_points(session_dir / "trajectory.vtk", duration_s, start)
@@ -1103,6 +1267,12 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
             "status": icp_summary.get("status") if icp_summary else None,
             "map_size_bytes": icp_summary.get("map_size_bytes") if icp_summary else None,
             "trajectory_size_bytes": icp_summary.get("trajectory_size_bytes") if icp_summary else None,
+            "trajectory_source": result.get("icp_trajectory_source"),
+            "status_rows": stats.get("icp_status_rows", 0),
+            "ground_truth_rows": stats.get("icp_ground_truth_rows", 0),
+            "odom_bridge_rows": stats.get("icp_odom_bridge_rows", 0),
+            "rejected_status_rows": stats.get("icp_rejected_status_rows", 0),
+            "validation_state_counts": stats.get("icp_validation_state_counts", {}),
         },
         "perception": {
             "trailer_angle_rows": stats["trailer_angle_rows"],
@@ -1127,6 +1297,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("input_path", nargs="?", default=str(workspace_root / "data"))
     parser.add_argument("--run-icp", action="store_true", help="Run/reuse offline ICP before CSV export.")
     parser.add_argument("--force-icp", action="store_true", help="Force offline ICP rebuild.")
+    parser.add_argument("--run-live-icp", action="store_true", help="Run mapping_dataset_icp replay before CSV export.")
+    parser.add_argument("--force-live-icp", action="store_true", help="Force mapping_dataset_icp rebuild.")
+    parser.add_argument("--live-icp-odom-source", default="auto", choices=["auto", "imu", "runtime", "zed", "none"], help="Odom prior source for --run-live-icp.")
+    parser.add_argument("--no-live-icp-global-output-map", dest="live_icp_global_output_map", action="store_false", default=True, help="Disable mapping_dataset_icp global output map accumulation.")
     parser.add_argument("--run-perception", "--run-enriched-bag", dest="run_perception", action="store_true", help="Replay perception and record a lightweight enriched bag before CSV export.")
     parser.add_argument("--force-perception", "--force-enriched-bag", dest="force_perception", action="store_true", help="Re-record the lightweight enriched bag.")
     parser.add_argument("--quality", default="standard", choices=["standard", "max"], help="Offline ICP quality profile.")
@@ -1135,6 +1309,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--strict", action="store_true", help="Return non-zero if any session fails.")
     parser.add_argument("--metadata-only", action="store_true", help="Only audit metadata and write summaries/report; do not read messages or run replay.")
     parser.add_argument("--prefer-offline-icp", dest="prefer_offline_icp", action="store_true", help="Use offline_icp/trajectory.vtk as ICP ground truth even when /mapping/icp_odom is in the bag.")
+    parser.add_argument(
+        "--prefer-offline-live-icp",
+        dest="prefer_offline_live_icp",
+        action="store_true",
+        help="Use mapping_dataset_icp outputs as ICP reference when present; falls back to legacy offline_live_icp.",
+    )
     parser.add_argument("--canonical-icp", dest="canonical_icp", action="store_true", help="Prefer offline_icp_canonical over legacy offline_icp outputs.")
     return parser.parse_args()
 
