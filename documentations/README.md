@@ -162,6 +162,18 @@ Runtime configs:
 - demos/data_collection/config
 - demos/bag_replay
 
+Networking:
+- [docs/reference/networking.md](../docs/reference/networking.md)
+  robot, PC, Tailscale, Doodle, LiDAR, routes, DNS, DHCP, and Internet-sharing
+  procedures
+- [docs/reference/doodle_field_handoff.md](../docs/reference/doodle_field_handoff.md)
+  current Doodle field setup, web UI access, stress-test results, and next
+  Zenoh/Foxglove optimization work
+- scripts/internet_via_usb
+  temporary PC-to-robot or robot-to-PC Internet sharing
+- scripts/autosync_ws
+  workspace sync over normal LAN, Tailscale, Ethernet, or Doodle targets
+
 Runtime integration:
 - src/external/norlab_robot/launch
 - src/external/norlab_robot/config
