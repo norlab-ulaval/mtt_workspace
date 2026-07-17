@@ -161,8 +161,7 @@ def print_static_tf_summary(static_msgs: list[TFMessage]) -> None:
     wanted = {
         ("base_footprint", "base_link"),
         ("base_link", "reference_point"),
-        ("reference_point", "center_lidar_link"),
-        ("center_lidar_link", "hesai_lidar"),
+        ("reference_point", "hesai_lidar"),
         ("base_link", "hesai_lidar"),
         ("base_footprint", "hesai_lidar"),
     }
