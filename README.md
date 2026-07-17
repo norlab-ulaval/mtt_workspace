@@ -271,8 +271,10 @@ Because this workspace uses nested repositories, root-level `git status` is not 
 
 ## Documentation layout
 
-All technical notes live in:
+Technical notes:
 - [documentations/README.md](./documentations/README.md)
+- [MTT networking reference](./docs/reference/networking.md)
+- [Doodle field network handoff](./docs/reference/doodle_field_handoff.md)
 
 ## Notes
 
