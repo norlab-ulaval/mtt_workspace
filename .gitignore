@@ -58,6 +58,7 @@ CATKIN_IGNORE
 # Build directories
 mtt_test_tools/**/build/
 mtt_test_tools/**/Build/
+mtt_logs/
 
 # Compiled binaries
 *.o
@@ -83,6 +84,8 @@ compile_commands.json
 *.swo
 *.log
 .DS_Store
+graphify-out/
+artifacts/
 
 # Bootstrapped external workspace
 src/
