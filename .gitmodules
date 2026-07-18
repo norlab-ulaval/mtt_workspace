@@ -25,7 +25,7 @@
 [submodule "src/external/imu_odom"]
 	path = src/external/imu_odom
 	url = git@github.com:norlab-ulaval/imu_odom.git
-	branch = humble
+	branch = altimeter-icp
 	update = checkout
 
 [submodule "src/external/imu_tools"]
@@ -136,7 +136,11 @@
 	update = checkout
 [submodule "src/external/kiss_icp"]
 	path = src/external/kiss_icp
-	url = https://github.com/PRBonn/kiss-icp.git
+	url = git@github.com:norlab-ulaval/kiss-icp.git
+	branch = mtt
+	update = checkout
 [submodule "src/external/mtt_motor_driver"]
 	path = src/external/mtt_motor_driver
 	url = git@github.com:norlab-ulaval/mtt_motor_driver.git
+	branch = main
+	update = checkout
