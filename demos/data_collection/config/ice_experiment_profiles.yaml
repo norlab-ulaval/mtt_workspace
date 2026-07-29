@@ -1,0 +1,361 @@
+# ICE_ID_FULL -- ice-rink identification session for MTT-154 motion-model
+# fitting. Consumed by scripts/mtt_experiment_conductor.py.
+#
+# REVISED 2026-07-25 to match the detailed ICE_ID_FULL protocol handed off by
+# the team (actuator ID -> steady arcs -> reverse -> transients -> payload ->
+# held-out E-series). This SUPERSEDES the 2026-07-23 "B-refill" revision:
+# treat this as a from-scratch, comprehensive identification session, not an
+# incremental patch on the 07-23 partial B grid.
+#
+# SESSION DISCIPLINE (do not violate): this bag is ICE_ID_FULL -- used to FIT
+# the actuator + M5 contact parameters. The 2026-07-01 ice bag
+# (mtt_calibration_patinoire_2026-07-01_09-54-06 / test_garage_2026-07-01_11-46-15)
+# is reserved as ICE_TEST -- an INDEPENDENT test set. No parameter may ever be
+# calibrated against it. Everything under "tier: core" below is FIT material;
+# Series E at the end is HELD-OUT within this same session and must never
+# enter the fit either, even though it comes from the same bag.
+#
+# KNOWN PRIORITY FINDING (2026-07-25): on the current M5 configuration, GT
+# median |vy| = 0.638 m/s vs M5-predicted median |vy| = 0.024 m/s -- M5
+# predicts almost no lateral slip velocity. The fit target must be the full
+# body twist [vx, vy, omega], not just curvature/omega-over-v. This session's
+# steady arcs + reverse + transients are the data that must be scored against
+# the full twist once GT at 100 Hz is available (see roadmap Phase 2/5).
+#
+# Speeds V1/V2/V3 match the protocol's 0.3/0.8/1.2 m/s steady-arc grid.
+# NOTE: the conductor caps AUTO speed session-wide via
+# /mtt_control/set_auto_speed_limit (EXPERIMENT_AUTO_SPEED_CAP_MS, default
+# 1.2 m/s) -- sufficient for this profile's max requested speed (1.2 m/s).
+#
+# tier: core     -> ~22 min of active driving; the full ICE_ID_FULL protocol.
+# tier: extended -> payload trim variants (front/rear) + longer held-out
+#                   E-series. Only played with --include-extended /
+#                   include_extended:=true.
+#
+# Repositioning workflow: "pause" segments are duration-based reminders, not
+# a hard wait. Reposition in MANUAL (release deadman / press MANUAL, drive by
+# joystick) -- a normal AUTO->MANUAL disengage, so re-pressing AUTO simply
+# restarts the short pause countdown (or publish Bool(true) on
+# /mtt_experiment/skip_pause to skip it once in position).
+
+meta:
+  speeds:
+    V1: 0.30
+    V2: 0.80
+    V3: 1.20
+    V1_REV: -0.30
+    V2_REV: -0.80
+  vehicle:
+    # Not consumed by any script (informational only) -- kept consistent with the
+    # measured geometry used in scripts/analyze_ice_session.py (L1_M=0.834227 +
+    # L2_M=1.5135) per the audit doc's Sec.3.2 warning about stale-geometry drift;
+    # the old manuscript approximation (l1=0.9, l2=1.5 -> 2.4) is superseded.
+    wheelbase_m: 2.3477
+    max_articulation_rad: 0.733  # operational cap 42 deg, 3 deg margin below the 45 deg hard stop
+
+segments:
+  # =======================================================================
+  # 1. Actuator identification at standstill (~5 min): delay, max rate,
+  #    backlash/hysteresis. Steps to +-40 deg (near the operational limit,
+  #    but as discrete HELD steps, not a continuous sweep, for safety
+  #    margin); ramps to +-30 deg at three rates to characterize dynamics
+  #    without spending the full budget sweeping right at the limit.
+  # =======================================================================
+  - id: A1_standstill_steps
+    tier: core
+    type: phi_steps
+    label: "A1 standstill articulation steps (delay, backlash, hysteresis)"
+    speed_ms: 0.0
+    steps_deg: [0, 3, -3, 0, 6, -6, 0, 10, -10, 0, 15, -15, 0, 30, -30, 0, 40, -40, 0]
+    hold_s: 4.0
+
+  - id: A1_ramp_1degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 1 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 1.0
+
+  - id: A1_ramp_4degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 4 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 4.0
+
+  - id: A1_ramp_12degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 12 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 12.0
+
+  - id: A2_speed_steps
+    tier: core
+    type: speed_steps
+    label: "A2 speed steps at phi=0 (delay_v, tau_v, real command-to-speed gain)"
+    phi_deg: 0.0
+    steps_ms: [0.0, V1, 0.0, V2, 0.0, V3, 0.0]
+    hold_s: 4.0
+
+  - id: pause_after_A
+    tier: core
+    type: pause
+    label: "Reposition for the steady-arc core"
+    duration_s: 15.0
+    message: "Actuator ID done. Reposition for steady arcs, then hold deadman + press AUTO."
+
+  # =======================================================================
+  # 2. Steady arcs -- core of the identification. 12-15s hold, >=2 reps,
+  #    symmetric left/right cells (phi_deg_list already alternates sign).
+  #    +-40 deg only at the lowest speed (V1) for safety margin near the
+  #    operational limit while moving.
+  # =======================================================================
+  # Added 2026-07-29 after the GRASS_ID_FULL session's identifiability bootstrap
+  # showed phi_dead pinned at the search-grid floor in 88% of replicates: the
+  # grid jumped straight from A1's STANDSTILL steps (v=0, not usable for the
+  # moving kappa(phi) fit) to +-5deg as the smallest ROLLING hold_arc angle --
+  # no data point where the deadband (typically a few degrees) actually lives.
+  # This segment fills that gap. Must stay byte-identical between
+  # ice_experiment_profiles.yaml and open_terrain_experiment_profiles.yaml (see
+  # header note) -- update both together.
+  - id: B_arcs_deadband_zone
+    tier: core
+    type: hold_arc_grid
+    label: "Dense near-zero rolling arcs to identify the deadband directly (fills the 0-5deg gap)"
+    phi_deg_list: [0, 2, -2, 3, -3]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_small_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-5/+-10 deg at V1/V2/V3"
+    phi_deg_list: [5, -5, 10, -10]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+      - {speed_ms: V2, reps: 2, hold_s: 13.0}
+      - {speed_ms: V3, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_wide_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-20/+-30 deg at V1/V2"
+    phi_deg_list: [20, -20, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+      - {speed_ms: V2, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_limit_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-40 deg at V1 only (near operational limit, safety margin)"
+    phi_deg_list: [40, -40]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+
+  - id: pause_after_B
+    tier: core
+    type: pause
+    label: "Reposition for reverse-driving block"
+    duration_s: 15.0
+    message: "Steady arcs done. Reposition for the reverse block (front-rear asymmetry)."
+
+  # =======================================================================
+  # 3. Reverse driving -- required to identify front-rear asymmetry. Never
+  #    exercised in any prior session.
+  # =======================================================================
+  # reps bumped 1->2 on 2026-07-29 (grass session review): reverse only had a
+  # single attempt per cell against forward's 2, and a 10s hold + one shot is
+  # exactly the combination that leaves no backup if that one attempt lands in
+  # an ICP gap -- 6/8 reverse rows fell back to tach in the grass bag vs 15%
+  # for forward. Must stay identical between ice/open_terrain (see header note).
+  - id: C_reverse_arcs
+    tier: core
+    type: hold_arc_grid
+    label: "Reverse steady arcs +-10/+-30 deg at -0.3/-0.8 m/s"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1_REV, reps: 2, hold_s: 10.0}
+      - {speed_ms: V2_REV, reps: 2, hold_s: 10.0}
+
+  - id: pause_after_reverse
+    tier: core
+    type: pause
+    label: "Reposition for constant-speed transients"
+    duration_s: 15.0
+    message: "Reverse block done. Reposition to a long straight for the transient ramps."
+
+  # =======================================================================
+  # 4. Transients at constant speed (0.8 m/s): same ramp waypoints as
+  #    Series A but ROLLING, to separate quasi-static contact response from
+  #    phi_dot-dependent transient effects.
+  # =======================================================================
+  - id: D_transient_ramp_1degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 1 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 1.0
+
+  - id: D_transient_ramp_4degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 4 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 4.0
+
+  - id: D_transient_ramp_12degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 12 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 12.0
+
+  - id: pause_after_transients
+    tier: core
+    type: pause
+    label: "Prepare for payload block"
+    duration_s: 15.0
+    message: "Transients done. Prepare the ~45kg centered load for Series E."
+
+  # =======================================================================
+  # 5. Payload -- identifies load distribution (N2/N1), not just total mass.
+  # =======================================================================
+  - id: E_payload_checkpoint
+    tier: core
+    type: manual_checkpoint
+    label: "Payload: strap ~45kg centered load before continuing"
+    duration_s: 30.0
+    message: "MANUAL STEP: strap a ~45kg centered load on the trailer, then continue."
+
+  - id: E_payload_loaded_arcs
+    tier: core
+    type: hold_arc_grid
+    label: "Loaded repeat of the core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+      - {speed_ms: V2, reps: 1, hold_s: 13.0}
+
+  - id: pause_after_payload
+    tier: core
+    type: pause
+    label: "Reposition for held-out validation (Series F)"
+    duration_s: 15.0
+    message: "Reposition to open ice for the held-out validation block."
+
+  # =======================================================================
+  # 6. Held-out validation -- NEVER enters the fit, scores the frozen model
+  #    only. Short forms here (core); longer forms under tier: extended.
+  # =======================================================================
+  - id: F_figure8_short
+    tier: core
+    type: figure8
+    label: "F held-out figure-8"
+    speed_ms: V1
+    phi_amp_deg: 20
+    hold_s: 6.0
+    repeats: 3
+
+  - id: F_prbs_burst
+    tier: core
+    type: prbs_phi
+    label: "F held-out PRBS burst (short -- avoids drifting into the boards)"
+    speed_ms: V2
+    phi_choices_deg: [-30, -15, -6, 0, 6, 15, 30]
+    dwell_min_s: 2.0
+    dwell_max_s: 5.0
+    total_duration_s: 40.0
+    seed: 20260725
+
+  # =======================================================================
+  # DEFERRED -- tier: extended. Front/rear payload trim + longer held-out
+  # forms. Only played with --include-extended, and only if time remains
+  # after the core protocol completes.
+  # =======================================================================
+  - id: E_trim_checkpoint_front
+    tier: extended
+    type: manual_checkpoint
+    label: "Payload trim: move the ~45kg load fully over the front axle"
+    duration_s: 30.0
+    message: "MANUAL STEP: move the load fully over the front (tractor) end, then continue."
+
+  - id: E_trim_front_arcs
+    tier: extended
+    type: hold_arc_grid
+    label: "Front-trim repeat of core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+
+  - id: E_trim_checkpoint_rear
+    tier: extended
+    type: manual_checkpoint
+    label: "Payload trim: move the ~45kg load fully over the rear axle"
+    duration_s: 30.0
+    message: "MANUAL STEP: move the load fully over the rear (trailer) end, then continue."
+
+  - id: E_trim_rear_arcs
+    tier: extended
+    type: hold_arc_grid
+    label: "Rear-trim repeat of core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+
+  - id: F_slalom_A6
+    tier: extended
+    type: slalom_sine
+    label: "F held-out slalom sine amplitude 6deg"
+    speed_ms: V1
+    phi_amp_deg: 6
+    freq_hz: 0.10
+    duration_s: 60.0
+
+  - id: F_slalom_A20
+    tier: extended
+    type: slalom_sine
+    label: "F held-out slalom sine amplitude 20deg"
+    speed_ms: V1
+    phi_amp_deg: 20
+    freq_hz: 0.06
+    duration_s: 60.0
+
+  - id: F_prbs_long
+    tier: extended
+    type: prbs_phi
+    label: "F held-out long PRBS"
+    speed_ms: V2
+    phi_choices_deg: [-30, -15, -6, 0, 6, 15, 30]
+    dwell_min_s: 2.0
+    dwell_max_s: 5.0
+    total_duration_s: 240.0
+    seed: 20260725001
+
+  - id: F_combined
+    tier: extended
+    type: combined_v_phi
+    label: "F held-out combined v(t) and phi(t) at distinct frequencies"
+    speed0_ms: V2
+    speed_amp_ms: 0.3
+    speed_freq_hz: 0.04
+    phi_amp_deg: 15
+    phi_freq_hz: 0.09
+    duration_s: 90.0
+
+  - id: F_stop_and_go
+    tier: extended
+    type: stop_and_go_hold_phi
+    label: "F held-out stop-and-go holding phi=+15deg (breakaway/start-up)"
+    speed_ms: V1
+    phi_deg: 15
+    on_s: 4.0
+    off_s: 3.0
+    cycles: 5

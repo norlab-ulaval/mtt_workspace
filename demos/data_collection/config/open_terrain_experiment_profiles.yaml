@@ -1,0 +1,381 @@
+# ASPHALT_ID_FULL / GRASS_ID_FULL -- open-terrain identification session for
+# MTT-154 motion-model fitting. Consumed by scripts/mtt_experiment_conductor.py.
+# Set TERRAIN=asphalt or TERRAIN=grass via env when recording (same profile).
+#
+# REWRITTEN 2026-07-25: the CORE block below is now a byte-for-byte match of
+# demos/data_collection/config/ice_experiment_profiles.yaml's ICE_ID_FULL
+# core (same phi/speed grid, same reverse block, same transients, same
+# payload structure) -- this is DELIBERATE, not an oversight: the protocol
+# handoff was explicit that "ASPHALT_ID_FULL" must be "exactement le meme
+# sous-ensemble que sur glace" so the two surfaces can be compared cell by
+# cell without a confound between "different terrain" and "different test".
+# Do not let core drift from ice_experiment_profiles.yaml's core without
+# updating both.
+#
+# The previous (2026-07-23) dense 23-angle x 5-speed factorial + full
+# long-form E-series is preserved below under tier: extended -- genuinely
+# useful bonus density given no rink-time pressure on asphalt/grass, but it
+# must never be used for the cross-terrain comparison itself (different grid
+# than ice = not comparable cell by cell).
+#
+# SESSION DISCIPLINE: this bag is ASPHALT_ID_FULL / GRASS_ID_FULL -- used to
+# FIT the actuator + M5 contact parameters for that surface. Reserve a
+# separate ASPHALT_TEST / GRASS_TEST session (same held-out E-series
+# discipline as ice) before claiming any transfer result. Series F at the
+# end (core and extended) is HELD-OUT within this session and must never
+# enter the fit.
+#
+# KNOWN PRIORITY FINDING (2026-07-25, carried over from ice): fit target
+# must be the full body twist [vx, vy, omega], not just curvature. See
+# ice_experiment_profiles.yaml header and documentations/icra_roadmap_2026-07-24.md.
+#
+# NOTE on speed cap: the core block only requests up to V3=1.2 m/s, so the
+# default EXPERIMENT_AUTO_SPEED_CAP_MS=1.2 already covers it -- no override
+# needed for a same-subset-as-ice run. The tier:extended block requests up
+# to V5=2.2 m/s and needs EXPERIMENT_AUTO_SPEED_CAP_MS raised deliberately
+# (e.g. 2.5) with a clear, obstacle-free area confirmed first.
+#
+# NOTE on quasi-static validity at V4/V5 (2026-07-28, see
+# scripts/analyze_ice_session.py epsilon_band()): eps = v^2|kappa|/(mu_y g).
+# At V5=2.2 m/s and phi=35deg (X_dense_full_grid/X_speedsweep_multi_angle),
+# eps ranges from ~1.6 (mu_y~0.08, ice-like/low-grip) down to ~0.18
+# (mu_y~0.7, high-grip asphalt) across the candidate mu_y band -- see
+# MU_Y_BAND in that script. On a genuinely low-mu_y surface (wet grass,
+# loose bumpy terrain) this combination can leave the quasi-static regime
+# the current M5-R/M5-PS theory assumes (eps ~ 1, not << 1); on dry asphalt
+# it almost certainly stays inside it. Treat V4/V5 + tight-angle (>=20deg)
+# combos on grass/bumpy as a DELIBERATE probe of the dynamic regime, not a
+# quasi-static data point -- keep them, but do not silently pool them into
+# the same fit as the core quasi-static grid; analyze_ice_session.py tags
+# every hold_arc row with its own epsilon_band so this can be filtered
+# after the fact.
+
+meta:
+  speeds:
+    V1: 0.30
+    V2: 0.80
+    V3: 1.20
+    V1_REV: -0.30
+    V2_REV: -0.80
+    V4: 1.50
+    V5: 2.20
+  vehicle:
+    # Not consumed by any script (informational only) -- kept consistent with the
+    # measured geometry used in scripts/analyze_ice_session.py (L1_M=0.834227 +
+    # L2_M=1.5135) per the audit doc's Sec.3.2 warning about stale-geometry drift;
+    # the old manuscript approximation (l1=0.9, l2=1.5 -> 2.4) is superseded.
+    wheelbase_m: 2.3477
+    max_articulation_rad: 0.733
+
+segments:
+  # =======================================================================
+  # CORE -- identical grid to ice_experiment_profiles.yaml's ICE_ID_FULL.
+  # Keep these segments in lockstep with the ice file; do not densify here.
+  # =======================================================================
+  - id: A1_standstill_steps
+    tier: core
+    type: phi_steps
+    label: "A1 standstill articulation steps (delay, backlash, hysteresis)"
+    speed_ms: 0.0
+    steps_deg: [0, 3, -3, 0, 6, -6, 0, 10, -10, 0, 15, -15, 0, 30, -30, 0, 40, -40, 0]
+    hold_s: 4.0
+
+  - id: A1_ramp_1degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 1 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 1.0
+
+  - id: A1_ramp_4degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 4 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 4.0
+
+  - id: A1_ramp_12degs
+    tier: core
+    type: phi_ramp
+    label: "A1 ramp 0/-30/+30/-30/0 at 12 deg/s (standstill)"
+    speed_ms: 0.0
+    waypoints_deg: [0, -30, 30, -30, 0]
+    rate_deg_s: 12.0
+
+  - id: A2_speed_steps
+    tier: core
+    type: speed_steps
+    label: "A2 speed steps at phi=0 (delay_v, tau_v, real command-to-speed gain)"
+    phi_deg: 0.0
+    steps_ms: [0.0, V1, 0.0, V2, 0.0, V3, 0.0]
+    hold_s: 4.0
+
+  - id: pause_after_A
+    tier: core
+    type: pause
+    label: "Reposition for the steady-arc core"
+    duration_s: 15.0
+    message: "Actuator ID done. Reposition for steady arcs, then hold deadman + press AUTO."
+
+  # Added 2026-07-29 after the GRASS_ID_FULL session's identifiability bootstrap
+  # showed phi_dead pinned at the search-grid floor in 88% of replicates: the
+  # grid jumped straight from A1's STANDSTILL steps (v=0, not usable for the
+  # moving kappa(phi) fit) to +-5deg as the smallest ROLLING hold_arc angle --
+  # no data point where the deadband (typically a few degrees) actually lives.
+  # This segment fills that gap. Must stay byte-identical between
+  # ice_experiment_profiles.yaml and open_terrain_experiment_profiles.yaml (see
+  # header note) -- update both together.
+  - id: B_arcs_deadband_zone
+    tier: core
+    type: hold_arc_grid
+    label: "Dense near-zero rolling arcs to identify the deadband directly (fills the 0-5deg gap)"
+    phi_deg_list: [0, 2, -2, 3, -3]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_small_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-5/+-10 deg at V1/V2/V3"
+    phi_deg_list: [5, -5, 10, -10]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+      - {speed_ms: V2, reps: 2, hold_s: 13.0}
+      - {speed_ms: V3, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_wide_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-20/+-30 deg at V1/V2"
+    phi_deg_list: [20, -20, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+      - {speed_ms: V2, reps: 2, hold_s: 13.0}
+
+  - id: B_arcs_limit_angle
+    tier: core
+    type: hold_arc_grid
+    label: "Steady arcs +-40 deg at V1 only (near operational limit, safety margin)"
+    phi_deg_list: [40, -40]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 13.0}
+
+  - id: pause_after_B
+    tier: core
+    type: pause
+    label: "Reposition for reverse-driving block"
+    duration_s: 15.0
+    message: "Steady arcs done. Reposition for the reverse block (front-rear asymmetry)."
+
+  # reps bumped 1->2 on 2026-07-29 (grass session review): reverse only had a
+  # single attempt per cell against forward's 2, and a 10s hold + one shot is
+  # exactly the combination that leaves no backup if that one attempt lands in
+  # an ICP gap -- 6/8 reverse rows fell back to tach in the grass bag vs 15%
+  # for forward. Must stay identical between ice/open_terrain (see header note).
+  - id: C_reverse_arcs
+    tier: core
+    type: hold_arc_grid
+    label: "Reverse steady arcs +-10/+-30 deg at -0.3/-0.8 m/s"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1_REV, reps: 2, hold_s: 10.0}
+      - {speed_ms: V2_REV, reps: 2, hold_s: 10.0}
+
+  - id: pause_after_reverse
+    tier: core
+    type: pause
+    label: "Reposition for constant-speed transients"
+    duration_s: 15.0
+    message: "Reverse block done. Reposition to a long straight for the transient ramps."
+
+  - id: D_transient_ramp_1degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 1 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 1.0
+
+  - id: D_transient_ramp_4degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 4 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 4.0
+
+  - id: D_transient_ramp_12degs
+    tier: core
+    type: phi_ramp
+    label: "D transient ramp 0/+30/0/-30/0 at 12 deg/s, V2 rolling"
+    speed_ms: V2
+    waypoints_deg: [0, 30, 0, -30, 0]
+    rate_deg_s: 12.0
+
+  - id: pause_after_transients
+    tier: core
+    type: pause
+    label: "Prepare for payload block"
+    duration_s: 15.0
+    message: "Transients done. Prepare the ~45kg centered load for Series E."
+
+  - id: E_payload_checkpoint
+    tier: core
+    type: manual_checkpoint
+    label: "Payload: strap ~45kg centered load before continuing"
+    duration_s: 30.0
+    message: "MANUAL STEP: strap a ~45kg centered load on the trailer, then continue."
+
+  - id: E_payload_loaded_arcs
+    tier: core
+    type: hold_arc_grid
+    label: "Loaded repeat of the core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+      - {speed_ms: V2, reps: 1, hold_s: 13.0}
+
+  - id: pause_after_payload
+    tier: core
+    type: pause
+    label: "Reposition for held-out validation (Series F)"
+    duration_s: 15.0
+    message: "Reposition to open ground for the held-out validation block."
+
+  - id: F_figure8_short
+    tier: core
+    type: figure8
+    label: "F held-out figure-8"
+    speed_ms: V1
+    phi_amp_deg: 20
+    hold_s: 6.0
+    repeats: 3
+
+  - id: F_prbs_burst
+    tier: core
+    type: prbs_phi
+    label: "F held-out PRBS burst (short)"
+    speed_ms: V2
+    phi_choices_deg: [-30, -15, -6, 0, 6, 15, 30]
+    dwell_min_s: 2.0
+    dwell_max_s: 5.0
+    total_duration_s: 40.0
+    seed: 20260725
+
+  # =======================================================================
+  # EXTENDED -- bonus density, only meaningful on this surface (no rink-time
+  # pressure), NOT part of the same-subset-as-ice comparison. Front/rear
+  # payload trim, then the pre-2026-07-25 dense factorial + long E-series.
+  # =======================================================================
+  - id: E_trim_checkpoint_front
+    tier: extended
+    type: manual_checkpoint
+    label: "Payload trim: move the ~45kg load fully over the front axle"
+    duration_s: 30.0
+    message: "MANUAL STEP: move the load fully over the front (tractor) end, then continue."
+
+  - id: E_trim_front_arcs
+    tier: extended
+    type: hold_arc_grid
+    label: "Front-trim repeat of core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+
+  - id: E_trim_checkpoint_rear
+    tier: extended
+    type: manual_checkpoint
+    label: "Payload trim: move the ~45kg load fully over the rear axle"
+    duration_s: 30.0
+    message: "MANUAL STEP: move the load fully over the rear (trailer) end, then continue."
+
+  - id: E_trim_rear_arcs
+    tier: extended
+    type: hold_arc_grid
+    label: "Rear-trim repeat of core steady-arc angles"
+    phi_deg_list: [10, -10, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 13.0}
+
+  - id: pause_before_dense_bonus
+    tier: extended
+    type: pause
+    label: "Reposition for the bonus dense factorial (extended tier)"
+    duration_s: 15.0
+    message: "Core + trim done. Only continue if time/rink-slot allows -- this is bonus density."
+
+  - id: X_dense_full_grid
+    tier: extended
+    type: hold_arc_grid
+    label: "Bonus dense phi->kappa factorial (23 angles x 5 speeds, NOT part of the ice-comparable core)"
+    phi_deg_list: [0, 2, -2, 4, -4, 6, -6, 8, -8, 10, -10, 13, -13, 16, -16, 20, -20, 25, -25, 30, -30, 35, -35]
+    speeds:
+      - {speed_ms: V1, reps: 2, hold_s: 8.0}
+      - {speed_ms: V2, reps: 2, hold_s: 8.0}
+      - {speed_ms: V3, reps: 1, hold_s: 8.0}
+      - {speed_ms: V4, reps: 1, hold_s: 8.0}
+      - {speed_ms: V5, reps: 1, hold_s: 8.0}
+
+  - id: X_speedsweep_multi_angle
+    tier: extended
+    type: hold_arc_grid
+    label: "Bonus multi-angle speed sweep (rate independence across curvature range)"
+    phi_deg_list: [5, -5, 10, -10, 20, -20, 30, -30]
+    speeds:
+      - {speed_ms: V1, reps: 1, hold_s: 8.0}
+      - {speed_ms: V2, reps: 1, hold_s: 8.0}
+      - {speed_ms: V3, reps: 1, hold_s: 8.0}
+      - {speed_ms: V4, reps: 1, hold_s: 8.0}
+      - {speed_ms: V5, reps: 1, hold_s: 8.0}
+
+  - id: X_slalom_A6
+    tier: extended
+    type: slalom_sine
+    label: "Bonus held-out slalom sine amplitude 6deg"
+    speed_ms: V2
+    phi_amp_deg: 6
+    freq_hz: 0.10
+    duration_s: 60.0
+
+  - id: X_slalom_A20
+    tier: extended
+    type: slalom_sine
+    label: "Bonus held-out slalom sine amplitude 20deg"
+    speed_ms: V2
+    phi_amp_deg: 20
+    freq_hz: 0.06
+    duration_s: 60.0
+
+  - id: X_prbs_long
+    tier: extended
+    type: prbs_phi
+    label: "Bonus long held-out PRBS"
+    speed_ms: V3
+    phi_choices_deg: [-30, -20, -10, -4, 0, 4, 10, 20, 30]
+    dwell_min_s: 2.0
+    dwell_max_s: 5.0
+    total_duration_s: 300.0
+    seed: 20260725001
+
+  - id: X_combined
+    tier: extended
+    type: combined_v_phi
+    label: "Bonus combined v(t) and phi(t) at distinct frequencies"
+    speed0_ms: V2
+    speed_amp_ms: 0.4
+    speed_freq_hz: 0.04
+    phi_amp_deg: 18
+    phi_freq_hz: 0.09
+    duration_s: 90.0
+
+  - id: X_stop_and_go
+    tier: extended
+    type: stop_and_go_hold_phi
+    label: "Bonus stop-and-go holding phi=+15deg (breakaway/start-up)"
+    speed_ms: V2
+    phi_deg: 15
+    on_s: 4.0
+    off_s: 3.0
+    cycles: 5

@@ -144,3 +144,23 @@
 	url = git@github.com:norlab-ulaval/mtt_motor_driver.git
 	branch = main
 	update = checkout
+[submodule "src/external/romea_core_common"]
+	path = src/external/romea_core_common
+	url = https://github.com/Romea/romea-core-common.git
+	branch = main
+[submodule "src/external/romea_core_path"]
+	path = src/external/romea_core_path
+	url = https://github.com/Romea/romea-core-path.git
+	branch = main
+[submodule "src/external/romea_core_path_matching"]
+	path = src/external/romea_core_path_matching
+	url = https://github.com/Romea/romea_core_path_matching.git
+	branch = main
+[submodule "src/external/romea_path_tools"]
+	path = src/external/romea_path_tools
+	url = https://github.com/Romea/romea-ros-path-tools.git
+	branch = main
+[submodule "src/external/isaac_ros_visual_slam"]
+	path = src/external/isaac_ros_visual_slam
+	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam.git
+	branch = release-4.5
