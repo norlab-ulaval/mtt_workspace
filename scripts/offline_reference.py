@@ -567,14 +567,6 @@ def load_gt_icp_csv(path: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def find_gt_icp_csv(session_dir: Path) -> Path | None:
-    gt_dir = session_dir / "GT_icp"
-    if not gt_dir.is_dir():
-        return None
-    candidates = sorted(gt_dir.glob("icp_odom_*.csv"))
-    return candidates[-1] if candidates else None
-
-
 def validate_offline_icp_csv(path: Path) -> None:
     """Refuse a structurally broken file. Never judges whether the ICP result
     is scientifically good -- that judgment already happened (--icp-approved-by
@@ -604,8 +596,7 @@ def validate_offline_icp_csv(path: Path) -> None:
 
 
 def build_source_csvs(samples: dict[str, list[dict[str, Any]]], output_dir: Path,
-                       session_dir: Path | None = None, offline_icp_path: Path | None = None,
-                       icp_approved_by: str | None = None) -> dict[str, Any]:
+                       offline_icp_path: Path, icp_approved_by: str) -> dict[str, Any]:
     """Write the per-source CSVs the rewritten offline_reference_solver expects
     (imu/icp/artic/track_odom/zed_odom), replacing the old single fused
     (icp_x,icp_y,icp_yaw,...) CSV the previous planar solver consumed."""
@@ -761,7 +752,7 @@ def plot_reference(reference_csv: Path, plot_path: Path) -> bool:
 
 def process_session(session_dir: Path, args: argparse.Namespace, workspace_root: Path) -> dict[str, Any]:
     bag_dir = session_dir / "bag"
-    output_dir = session_dir / "offline_reference"
+    output_dir = args.output_dir if args.output_dir is not None else session_dir / "offline_reference"
     log_dir = output_dir / "logs"
     output_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -838,7 +829,7 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         return result
 
     source_dir = output_dir / "measurements"
-    stats = build_source_csvs(samples, source_dir, session_dir, args.offline_icp, args.icp_approved_by)
+    stats = build_source_csvs(samples, source_dir, args.offline_icp, args.icp_approved_by)
     result["measurement_stats"] = stats
 
     graph_dir = output_dir / "graph"
@@ -896,6 +887,11 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
         parser.error("--offline-icp and --icp-approved-by must be supplied together.")
     if args.offline_icp is not None and not args.offline_icp.is_file():
         parser.error(f"--offline-icp path does not exist or is not a file: {args.offline_icp}")
+    if args.offline_icp is not None:
+        try:
+            validate_offline_icp_csv(args.offline_icp)
+        except ValueError as exc:
+            parser.error(str(exc))
     return args
 
 
@@ -907,6 +903,11 @@ def main() -> int:
         print(f"error: --offline-icp supplied but {len(sessions)} sessions would be processed. "
               "When using an offline ICP reference, process one session at a time (pass the "
               "exact session directory or a single bag). This enforces provenance tracking.")
+        return 1
+    if args.output_dir is not None and len(sessions) > 1:
+        print(f"error: --output-dir supplied but {len(sessions)} sessions would be processed. "
+              "Every session would collide on the same output directory. Process one session "
+              "at a time when overriding --output-dir.")
         return 1
     failures = 0
     report = []
@@ -924,7 +925,7 @@ def main() -> int:
             }
         report.append(result)
 
-        output_dir = session_dir / "offline_reference"
+        output_dir = args.output_dir if args.output_dir is not None else session_dir / "offline_reference"
         output_dir.mkdir(parents=True, exist_ok=True)
         (output_dir / "summary.yaml").write_text(yaml.safe_dump(result, sort_keys=False), encoding="utf-8")
         print(f"  {result['status']}")
