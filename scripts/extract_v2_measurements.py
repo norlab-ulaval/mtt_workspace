@@ -474,10 +474,9 @@ def main() -> int:
     else:
         print(f"WARNING: GT_icp CSV not found at {args.offline_icp}", file=sys.stderr)
 
-    if ZED_MAP_CSV.exists():
-        import shutil
+    if zed_map_csv.exists():
         shutil.copy(zed_map_csv, out / "measurements" / "zed_visual_map_trajectory.csv")
-        print(f"zed_visual_map_trajectory.csv copied from {ZED_MAP_CSV}")
+        print(f"zed_visual_map_trajectory.csv copied from {zed_map_csv}")
 
     # ── IMU stationary-segment gravity check ──
     imu_csv = out / "measurements" / "imu_raw.csv"
