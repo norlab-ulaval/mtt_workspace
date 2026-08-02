@@ -108,8 +108,10 @@ def print_dry_run_plan(args: argparse.Namespace) -> None:
     print(f"  output:             {args.output}")
     print(f"  output/dataset:     {args.output / 'dataset'}")
     print("  planned stages:")
-    print("    1. offline_reference.py       -> offline_reference/{measurements,graph}/")
-    print("    2. extract_v2_measurements.py -> offline_reference/audit/tf_static.yaml")
+    print("    1. extract_v2_measurements.py -> offline_reference/audit/tf_static.yaml "
+          "(+ measurements/, superseded by stage 2 below for icp/track_odom/zed_odom.csv)")
+    print("    2. offline_reference.py       -> offline_reference/{measurements,graph}/ "
+          "(runs after stage 1 -- see build_gt_pipeline.py's stage-order comment)")
     print("    3. build_gt_v2_100hz.py       -> offline_reference/poses/")
     print("    4. qualify_gt_v2.py           -> offline_reference/qualification/")
     print("    5. build_gt_reference_csv.py  -> offline_reference/reference.csv")
@@ -163,18 +165,37 @@ def main() -> int:
     work_dir = args.output / "offline_reference"
     work_dir.mkdir(parents=True, exist_ok=True)
 
-    # Stage 1: offline_reference.py (Task 1)
+    # Stage 1 (run second) / Stage 2 (run first) both write into work_dir's
+    # measurements/ subdirectory, and their outputs overlap on three filenames
+    # (icp.csv, track_odom.csv, zed_odom.csv). icp.csv is byte-identical
+    # regardless of writer (both read the same --offline-icp file with the
+    # same t = sec + nanosec*1e-9 formula); track_odom.csv/zed_odom.csv are
+    # NOT -- each script independently re-parses the same bag topic. Running
+    # extract_v2_measurements.py (Task 2) FIRST and offline_reference.py
+    # (Task 1) SECOND makes Task 1's versions the ones left on disk for all
+    # three shared filenames -- the same measurement stream that actually fed
+    # the factor graph solve below, so qualify_gt_v2.py's diagnostics (Stage 4)
+    # stay self-consistent with what was optimized. Task 2's own unique files
+    # (zed_imu.csv, articulation_state.csv, hardware_phi.csv, etc. -- read
+    # unconditionally, some without an .exists() guard, by qualify_gt_v2.py)
+    # are untouched by Task 1 and survive regardless of order.
+
+    # Stage 2: extract_v2_measurements.py (Task 2) -- audit/tf_static.yaml
+    # (needed by Stage 3) plus its own measurements/ files, superseded below
+    # for the three overlapping filenames.
+    run_checked([
+        sys.executable, str(repo_root / "scripts" / "extract_v2_measurements.py"),
+        "--session", str(args.session), "--offline-icp", str(args.offline_icp),
+        "--output-dir", str(work_dir),
+    ])
+
+    # Stage 1: offline_reference.py (Task 1) -- measurements/ + graph/. Runs
+    # after Stage 2 so its icp.csv/track_odom.csv/zed_odom.csv are the ones
+    # that persist (see comment above).
     run_checked([
         sys.executable, str(repo_root / "scripts" / "offline_reference.py"),
         str(args.session), "--offline-icp", str(args.offline_icp),
         "--icp-approved-by", args.icp_approved_by,
-        "--output-dir", str(work_dir),
-    ])
-
-    # Stage 2: extract_v2_measurements.py (Task 2)
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "extract_v2_measurements.py"),
-        "--session", str(args.session), "--offline-icp", str(args.offline_icp),
         "--output-dir", str(work_dir),
     ])
 
