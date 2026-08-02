@@ -236,9 +236,13 @@ def main() -> int:
         "--offline-icp", str(args.offline_icp),
     ])
 
-    # Stage 7: copy map reference file(s) atomically
+    # Stage 7: copy map reference file(s) atomically. Named after the source
+    # file's own stem (not just its suffix) -- multiple --map-reference
+    # files sharing an extension (e.g. a KISS-ICP session's map.ply plus a
+    # separate trajectory .ply) would otherwise silently collide on the same
+    # destination name, with only the last one surviving.
     for src in args.map_reference:
-        dst = dataset_dir / f"map_reference{src.suffix}"
+        dst = dataset_dir / f"map_reference_{src.stem}{src.suffix}"
         tmp = dst.with_suffix(dst.suffix + ".tmp")
         tmp.write_bytes(src.read_bytes())
         tmp.replace(dst)
@@ -268,7 +272,8 @@ def main() -> int:
             "canonical_100hz.csv.gz": file_record(dataset_dir / "canonical_100hz.csv.gz"),
             "trajectory_reference.ply": file_record(dataset_dir / "trajectory_reference.ply"),
             "preview.mp4": file_record(dataset_dir / "preview.mp4"),
-            **{f"map_reference{p.suffix}": file_record(dataset_dir / f"map_reference{p.suffix}")
+            **{f"map_reference_{p.stem}{p.suffix}": file_record(
+                   dataset_dir / f"map_reference_{p.stem}{p.suffix}")
                for p in args.map_reference},
         },
     }

@@ -551,17 +551,39 @@ def resolve_imu_rotation(samples: dict[str, list[dict[str, Any]]], imu_frame: st
 def load_gt_icp_csv(path: Path) -> list[dict[str, Any]]:
     """Read a GT_icp/icp_odom_*.csv (written by
     norlab_ws/src/icp_odom_logger/icp_odom_logger_node.py during an offline
-    mapper rebuild), converting its split sec/nanosec timestamp to the same
-    row shape as extract_sample()'s /mapping/icp_odom rows."""
+    mapper rebuild) or an equivalent offline-mapper export (e.g. KISS-ICP's
+    bag/mapping_output_kiss/icp_odom.csv), converting its split sec/nanosec
+    timestamp to the same row shape as extract_sample()'s /mapping/icp_odom
+    rows.
+
+    vx/vy/vz/wx/wy/wz are used downstream (offline_reference_solver.cpp)
+    ONLY to seed the optimizer's initial linearization point -- never as a
+    factor or output (see that file's comment at the ICP-seeded initial
+    guess). KISS-ICP's own exporter names the angular columns
+    roll_rate/pitch_rate/yaw_rate instead of wx/wy/wz; the two conventions
+    only coincide exactly near zero roll/pitch, but since these columns
+    never reach the optimizer as a measurement, that approximation cannot
+    bias the solve -- it only affects how good a starting guess it is.
+    """
     rows: list[dict[str, Any]] = []
     with path.open("r", encoding="utf-8", newline="") as f:
-        for r in csv.DictReader(f):
+        reader = csv.DictReader(f)
+        fieldnames = set(reader.fieldnames or [])
+        if {"wx", "wy", "wz"} <= fieldnames:
+            wx_key, wy_key, wz_key = "wx", "wy", "wz"
+        elif {"roll_rate", "pitch_rate", "yaw_rate"} <= fieldnames:
+            wx_key, wy_key, wz_key = "roll_rate", "pitch_rate", "yaw_rate"
+        else:
+            raise ValueError(
+                f"{path}: neither {{wx,wy,wz}} nor {{roll_rate,pitch_rate,yaw_rate}} "
+                "present -- cannot seed the solver's initial angular-velocity guess.")
+        for r in reader:
             rows.append({
                 "t": float(r["timestamp_sec"]) + float(r["timestamp_nanosec"]) * 1e-9,
                 "x": float(r["x"]), "y": float(r["y"]), "z": float(r["z"]),
                 "qx": float(r["qx"]), "qy": float(r["qy"]), "qz": float(r["qz"]), "qw": float(r["qw"]),
                 "vx": float(r["vx"]), "vy": float(r["vy"]), "vz": float(r["vz"]),
-                "wx": float(r["wx"]), "wy": float(r["wy"]), "wz": float(r["wz"]),
+                "wx": float(r[wx_key]), "wy": float(r[wy_key]), "wz": float(r[wz_key]),
             })
     rows.sort(key=lambda row: row["t"])
     return rows
@@ -570,18 +592,32 @@ def load_gt_icp_csv(path: Path) -> list[dict[str, Any]]:
 def validate_offline_icp_csv(path: Path) -> None:
     """Refuse a structurally broken file. Never judges whether the ICP result
     is scientifically good -- that judgment already happened (--icp-approved-by
-    records who made it), this only catches a wrong/corrupt/empty file."""
+    records who made it), this only catches a wrong/corrupt/empty file.
+
+    Checks exactly what load_gt_icp_csv() needs to read without crashing:
+    the 9 pose columns, vx/vy/vz, and one of the two angular-velocity
+    conventions (wx/wy/wz -- norlab's icp_odom_logger -- or
+    roll_rate/pitch_rate/yaw_rate -- KISS-ICP's exporter). A file missing
+    these used to pass this check and then die with a KeyError deep inside
+    build_source_csvs()."""
     required_columns = {
         "timestamp_sec", "timestamp_nanosec", "x", "y", "z",
-        "qx", "qy", "qz", "qw",
+        "qx", "qy", "qz", "qw", "vx", "vy", "vz",
     }
     df = pd.read_csv(path, nrows=0)
-    missing = required_columns - set(df.columns)
+    columns = set(df.columns)
+    missing = required_columns - columns
     if missing:
         raise ValueError(
             f"{path}: missing required columns {sorted(missing)} -- this does not "
             "look like a GT_icp/icp_odom_*.csv, refusing to use it as an offline "
             "ICP reference.")
+    has_wxyz = {"wx", "wy", "wz"} <= columns
+    has_rates = {"roll_rate", "pitch_rate", "yaw_rate"} <= columns
+    if not (has_wxyz or has_rates):
+        raise ValueError(
+            f"{path}: missing angular-velocity columns -- need either "
+            "{wx,wy,wz} (norlab) or {roll_rate,pitch_rate,yaw_rate} (KISS-ICP).")
     full = pd.read_csv(path)
     if full.empty:
         raise ValueError(f"{path}: has a header but zero data rows.")
