@@ -445,16 +445,30 @@ def main() -> int:
                         f"{max_gap.get(t, 0.0):.4f}", dup_count[t], header_zero_count[t]])
 
     # ── GT_icp CSV: reformat/copy with explicit column names ──
+    # Angular-velocity column name varies by mapper: norlab's icp_odom_logger
+    # writes wx/wy/wz, KISS-ICP's exporter writes roll_rate/pitch_rate/yaw_rate
+    # -- same alias resolved once here as in offline_reference.load_gt_icp_csv()
+    # (kept in sync manually; both readers exist because this script's icp.csv
+    # is a diagnostic-only copy, see this file's module docstring).
     if args.offline_icp.exists():
         with args.offline_icp.open() as fin, (out / "measurements" / "icp.csv").open("w", newline="") as fout:
             reader_csv = csv.DictReader(fin)
+            fieldnames = set(reader_csv.fieldnames or [])
+            if {"wx", "wy", "wz"} <= fieldnames:
+                wx_key, wy_key, wz_key = "wx", "wy", "wz"
+            elif {"roll_rate", "pitch_rate", "yaw_rate"} <= fieldnames:
+                wx_key, wy_key, wz_key = "roll_rate", "pitch_rate", "yaw_rate"
+            else:
+                raise SystemExit(
+                    f"{args.offline_icp}: neither {{wx,wy,wz}} nor "
+                    "{roll_rate,pitch_rate,yaw_rate} present.")
             writer_csv = csv.writer(fout)
             writer_csv.writerow(["t", "x", "y", "z", "qx", "qy", "qz", "qw", "vx", "vy", "vz", "wx", "wy", "wz"])
             n = 0
             for row in reader_csv:
                 t = float(row["timestamp_sec"]) + float(row["timestamp_nanosec"]) * 1e-9
                 writer_csv.writerow([t, row["x"], row["y"], row["z"], row["qx"], row["qy"], row["qz"], row["qw"],
-                                      row["vx"], row["vy"], row["vz"], row["wx"], row["wy"], row["wz"]])
+                                      row["vx"], row["vy"], row["vz"], row[wx_key], row[wy_key], row[wz_key]])
                 n += 1
         print(f"icp.csv: {n} rows copied from {args.offline_icp.name}")
     else:
