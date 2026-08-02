@@ -26,6 +26,8 @@ from pathlib import Path
 from typing import Any
 from zipfile import ZipFile
 
+import numpy as np
+import pandas as pd
 import yaml
 
 try:
@@ -42,7 +44,6 @@ else:
 
 
 TOPICS = {
-    "/mapping/icp_odom",
     "/mtt_odometry",
     "/mtt_tachometer",
     "/mtt_articulation_angle",
@@ -53,10 +54,25 @@ TOPICS = {
     "/gps_left/fix",
     "/gps_right/fix",
     "/gps/heading",
+    # Required by the offline_reference_solver rewrite (GTSAM ISAM2 batch
+    # smoother, see mtt_localization/src/offline_reference_solver.cpp): the
+    # solver's keyframes are at IMU rate, so IMU is no longer optional the
+    # way it was for the old planar (icp_x,icp_y,icp_yaw) solver CLI.
+    "/mti100/data",
+    "/zed/zed_node/odom",
+    "/isaac/vslam/odometry",
+    "/mtt/articulation_state",
+    "/hardware/articulation_angle",
+    "/hardware/articulation_pitch_rad",
+    "/tf_static",
 }
 
+# Read once, before the main filtered pass, to compute the fixed rotation
+# from the IMU's own sensor frame into base_frame (see resolve_imu_rotation()
+# below) — same convention as factor_graph_node.cpp's R_base_imu_.
+TF_STATIC_TOPIC = "/tf_static"
+
 TOPIC_LABELS = {
-    "/mapping/icp_odom": "recorded_icp",
     "/mtt_odometry": "mtt_odometry",
     "/mtt_tachometer": "mtt_tachometer",
     "/mtt_articulation_angle": "mtt_articulation_angle",
@@ -68,6 +84,10 @@ TOPIC_LABELS = {
     "/gps_right/fix": "gps_right_fix",
     "/gps/heading": "gps_heading",
     "/external/gps_llh": "external_gps_llh",
+    "/mti100/data": "imu",
+    "/zed/zed_node/odom": "zed_odom",
+    "/isaac/vslam/odometry": "isaac_vslam_odom",
+    "/mtt/articulation_state": "articulation_state",
 }
 
 
@@ -144,15 +164,132 @@ def csv_bool(value: Any) -> bool:
     return str(value).strip().lower() in {"1", "true", "yes"}
 
 
+# ─── TF composition (same convention as scripts/extract_v2_measurements.py
+# and factor_graph_node.cpp's R_base_imu_) — kept self-contained here since
+# this script must remain independently runnable for arbitrary sessions. ──
+def _quat_to_rotmat(x: float, y: float, z: float, w: float) -> list[list[float]]:
+    n = math.sqrt(x * x + y * y + z * z + w * w)
+    if n == 0.0:
+        return [[1, 0, 0], [0, 1, 0], [0, 0, 1]]
+    x, y, z, w = x / n, y / n, z / n, w / n
+    return [
+        [1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+        [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+        [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)],
+    ]
+
+
+def _mat_mul(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
+    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
+
+
+def _mat_transpose(a: list[list[float]]) -> list[list[float]]:
+    return [[a[j][i] for j in range(3)] for i in range(3)]
+
+
+def build_frame_graph(edges: list[tuple[str, str, float, float, float, float, float, float, float]]):
+    """edges: (parent, child, x, y, z, qx, qy, qz, qw) -> {child: (parent, R, t)}"""
+    graph = {}
+    for parent, child, x, y, z, qx, qy, qz, qw in edges:
+        graph[child] = (parent, _quat_to_rotmat(qx, qy, qz, qw), [x, y, z])
+    return graph
+
+
+def lookup_rotation(graph: dict, target: str, source: str) -> list[list[float]] | None:
+    """Rotation-only R such that v_target = R @ v_source, composing static edges."""
+    def path_to_root(frame: str) -> list[str]:
+        chain = [frame]
+        while chain[-1] in graph:
+            chain.append(graph[chain[-1]][0])
+        return chain
+
+    if source not in graph and source != target:
+        return None
+    chain_s = path_to_root(source)
+    chain_t = path_to_root(target)
+    set_t = set(chain_t)
+    common = next((f for f in chain_s if f in set_t), None)
+    if common is None:
+        return None
+
+    r_sc = [[1.0, 0, 0], [0, 1, 0], [0, 0, 1]]
+    frame = source
+    while frame != common:
+        _, r_pc, _ = graph[frame]
+        r_sc = _mat_mul(r_pc, r_sc)
+        frame = graph[frame][0]
+
+    r_tc = [[1.0, 0, 0], [0, 1, 0], [0, 0, 1]]
+    frame = target
+    while frame != common:
+        _, r_pc, _ = graph[frame]
+        r_tc = _mat_mul(r_pc, r_tc)
+        frame = graph[frame][0]
+
+    return _mat_mul(_mat_transpose(r_tc), r_sc)
+
+
+def rotate_vec(r: list[list[float]], v: tuple[float, float, float]) -> tuple[float, float, float]:
+    x, y, z = v
+    return (
+        r[0][0] * x + r[0][1] * y + r[0][2] * z,
+        r[1][0] * x + r[1][1] * y + r[1][2] * z,
+        r[2][0] * x + r[2][1] * y + r[2][2] * z,
+    )
+
+
 def extract_sample(topic: str, msg: Any, bag_time_s: float) -> dict[str, Any]:
-    if topic in {"/mapping/icp_odom", "/mtt_odometry"}:
+    if topic == "/tf_static":
+        return {
+            "t": bag_time_s,
+            "edges": [
+                (
+                    tr.header.frame_id, tr.child_frame_id,
+                    float(tr.transform.translation.x), float(tr.transform.translation.y),
+                    float(tr.transform.translation.z),
+                    float(tr.transform.rotation.x), float(tr.transform.rotation.y),
+                    float(tr.transform.rotation.z), float(tr.transform.rotation.w),
+                )
+                for tr in msg.transforms
+            ],
+        }
+
+    if topic in {"/mapping/icp_odom", "/mtt_odometry", "/zed/zed_node/odom", "/isaac/vslam/odometry"}:
+        t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
+        p = msg.pose.pose.position
+        q = msg.pose.pose.orientation
+        v = msg.twist.twist.linear
+        w = msg.twist.twist.angular
+        return {
+            "t": t,
+            "x": float(p.x), "y": float(p.y), "z": float(p.z),
+            "qx": float(q.x), "qy": float(q.y), "qz": float(q.z), "qw": float(q.w),
+            "yaw": q_to_yaw(q),
+            "vx": float(v.x), "vy": float(v.y), "vz": float(v.z),
+            "wx": float(w.x), "wy": float(w.y), "wz": float(w.z),
+        }
+
+    if topic == "/mti100/data":
+        t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
+        a = msg.linear_acceleration
+        g = msg.angular_velocity
+        return {
+            "t": t, "frame_id": msg.header.frame_id,
+            "ax": float(a.x), "ay": float(a.y), "az": float(a.z),
+            "gx": float(g.x), "gy": float(g.y), "gz": float(g.z),
+        }
+
+    if topic == "/mtt/articulation_state":
         t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
         return {
             "t": t,
-            "x": float(msg.pose.pose.position.x),
-            "y": float(msg.pose.pose.position.y),
-            "yaw": q_to_yaw(msg.pose.pose.orientation),
+            "hardware_rad": float(msg.hardware_rad), "hardware_fresh": bool(msg.hardware_fresh),
+            "lidar_rad": float(msg.lidar_rad), "lidar_detected": bool(msg.lidar_detected),
+            "pitch_rad": float(msg.pitch_rad), "pitch_fresh": bool(msg.pitch_fresh),
         }
+
+    if topic in {"/hardware/articulation_angle", "/hardware/articulation_pitch_rad"}:
+        return {"t": bag_time_s, "value": float(msg.data)}
 
     if topic == "/mtt_tachometer":
         t = stamp_to_sec(msg.header.stamp) if msg.header.stamp.sec or msg.header.stamp.nanosec else bag_time_s
@@ -389,197 +526,168 @@ def gps_to_local_converter(gps_rows: list[dict[str, Any]]):
     return convert
 
 
-def build_measurements(samples: dict[str, list[dict[str, Any]]]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    icp = Series(samples.get("/mapping/icp_odom", []))
-    odom = Series(samples.get("/mtt_odometry", []))
-    tacho = Series(samples.get("/mtt_tachometer", []))
-    trailer_angle = Series(samples.get("/trailer/angle") or samples.get("/trailer/articulation_angle", []))
-    mtt_articulation = Series(samples.get("/mtt_articulation_angle", []))
-    trailer_pose = Series(samples.get("/trailer/pose", []))
+def resolve_imu_rotation(samples: dict[str, list[dict[str, Any]]], imu_frame: str, base_frame: str = "base_footprint"):
+    """Compose /tf_static into a fixed rotation base_frame <- imu_frame, same
+    convention as factor_graph_node.cpp's R_base_imu_ (TF lookup at startup)
+    and scripts/extract_v2_measurements.py. Falls back to 'base_link' and, if
+    tf_static has no path between the two frames, to identity (logged)."""
+    tf_rows = samples.get("/tf_static", [])
+    edges: list[tuple] = []
+    for row in tf_rows:
+        edges.extend(row.get("edges", []))
+    if not edges:
+        print("warning: no /tf_static in this bag — IMU used unrotated (identity)", file=sys.stderr)
+        return None
+    graph = build_frame_graph(edges)
+    frames = set(graph.keys()) | {e[0] for e in edges}
+    frame = base_frame if base_frame in frames else ("base_link" if "base_link" in frames else base_frame)
+    r = lookup_rotation(graph, frame, imu_frame)
+    if r is None:
+        print(f"warning: no TF path {frame} <- {imu_frame} — IMU used unrotated (identity)", file=sys.stderr)
+        return None
+    return r
 
-    gps_topic = "/gps/fix"
-    if not samples.get(gps_topic):
-        if samples.get("/gps_left/fix"):
-            gps_topic = "/gps_left/fix"
-        elif samples.get("/gps_right/fix"):
-            gps_topic = "/gps_right/fix"
-        else:
-            gps_topic = "/external/gps_llh"
-    gps_rows = samples.get(gps_topic, [])
-    gps = Series(gps_rows)
-    gps_converter = gps_to_local_converter(gps_rows)
 
-    reference_times = []
-    for topic in ("/mapping/icp_odom", "/mtt_odometry", "/gps/fix", "/gps_left/fix", "/gps_right/fix", "/external/gps_llh"):
-        reference_times.extend(float(row["t"]) for row in samples.get(topic, []))
-    reference_times = sorted(set(round(t, 3) for t in reference_times))
-
-    if len(reference_times) > 8000:
-        step = max(1, len(reference_times) // 8000)
-        reference_times = reference_times[::step]
-
+def load_gt_icp_csv(path: Path) -> list[dict[str, Any]]:
+    """Read a GT_icp/icp_odom_*.csv (written by
+    norlab_ws/src/icp_odom_logger/icp_odom_logger_node.py during an offline
+    mapper rebuild), converting its split sec/nanosec timestamp to the same
+    row shape as extract_sample()'s /mapping/icp_odom rows."""
     rows: list[dict[str, Any]] = []
-    synthetic_count = 0
-    cmd_sim_count = 0
-    real_tacho_count = 0
+    with path.open("r", encoding="utf-8", newline="") as f:
+        for r in csv.DictReader(f):
+            rows.append({
+                "t": float(r["timestamp_sec"]) + float(r["timestamp_nanosec"]) * 1e-9,
+                "x": float(r["x"]), "y": float(r["y"]), "z": float(r["z"]),
+                "qx": float(r["qx"]), "qy": float(r["qy"]), "qz": float(r["qz"]), "qw": float(r["qw"]),
+                "vx": float(r["vx"]), "vy": float(r["vy"]), "vz": float(r["vz"]),
+                "wx": float(r["wx"]), "wy": float(r["wy"]), "wz": float(r["wz"]),
+            })
+    rows.sort(key=lambda row: row["t"])
+    return rows
 
-    for t in reference_times:
-        icp_row = icp.nearest(t, 0.20)
-        odom_row = odom.nearest(t, 0.10)
-        tacho_row = tacho.nearest(t, 0.10)
-        angle_row = trailer_angle.nearest(t, 0.15) or mtt_articulation.nearest(t, 0.15)
-        trailer_pose_row = trailer_pose.nearest(t, 0.15)
-        gps_row = gps.nearest(t, 0.50)
 
-        odom_is_synthetic = False
-        if tacho_row:
-            odom_is_synthetic = bool(tacho_row.get("synthetic")) or str(tacho_row.get("source")) == "cmd_sim"
-            synthetic_count += int(bool(tacho_row.get("synthetic")))
-            cmd_sim_count += int(str(tacho_row.get("source")) == "cmd_sim")
-            real_tacho_count += int(str(tacho_row.get("source")) == "real")
+def find_gt_icp_csv(session_dir: Path) -> Path | None:
+    gt_dir = session_dir / "GT_icp"
+    if not gt_dir.is_dir():
+        return None
+    candidates = sorted(gt_dir.glob("icp_odom_*.csv"))
+    return candidates[-1] if candidates else None
 
-        local_gps = None
-        if gps_row and gps_converter and int(gps_row.get("status", -1)) >= 0:
-            local_gps = gps_converter(gps_row)
 
-        rows.append({
-            "t": t,
-            "has_icp": icp_row is not None,
-            "icp_x": icp_row["x"] if icp_row else "",
-            "icp_y": icp_row["y"] if icp_row else "",
-            "icp_yaw": icp_row["yaw"] if icp_row else "",
-            "has_odom": odom_row is not None,
-            "odom_is_synthetic": odom_is_synthetic,
-            "odom_x": odom_row["x"] if odom_row else "",
-            "odom_y": odom_row["y"] if odom_row else "",
-            "odom_yaw": odom_row["yaw"] if odom_row else "",
-            "has_gps": local_gps is not None,
-            "gps_x": local_gps[0] if local_gps else "",
-            "gps_y": local_gps[1] if local_gps else "",
-            "gps_z": local_gps[2] if local_gps else "",
-            "has_trailer_angle": angle_row is not None,
-            "trailer_angle": angle_row["angle"] if angle_row else "",
-            "has_trailer_pose": trailer_pose_row is not None,
-            "trailer_x": trailer_pose_row["x"] if trailer_pose_row else "",
-            "trailer_y": trailer_pose_row["y"] if trailer_pose_row else "",
-            "trailer_z": trailer_pose_row["z"] if trailer_pose_row else "",
-        })
-
-    stats = {
-        "reference_times": len(reference_times),
-        "synthetic_tachometer_samples": synthetic_count,
-        "cmd_sim_tachometer_samples": cmd_sim_count,
-        "real_tachometer_samples": real_tacho_count,
-        "gps_topic_used": gps_topic if gps_rows else None,
+def validate_offline_icp_csv(path: Path) -> None:
+    """Refuse a structurally broken file. Never judges whether the ICP result
+    is scientifically good -- that judgment already happened (--icp-approved-by
+    records who made it), this only catches a wrong/corrupt/empty file."""
+    required_columns = {
+        "timestamp_sec", "timestamp_nanosec", "x", "y", "z",
+        "qx", "qy", "qz", "qw",
     }
-    return rows, stats
+    df = pd.read_csv(path, nrows=0)
+    missing = required_columns - set(df.columns)
+    if missing:
+        raise ValueError(
+            f"{path}: missing required columns {sorted(missing)} -- this does not "
+            "look like a GT_icp/icp_odom_*.csv, refusing to use it as an offline "
+            "ICP reference.")
+    full = pd.read_csv(path)
+    if full.empty:
+        raise ValueError(f"{path}: has a header but zero data rows.")
+    t = full["timestamp_sec"].to_numpy(dtype=float) + full["timestamp_nanosec"].to_numpy(dtype=float) * 1e-9
+    if not np.all(np.isfinite(t)):
+        raise ValueError(f"{path}: non-finite timestamps present.")
+    if not np.all(np.diff(t) > 0):
+        raise ValueError(f"{path}: timestamps are not strictly increasing.")
+    pose_cols = ["x", "y", "z", "qx", "qy", "qz", "qw"]
+    if not np.all(np.isfinite(full[pose_cols].to_numpy(dtype=float))):
+        raise ValueError(f"{path}: non-finite pose values present.")
 
 
-def build_measurements_from_postprocess_csv(csv_path: Path) -> tuple[list[dict[str, Any]], dict[str, Any]]:
-    with csv_path.open("r", encoding="utf-8", newline="") as stream:
-        source_rows = [dict(row) for row in csv.DictReader(stream)]
+def build_source_csvs(samples: dict[str, list[dict[str, Any]]], output_dir: Path,
+                       session_dir: Path | None = None, offline_icp_path: Path | None = None,
+                       icp_approved_by: str | None = None) -> dict[str, Any]:
+    """Write the per-source CSVs the rewritten offline_reference_solver expects
+    (imu/icp/artic/track_odom/zed_odom), replacing the old single fused
+    (icp_x,icp_y,icp_yaw,...) CSV the previous planar solver consumed."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stats: dict[str, Any] = {}
 
-    rows: list[dict[str, Any]] = []
-    synthetic_count = 0
-    cmd_sim_count = 0
-    real_tacho_count = 0
-    icp_count = 0
-    odom_count = 0
-    trailer_angle_count = 0
-    trailer_pose_count = 0
+    imu_rows = samples.get("/mti100/data", [])
+    stats["imu_samples"] = len(imu_rows)
+    if imu_rows:
+        imu_frame = next((r["frame_id"] for r in imu_rows if r.get("frame_id")), "imu_link")
+        rot = resolve_imu_rotation(samples, imu_frame)
+        with (output_dir / "imu.csv").open("w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["t", "ax", "ay", "az", "gx", "gy", "gz"])
+            for r in imu_rows:
+                a = (r["ax"], r["ay"], r["az"])
+                g = (r["gx"], r["gy"], r["gz"])
+                if rot is not None:
+                    a = rotate_vec(rot, a)
+                    g = rotate_vec(rot, g)
+                w.writerow([r["t"], *a, *g])
 
-    for source in source_rows:
-        t = csv_float(source.get("t"))
-        if t is None:
-            continue
+    if offline_icp_path is None:
+        raise ValueError(
+            "--offline-icp is required: this script only uses explicitly-approved offline "
+            "ICP CSVs, never live /mapping/icp_odom. Run the offline_icp_mapper to produce "
+            "a qualified GT_icp/icp_odom_*.csv, then pass it via --offline-icp <path> "
+            "--icp-approved-by <name>.")
+    icp_rows = load_gt_icp_csv(offline_icp_path)
+    stats["icp_source"] = str(offline_icp_path)
+    stats["icp_approved_by"] = icp_approved_by
+    stats["icp_samples"] = len(icp_rows)
+    with (output_dir / "icp.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "x", "y", "z", "qx", "qy", "qz", "qw", "vx", "vy", "vz", "wx", "wy", "wz"])
+        for r in icp_rows:
+            w.writerow([r["t"], r["x"], r["y"], r["z"], r["qx"], r["qy"], r["qz"], r["qw"],
+                        r["vx"], r["vy"], r["vz"], r["wx"], r["wy"], r["wz"]])
 
-        has_icp = csv_bool(source.get("has_icp"))
-        icp_x = csv_float(source.get("icp_x"))
-        icp_y = csv_float(source.get("icp_y"))
-        icp_qx = csv_float(source.get("icp_qx"))
-        icp_qy = csv_float(source.get("icp_qy"))
-        icp_qz = csv_float(source.get("icp_qz"))
-        icp_qw = csv_float(source.get("icp_qw"))
-        if has_icp and None not in (icp_x, icp_y, icp_qx, icp_qy, icp_qz, icp_qw):
-            assert icp_x is not None and icp_y is not None
-            assert icp_qx is not None and icp_qy is not None and icp_qz is not None and icp_qw is not None
-            icp_yaw: float | str = q_values_to_yaw(icp_qx, icp_qy, icp_qz, icp_qw)
-            icp_count += 1
-        else:
-            has_icp = False
-            icp_x = icp_y = icp_yaw = ""
+    artic_rows = samples.get("/mtt/articulation_state", [])
+    hw_rows = Series(samples.get("/hardware/articulation_angle", []))
+    pitch_rows = Series(samples.get("/hardware/articulation_pitch_rad", []))
+    stats["articulation_state_samples"] = len(artic_rows)
+    stats["hardware_articulation_angle_samples"] = len(hw_rows.rows)
+    with (output_dir / "artic.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "hardware_rad", "hardware_fresh", "lidar_rad", "lidar_detected", "pitch_rad", "pitch_fresh"])
+        if artic_rows:
+            for r in artic_rows:
+                w.writerow([r["t"], r["hardware_rad"], int(r["hardware_fresh"]),
+                            r["lidar_rad"], int(r["lidar_detected"]), r["pitch_rad"], int(r["pitch_fresh"])])
+        elif hw_rows.rows:
+            # Fallback for bags without /mtt/articulation_state (older recordings):
+            # hardware encoder only, no LiDAR-fused hitch angle, no pitch.
+            for r in hw_rows.rows:
+                w.writerow([r["t"], r["value"], 1, 0.0, 0, 0.0, 0])
 
-        has_odom = csv_bool(source.get("has_odom"))
-        odom_x = csv_float(source.get("odom_x"))
-        odom_y = csv_float(source.get("odom_y"))
-        odom_yaw = csv_float(source.get("odom_yaw"))
-        if has_odom and None not in (odom_x, odom_y, odom_yaw):
-            odom_count += 1
-        else:
-            has_odom = False
-            odom_x = odom_y = odom_yaw = ""
+    track_rows = samples.get("/mtt_odometry", [])
+    stats["track_odom_samples"] = len(track_rows)
+    with (output_dir / "track_odom.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "x", "y", "z", "qx", "qy", "qz", "qw"])
+        for r in track_rows:
+            w.writerow([r["t"], r["x"], r["y"], r["z"], r["qx"], r["qy"], r["qz"], r["qw"]])
 
-        tach_source = str(source.get("tach_source") or "")
-        tach_synthetic = csv_bool(source.get("tach_is_synthetic"))
-        synthetic_count += int(tach_synthetic)
-        cmd_sim_count += int(tach_source == "cmd_sim")
-        real_tacho_count += int(tach_source == "real")
-        odom_is_synthetic = tach_synthetic or tach_source == "cmd_sim"
+    zed_rows = samples.get("/zed/zed_node/odom", [])
+    stats["zed_odom_samples"] = len(zed_rows)
+    with (output_dir / "zed_odom.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "x", "y", "z", "qx", "qy", "qz", "qw"])
+        for r in zed_rows:
+            w.writerow([r["t"], r["x"], r["y"], r["z"], r["qx"], r["qy"], r["qz"], r["qw"]])
 
-        has_trailer_angle = csv_bool(source.get("has_trailer_angle"))
-        trailer_angle = csv_float(source.get("trailer_articulation_angle"))
-        if has_trailer_angle and trailer_angle is not None:
-            trailer_angle_count += 1
-        else:
-            has_trailer_angle = False
-            trailer_angle = ""
+    isaac_vslam_rows = samples.get("/isaac/vslam/odometry", [])
+    stats["isaac_vslam_samples"] = len(isaac_vslam_rows)
+    with (output_dir / "isaac_vslam.csv").open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["t", "x", "y", "z", "qx", "qy", "qz", "qw"])
+        for r in isaac_vslam_rows:
+            w.writerow([r["t"], r["x"], r["y"], r["z"], r["qx"], r["qy"], r["qz"], r["qw"]])
 
-        has_trailer_pose = csv_bool(source.get("has_trailer_pose"))
-        trailer_x = csv_float(source.get("trailer_pose_x"))
-        trailer_y = csv_float(source.get("trailer_pose_y"))
-        trailer_z = csv_float(source.get("trailer_pose_z"))
-        if has_trailer_pose and None not in (trailer_x, trailer_y, trailer_z):
-            trailer_pose_count += 1
-        else:
-            has_trailer_pose = False
-            trailer_x = trailer_y = trailer_z = ""
-
-        rows.append({
-            "t": t,
-            "has_icp": has_icp,
-            "icp_x": icp_x,
-            "icp_y": icp_y,
-            "icp_yaw": icp_yaw,
-            "has_odom": has_odom,
-            "odom_is_synthetic": odom_is_synthetic,
-            "odom_x": odom_x,
-            "odom_y": odom_y,
-            "odom_yaw": odom_yaw,
-            "has_gps": False,
-            "gps_x": "",
-            "gps_y": "",
-            "gps_z": "",
-            "has_trailer_angle": has_trailer_angle,
-            "trailer_angle": trailer_angle,
-            "has_trailer_pose": has_trailer_pose,
-            "trailer_x": trailer_x,
-            "trailer_y": trailer_y,
-            "trailer_z": trailer_z,
-        })
-
-    stats = {
-        "reference_times": len(rows),
-        "synthetic_tachometer_samples": synthetic_count,
-        "cmd_sim_tachometer_samples": cmd_sim_count,
-        "real_tachometer_samples": real_tacho_count,
-        "gps_topic_used": None,
-        "source": "postprocess_dataset/dataset.csv",
-        "icp_samples": icp_count,
-        "odom_samples": odom_count,
-        "trailer_angle_samples": trailer_angle_count,
-        "trailer_pose_samples": trailer_pose_count,
-    }
-    return rows, stats
+    return stats
 
 
 def write_csv(rows: list[dict[str, Any]], path: Path) -> None:
@@ -598,21 +706,22 @@ def run_command(command: list[str], log_path: Path, cwd: Path) -> int:
     return process.returncode
 
 
-def run_solver(args: argparse.Namespace, workspace_root: Path, measurements_csv: Path, output_csv: Path, summary_yaml: Path, log_path: Path) -> int:
+def run_solver(args: argparse.Namespace, workspace_root: Path, source_dir: Path, output_dir: Path, log_path: Path) -> int:
     if args.solver:
         command = [args.solver]
     else:
         command = ["ros2", "run", "mtt_localization", "offline_reference_solver"]
-    command += [
-        "--input", str(measurements_csv),
-        "--output", str(output_csv),
-        "--summary", str(summary_yaml),
-        "--icp-sigma-xy", str(args.icp_sigma_xy),
-        "--icp-sigma-yaw", str(args.icp_sigma_yaw),
-        "--odom-sigma-xy", str(args.odom_sigma_xy),
-        "--odom-sigma-yaw", str(args.odom_sigma_yaw),
-        "--gps-sigma-xy", str(args.gps_sigma_xy),
-    ]
+    output_dir.mkdir(parents=True, exist_ok=True)
+    command += ["--imu", str(source_dir / "imu.csv"), "--icp", str(source_dir / "icp.csv"),
+                "--output-dir", str(output_dir)]
+    if (source_dir / "artic.csv").exists():
+        command += ["--artic", str(source_dir / "artic.csv")]
+    if (source_dir / "track_odom.csv").exists():
+        command += ["--track-odom", str(source_dir / "track_odom.csv")]
+    if (source_dir / "zed_odom.csv").exists():
+        command += ["--zed-odom", str(source_dir / "zed_odom.csv")]
+    if (source_dir / "isaac_vslam.csv").exists():
+        command += ["--isaac-vslam", str(source_dir / "isaac_vslam.csv")]
     return run_command(command, log_path, workspace_root)
 
 
@@ -624,24 +733,26 @@ def plot_reference(reference_csv: Path, plot_path: Path) -> bool:
     except ImportError:
         return False
 
-    xs, ys, qs = [], [], []
+    xs, ys, sigmas = [], [], []
     with reference_csv.open("r", encoding="utf-8", newline="") as stream:
         for row in csv.DictReader(stream):
             xs.append(float(row["x"]))
             ys.append(float(row["y"]))
-            qs.append(float(row["source_quality"]))
+            sx = csv_float(row.get("sigma_x"))
+            sy = csv_float(row.get("sigma_y"))
+            sigmas.append(math.hypot(sx, sy) if sx is not None and sy is not None else float("nan"))
     if not xs:
         return False
 
     plot_path.parent.mkdir(parents=True, exist_ok=True)
     _, ax = plt.subplots(figsize=(8, 6))
-    sc = ax.scatter(xs, ys, c=qs, s=4, cmap="viridis", vmin=0.0, vmax=1.0)
+    sc = ax.scatter(xs, ys, c=sigmas, s=4, cmap="viridis")
     ax.plot(xs, ys, linewidth=0.8, alpha=0.5)
     ax.set_xlabel("x [m]")
     ax.set_ylabel("y [m]")
     ax.axis("equal")
     ax.grid(True, linewidth=0.4, alpha=0.5)
-    plt.colorbar(sc, ax=ax, label="quality")
+    plt.colorbar(sc, ax=ax, label="position sigma [m] (NaN where marginals not computed at this stride)")
     plt.tight_layout()
     plt.savefig(plot_path, dpi=140)
     plt.close()
@@ -672,12 +783,9 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         return result
 
     has_two_lidars = counts.get("/hesai_lidar/points", 0) > 0 and counts.get("/rsairy_ns/points", 0) > 0
-    has_recorded_icp = counts.get("/mapping/icp_odom", 0) > 0
     has_merged = counts.get("/merged_points_filtered", 0) > 0
     if has_two_lidars:
         result["notes"].append("two_lidars_available")
-    if not has_recorded_icp:
-        result["notes"].append("recorded_icp_missing_or_dead")
     if has_two_lidars and not has_merged:
         result["notes"].append("merged_cloud_missing_but_can_be_rebuilt")
 
@@ -692,46 +800,53 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
             result["notes"].append("offline_icp_failed")
 
     if args.from_postprocess_csv:
-        postprocess_csv = session_dir / "postprocess_dataset" / "dataset.csv"
-        if not postprocess_csv.exists():
-            result["status"] = "skipped_missing_postprocess_dataset"
-            result["notes"].append("postprocess_dataset_csv_missing")
-            return result
-        measurements, stats = build_measurements_from_postprocess_csv(postprocess_csv)
-        result["skipped_topics"] = {}
-        result["notes"].append("measurements_from_postprocess_dataset")
-    else:
-        samples, skipped = read_samples(bag_dir)
-        bag_start, bag_end = sample_time_bounds(samples)
-        gps_dir = Path(args.gps_log_dir).expanduser() if args.gps_log_dir else next(
-            (path if path.is_absolute() else workspace_root / path for path in GPS_CANDIDATE_DIRS if (path if path.is_absolute() else workspace_root / path).exists()),
-            None,
+        # The rewritten offline_reference_solver keyframes at IMU rate and
+        # requires raw accel/gyro (see mtt_localization/src/
+        # offline_reference_solver.cpp) — postprocess_dataset/dataset.csv is a
+        # planar (x,y,yaw) fused CSV with no raw IMU samples, so it cannot
+        # feed the new solver. Rather than silently degrade or fabricate IMU
+        # data, this mode is explicitly unsupported until a dataset with raw
+        # IMU is available; use the direct bag-reading path instead.
+        result["status"] = "skipped_postprocess_csv_incompatible_with_new_solver"
+        result["notes"].append(
+            "offline_reference_solver now requires raw IMU (accel/gyro) at its own rate; "
+            "postprocess_dataset/dataset.csv has no IMU columns. Re-run without --from-postprocess-csv."
         )
-        if not args.no_external_gps:
-            external_rows, external_stats = load_external_gps_rows(gps_dir, bag_start, bag_end, output_dir)
-            if external_rows:
-                samples["/external/gps_llh"] = external_rows
-                result["notes"].append("external_gps_llh_matched")
-            result["external_gps"] = external_stats
-        result["skipped_topics"] = skipped
-        measurements, stats = build_measurements(samples)
-    result["measurement_stats"] = stats
-
-    if not measurements:
-        result["status"] = "skipped_no_measurements"
         return result
 
-    measurements_csv = output_dir / "measurements.csv"
-    reference_csv = output_dir / "reference_state.csv"
-    solver_summary = output_dir / "solver_summary.yaml"
-    write_csv(measurements, measurements_csv)
+    samples, skipped = read_samples(bag_dir)
+    bag_start, bag_end = sample_time_bounds(samples)
+    gps_dir = Path(args.gps_log_dir).expanduser() if args.gps_log_dir else next(
+        (path if path.is_absolute() else workspace_root / path for path in GPS_CANDIDATE_DIRS if (path if path.is_absolute() else workspace_root / path).exists()),
+        None,
+    )
+    if not args.no_external_gps:
+        external_rows, external_stats = load_external_gps_rows(gps_dir, bag_start, bag_end, output_dir)
+        if external_rows:
+            samples["/external/gps_llh"] = external_rows
+            result["notes"].append("external_gps_llh_matched")
+        result["external_gps"] = external_stats
+    result["skipped_topics"] = skipped
 
+    if not samples.get("/mti100/data"):
+        result["status"] = "skipped_no_imu"
+        result["notes"].append("no /mti100/data in this bag — offline_reference_solver requires IMU keyframes")
+        return result
+    if args.offline_icp is None:
+        result["status"] = "skipped_no_offline_icp"
+        result["notes"].append("--offline-icp is required; see --help for usage")
+        return result
+
+    source_dir = output_dir / "measurements"
+    stats = build_source_csvs(samples, source_dir, session_dir, args.offline_icp, args.icp_approved_by)
+    result["measurement_stats"] = stats
+
+    graph_dir = output_dir / "graph"
     code = run_solver(
         args=args,
         workspace_root=workspace_root,
-        measurements_csv=measurements_csv,
-        output_csv=reference_csv,
-        summary_yaml=solver_summary,
+        source_dir=source_dir,
+        output_dir=graph_dir,
         log_path=log_dir / "offline_reference_solver.log",
     )
     result["solver_returncode"] = code
@@ -739,10 +854,11 @@ def process_session(session_dir: Path, args: argparse.Namespace, workspace_root:
         result["status"] = "solver_failed"
         return result
 
+    reference_csv = graph_dir / "optimized_trajectory.csv"
     result["status"] = "ok"
-    result["measurements_csv"] = str(measurements_csv)
+    result["source_csv_dir"] = str(source_dir)
     result["reference_state_csv"] = str(reference_csv)
-    result["solver_summary_yaml"] = str(solver_summary)
+    result["solver_summary_yaml"] = str(graph_dir / "solver_summary.yaml")
     result["trajectory_plot"] = str(output_dir / "trajectory_xy.png")
     result["plot_written"] = plot_reference(reference_csv, output_dir / "trajectory_xy.png")
     return result
@@ -756,19 +872,42 @@ def parse_args(workspace_root: Path) -> argparse.Namespace:
     parser.add_argument("--solver", default="", help="Path to offline_reference_solver; default uses ros2 run.")
     parser.add_argument("--gps-log-dir", default="", help="Directory containing RSplus .LLH files or ZIP exports.")
     parser.add_argument("--no-external-gps", action="store_true", help="Ignore external RSplus .LLH GPS logs.")
-    parser.add_argument("--from-postprocess-csv", action="store_true", help="Use postprocess_dataset/dataset.csv as the solver input source.")
-    parser.add_argument("--icp-sigma-xy", type=float, default=0.03)
-    parser.add_argument("--icp-sigma-yaw", type=float, default=0.03)
-    parser.add_argument("--odom-sigma-xy", type=float, default=0.30)
-    parser.add_argument("--odom-sigma-yaw", type=float, default=0.25)
-    parser.add_argument("--gps-sigma-xy", type=float, default=1.50)
-    return parser.parse_args()
+    parser.add_argument("--from-postprocess-csv", action="store_true",
+                         help="Deprecated/unsupported: postprocess_dataset/dataset.csv has no raw IMU, "
+                              "which the rewritten solver requires. Kept only to produce a clear error.")
+    parser.add_argument("--output-dir", type=Path, default=None,
+                         help="Override the per-session output directory (default: "
+                             "<session_dir>/offline_reference). Only valid together with "
+                             "--offline-icp / a single resolved session -- see Step 6's "
+                             "single-session enforcement below; using this in a multi-session "
+                             "sweep would make every session collide on the same directory.")
+    parser.add_argument("--offline-icp", type=Path, default=None,
+                         help="Path to the qualified offline ICP CSV (GT_icp/icp_odom_*.csv "
+                             "format). REQUIRED for any session actually processed -- there "
+                             "is no live-ICP fallback and no automatic discovery. See the "
+                             "absolute ICP rule in documentations/paper_results.md.")
+    parser.add_argument("--icp-approved-by", default=None,
+                         help="Name of the person who visually qualified --offline-icp "
+                             "(e.g. 'mohamed'). Required together with --offline-icp; this "
+                             "is the qualification record, not something this script "
+                             "computes or infers.")
+    args = parser.parse_args()
+    if bool(args.offline_icp) != bool(args.icp_approved_by):
+        parser.error("--offline-icp and --icp-approved-by must be supplied together.")
+    if args.offline_icp is not None and not args.offline_icp.is_file():
+        parser.error(f"--offline-icp path does not exist or is not a file: {args.offline_icp}")
+    return args
 
 
 def main() -> int:
     workspace_root = infer_workspace_root(Path(__file__).resolve())
     args = parse_args(workspace_root)
     sessions = resolve_sessions(args.input_path)
+    if args.offline_icp is not None and len(sessions) > 1:
+        print(f"error: --offline-icp supplied but {len(sessions)} sessions would be processed. "
+              "When using an offline ICP reference, process one session at a time (pass the "
+              "exact session directory or a single bag). This enforces provenance tracking.")
+        return 1
     failures = 0
     report = []
 
