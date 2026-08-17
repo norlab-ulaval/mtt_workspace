@@ -4,10 +4,24 @@
 /**:
   ros__parameters:
     use_sim_time: false
-    num_cameras: 1
+    # 2, not 1: NVIDIA's bundled RealSense RGBD launch example uses 1, but the
+    # current official docs say "set to 2 for a single stereo camera" and the
+    # real error on this hardware/release (cuVSLAM 15.0.0, release-4.5) was
+    # "...Number of cameras must be even" at num_cameras=1. Empirically testing
+    # 2 -- see report/session notes 2026-07-26 for which one actually works.
+    num_cameras: 2
     min_num_images: 1
     tracking_mode: 2
-    rectified_images: true
+    # false, NOT true: NVIDIA's own official RGBD reference
+    # (isaac_ros_visual_slam_realsense_rgbd.launch.py) uses rectified_images:
+    # false + a RAW (unrectified) image_0 -- cuVSLAM does its own rectification
+    # internally in RGBD mode via camera_info. Setting this true caused a hard
+    # runtime failure on real hardware: "Rectified stereo camera mode only
+    # works with 1+ stereo cameras. Number of cameras must be even." (cuVSLAM
+    # 15.0.0, confirmed on robot 2026-07-26) -- rectified_images:true routes
+    # into cuVSLAM's stereo-pair code path regardless of num_cameras/tracking_mode.
+    rectified_images: false
+    depth_camera_id: 0
     enable_localization_n_mapping: true
     enable_ground_constraint_in_odometry: true
     enable_ground_constraint_in_slam: true
@@ -18,7 +32,17 @@
     camera_optical_frames: ["zed_left_camera_frame_optical"]
     imu_frame: "zed_imu_link"
     publish_map_to_odom_tf: true
-    publish_odom_to_base_tf: true
+    # false, NOT true: base_frame (zed_camera_link) already has a static
+    # parent from the URDF (hesai_lidar -> zed_camera_link). Isaac VSLAM
+    # broadcasting odom -> zed_camera_link on top of that gives the frame two
+    # simultaneous parents -- confirmed on the robot 2026-07-26 ("Tf has two
+    # or more unconnected trees"). Same root cause documented at length in
+    # isaac_vslam_vio.yaml (the VIO profile), which sets this false for
+    # exactly this reason. rgbd is the compose default mode
+    # (ISAAC_VSLAM_MODE unset -> demos/live_robot/compose.yaml:307), so this
+    # was a live footgun regardless of rgbd's separate tracking issues (see
+    # report/session notes 2026-07-26) -- do not copy `true` forward here.
+    publish_odom_to_base_tf: false
     invert_map_to_odom_tf: false
     invert_odom_to_base_tf: false
     enable_slam_visualization: true

@@ -43,12 +43,7 @@ def generate_launch_description():
 
     use_sim_time = os.environ.get("USE_SIM_TIME", "true").lower() in ("1", "true", "yes")
 
-    # In bag replay (use_sim_time=true), joint_state_builder publishes on /joint_states directly.
-    # On the live robot (use_sim_time=false), norlab_robot's mtt_joint_state_builder publishes on
-    # /runtime_joint_states — remap so robot_state_publisher picks it up.
-    remappings = [] if use_sim_time else [("joint_states", "runtime_joint_states")]
-
-    return LaunchDescription([
+    actions = [
         Node(
             package="robot_state_publisher",
             executable="robot_state_publisher",
@@ -58,6 +53,30 @@ def generate_launch_description():
                 {"robot_description": urdf_string},
                 {"use_sim_time": use_sim_time},
             ],
-            remappings=remappings,
         )
-    ])
+    ]
+
+    if not use_sim_time:
+        # Keep the same live visualization chain that was used by
+        # norlab_robot/description.launch.py before description ownership was
+        # split into this standalone service.  The runtime builder publishes
+        # the measured joints while joint_state_publisher fills every movable
+        # URDF joint and exposes the conventional /joint_states topic.
+        actions.append(
+            Node(
+                package="joint_state_publisher",
+                executable="joint_state_publisher",
+                name="joint_state_publisher",
+                output="both",
+                parameters=[
+                    {
+                        "rate": 50,
+                        "robot_description": urdf_string,
+                        "use_sim_time": use_sim_time,
+                        "source_list": ["runtime_joint_states"],
+                    }
+                ],
+            )
+        )
+
+    return LaunchDescription(actions)

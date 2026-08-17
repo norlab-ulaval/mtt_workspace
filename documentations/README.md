@@ -7,6 +7,19 @@ If you are new to the project, read this file once end to end.
 It is meant to be the operational reference for an engineer who must modify the
 stack without guessing.
 
+Current operator references live under `docs/reference/`:
+
+- [operations handoff](../docs/reference/operations.md)
+- [developer guide](../docs/reference/development.md)
+- [networking](../docs/reference/networking.md)
+- [Zenoh](../docs/reference/zenoh.md)
+- [Doodle field setup](../docs/reference/doodle_field_handoff.md)
+- [safety audit, 2026-08-17](../docs/reference/robotics_safety_audit_2026-08-17.md)
+
+This `documentations/` directory also contains historical analyses, manuals,
+DBC files and paper material. Historical notes are evidence, not necessarily
+the current runtime procedure.
+
 ## Workspace layout
 
 ```text

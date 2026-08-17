@@ -94,5 +94,22 @@
         - connectionGraph
         - assets
       include_hidden: false
+      # TRANSIENT_LOCAL QoS — topics published with TRANSIENT_LOCAL durability
+      # that must be received by late-joining Foxglove clients (e.g., /tf_static,
+      # /robot_description). Without this, the bridge subscribes VOLATILE by
+      # default and misses latched messages if the publisher started before the
+      # bridge.
+      subscribed_transient_local_qos_topic_whitelist:
+        - "^/tf_static$"
+        - "^/robot_description$"
+        - "^/planned_trajectory$"
+        - "^/real_trajectory$"
+        - "^/wiln/trajectory$"
+        - "^/wiln/global_plan$"
+        - "^/wiln/[^/]+/state$"
+        - "^/mtt_path_follower/reference_path$"
+        - "^/mtt_repeat/.*"
+        - "^/mtt_route/.*"
+        - "^/session/events$"
       asset_uri_allowlist:
         - "^package://(?:[\\w.-]+/)*[\\w.-]+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"

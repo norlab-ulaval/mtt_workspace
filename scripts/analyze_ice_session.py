@@ -50,7 +50,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 import numpy as np
-from mcap.reader import make_reader
+from mcap.reader import NonSeekingReader, make_reader
 from mcap_ros2.decoder import DecoderFactory
 
 # --------------------------------------------------------------------------
@@ -213,45 +213,96 @@ class BagStreams:
     odom_v: List[float] = field(default_factory=list)
 
 
+def _consume_record(streams: BagStreams, record) -> None:
+    topic = record.channel.topic
+    msg = record.decoded_message
+    t = stamp_or_log_time(msg, record.message.log_time * 1e-9)
+    if topic == "/mtt_experiment/segment":
+        try:
+            payload = json.loads(msg.data)
+        except (json.JSONDecodeError, AttributeError):
+            return
+        payload["_t"] = t
+        streams.segment_events.append(payload)
+    elif topic == "/hardware/articulation_angle":
+        streams.phi_t.append(t)
+        streams.phi_deg.append(math.degrees(PHI_SIGN * msg.data))
+    elif topic in ("mtt_tachometer", "/mtt_tachometer"):
+        sign = 1.0 if msg.direction == "Forward" else -1.0
+        streams.tach_t.append(t)
+        streams.tach_v.append(sign * msg.speed_ms)
+    elif topic == "/sensor/speed":
+        streams.sensor_speed_t.append(t)
+        streams.sensor_speed_v.append(float(msg.data))
+    elif topic == "/mti100/data":
+        streams.imu_t.append(t)
+        streams.imu_yawrate.append(msg.angular_velocity.z)
+    elif topic == "/mapping/icp_odom":
+        streams.icp_t.append(t)
+        streams.icp_x.append(msg.pose.pose.position.x)
+        streams.icp_y.append(msg.pose.pose.position.y)
+        q = msg.pose.pose.orientation
+        streams.icp_yaw.append(
+            math.atan2(2.0 * (q.w * q.z + q.x * q.y), q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z)
+        )
+    elif topic == "/mtt_odometry":
+        streams.odom_t.append(t)
+        streams.odom_v.append(msg.twist.twist.linear.x)
+
+
 def read_bag(mcap_path: Path) -> BagStreams:
+    """Indexed read first (fast, uses the MCAP summary/footer). Falls back to a
+    pure sequential (non-seeking) read if the summary is unreadable -- this is
+    the normal signature of a session that ended without a clean shutdown
+    (container killed, power/network loss): the MCAP writer never got to write
+    a valid closing Footer/summary section, but the MESSAGES it already wrote
+    are intact. `ros2 bag reindex` fixes the separate rosbag2 metadata.yaml
+    sidecar but does NOT repair the MCAP file's own internal footer, so this
+    fallback is still needed even after reindexing. Confirmed against a real
+    corrupted bag 2026-08-02 (RecordLengthLimitExceeded on a garbage footer
+    length -- the fallback recovered the full session)."""
     streams = BagStreams()
+    try:
+        with mcap_path.open("rb") as fh:
+            reader = make_reader(fh, decoder_factories=[DecoderFactory()])
+            for record in reader.iter_decoded_messages(topics=sorted(WANTED_TOPICS)):
+                _consume_record(streams, record)
+        return streams
+    except Exception as exc:
+        print(
+            f"  Indexed read failed ({exc!r}) -- likely a corrupted MCAP footer from an "
+            "unclean session end. Falling back to a sequential (non-seeking) read of the "
+            "same file; this recovers all messages, just slower."
+        )
+
+    streams = BagStreams()  # discard any partial state from the failed indexed attempt
+    n_recovered = 0
     with mcap_path.open("rb") as fh:
-        reader = make_reader(fh, decoder_factories=[DecoderFactory()])
-        for record in reader.iter_decoded_messages(topics=sorted(WANTED_TOPICS)):
-            topic = record.channel.topic
-            msg = record.decoded_message
-            t = stamp_or_log_time(msg, record.message.log_time * 1e-9)
-            if topic == "/mtt_experiment/segment":
-                try:
-                    payload = json.loads(msg.data)
-                except (json.JSONDecodeError, AttributeError):
-                    continue
-                payload["_t"] = t
-                streams.segment_events.append(payload)
-            elif topic == "/hardware/articulation_angle":
-                streams.phi_t.append(t)
-                streams.phi_deg.append(math.degrees(PHI_SIGN * msg.data))
-            elif topic in ("mtt_tachometer", "/mtt_tachometer"):
-                sign = 1.0 if msg.direction == "Forward" else -1.0
-                streams.tach_t.append(t)
-                streams.tach_v.append(sign * msg.speed_ms)
-            elif topic == "/sensor/speed":
-                streams.sensor_speed_t.append(t)
-                streams.sensor_speed_v.append(float(msg.data))
-            elif topic == "/mti100/data":
-                streams.imu_t.append(t)
-                streams.imu_yawrate.append(msg.angular_velocity.z)
-            elif topic == "/mapping/icp_odom":
-                streams.icp_t.append(t)
-                streams.icp_x.append(msg.pose.pose.position.x)
-                streams.icp_y.append(msg.pose.pose.position.y)
-                q = msg.pose.pose.orientation
-                streams.icp_yaw.append(
-                    math.atan2(2.0 * (q.w * q.z + q.x * q.y), q.w * q.w + q.x * q.x - q.y * q.y - q.z * q.z)
-                )
-            elif topic == "/mtt_odometry":
-                streams.odom_t.append(t)
-                streams.odom_v.append(msg.twist.twist.linear.x)
+        reader = NonSeekingReader(fh, decoder_factories=[DecoderFactory()])
+        try:
+            # log_time_order=False is essential here, not an optimization: with no chunk
+            # index to seek by, the default (True) has to buffer messages to sort them --
+            # for a 15M-message/84GB bag that means trying to hold the whole file in RAM,
+            # which OOM-killed this exact process with zero progress (confirmed 2026-08-02,
+            # no exception raised, just SIGKILL). File order is fine for our purposes:
+            # each topic's OWN stream is still written in the order its publisher produced
+            # it, and every consumer below (resample_hold/resample_linear, group_segments)
+            # only assumes per-topic monotonicity, never a global cross-topic ordering.
+            for record in reader.iter_decoded_messages(topics=sorted(WANTED_TOPICS), log_time_order=False):
+                _consume_record(streams, record)
+                n_recovered += 1
+        except Exception as exc:
+            # A plain mid-record truncation (not just a garbage footer length) can make
+            # the sequential reader itself choke on the final, incomplete record -- e.g.
+            # a raw struct.error from a header that's cut off mid-field. Recovering
+            # everything up to that point is still far better than raising and getting
+            # nothing; only the last (at most one) partial record at the truncation
+            # point is lost, matching the physical reality of an abrupt kill.
+            print(
+                f"  Sequential read also hit an error after recovering {n_recovered} messages "
+                f"({exc!r}) -- likely the trailing record was mid-write when the process was "
+                "killed. Keeping everything recovered up to that point."
+            )
     return streams
 
 

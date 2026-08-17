@@ -30,14 +30,21 @@ def file_record(path: Path) -> dict[str, Any]:
 
 
 def git_commit_hash(repo_root: Path) -> str:
+    # Some deployments (e.g. an rsync'd copy on a robot, not a git clone)
+    # have no .git at all -- record that plainly instead of crashing the
+    # whole pipeline at the very last stage after everything else succeeded.
     result = subprocess.run(
         ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        return "unknown (not a git repository)"
     return result.stdout.strip()
 
 
-def git_is_dirty(repo_root: Path) -> bool:
+def git_is_dirty(repo_root: Path) -> bool | None:
     result = subprocess.run(
         ["git", "-C", str(repo_root), "status", "--porcelain"],
-        capture_output=True, text=True, check=True)
+        capture_output=True, text=True)
+    if result.returncode != 0:
+        return None
     return bool(result.stdout.strip())

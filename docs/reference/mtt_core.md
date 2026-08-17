@@ -59,6 +59,9 @@ Configuration files are located in `demos/common/config/`.
 
 ## 3. Deployment without Containerization
 
+Docker Compose is the supported deployment path. The commands below are for
+engineering diagnostics only and can initialize real hardware.
+
 To deploy the stack on a native host, these independent processes must be initialized.
 
 1.  **Communication Middleware (Zenoh)**
@@ -83,7 +86,7 @@ To deploy the stack on a native host, these independent processes must be initia
 ## 4. System Integration
 
 The `mtt_core` provides the low-level API via standard ROS 2 topics:
-- **Subscribed**: `/cmd_vel` (geometry_msgs/msg/Twist)
+- **Subscribed**: `/cmd_vel` (`geometry_msgs/msg/TwistStamped` in the current MTT command chain)
 - **Published**: `/odom` (nav_msgs/msg/Odometry), `/tf` (tf2_msgs/msg/TFMessage), `/joint_states` (sensor_msgs/msg/JointState).
 
 The `norlab_robot` and `WILN` packages utilize these interfaces to perform high-precision localization and trajectory tracking.

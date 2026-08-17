@@ -87,7 +87,10 @@ class ControlSafetyAudit(Node):
             "/joy": 1,
             "/cmd_vel/manual_raw": 1,
             "/cmd_vel/manual": 1,
+            "/controller/cmd_vel": 1,
             "/cmd_vel": 1,
+            "/mtt_tachometer": 1,
+            "/sensor/speed": 1,
             "/mtt_control/teleop_deadman": 1,
         }
         lines = []

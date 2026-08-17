@@ -50,9 +50,20 @@ def parse_args() -> argparse.Namespace:
                          help="Free-form identifier for the reference pipeline used, "
                               "recorded verbatim in the canonical CSV and catalog.")
     parser.add_argument("--reference-world-frame", default="map")
+    parser.add_argument("--lidar-articulation-smoothed", type=Path,
+                         help="Offline RS-Airy PCA hitch-angle CSV (Mohamed's separate "
+                              "post-processing pipeline). Optional -- pass-through to "
+                              "build_session_dataset.py's --lidar-articulation-smoothed.")
     parser.add_argument("--force-overwrite-ready", action="store_true",
                          help="Override the frozen-dataset guard (Task 7). Do not use this "
                               "on Campus or Ice rink without discussing with Mohamed first.")
+    parser.add_argument("--skip-to-dataset", action="store_true",
+                         help="Skip Stages 1-5 (extraction + factor-graph solve + "
+                              "qualification) and reuse the existing "
+                              "offline_reference/reference.csv from a prior run of this "
+                              "same session. For re-running Stage 6+ only (e.g. to add a "
+                              "new canonical column) without repeating the expensive "
+                              "solve. Errors if reference.csv does not already exist.")
     parser.add_argument("--dry-run", action="store_true",
                          help="Print the resolved stage plan and exit without running anything.")
     parser.add_argument("--validate-only", action="store_true",
@@ -159,7 +170,14 @@ def main() -> int:
 
     session_id = args.session_id or args.session.resolve().name
     repo_root = Path(__file__).resolve().parents[1]
-    catalog_path = Path("/data/mtt_bags/dataset_catalog.csv")
+    # /data/mtt_bags is this machine's central catalog location, shared by
+    # both local and LaCie sessions. On a different deployment (e.g. a
+    # remote robot with its own data/ layout) that path doesn't exist --
+    # fall back to a catalog next to the session's own bags root instead of
+    # crashing Stage 9 after every other stage already succeeded.
+    default_catalog_root = Path("/data/mtt_bags")
+    catalog_root = default_catalog_root if default_catalog_root.is_dir() else args.session.resolve().parent
+    catalog_path = catalog_root / "dataset_catalog.csv"
     assert_not_frozen(catalog_path, session_id, args.force_overwrite_ready)
 
     work_dir = args.output / "offline_reference"
@@ -180,45 +198,52 @@ def main() -> int:
     # unconditionally, some without an .exists() guard, by qualify_gt_v2.py)
     # are untouched by Task 1 and survive regardless of order.
 
-    # Stage 2: extract_v2_measurements.py (Task 2) -- audit/tf_static.yaml
-    # (needed by Stage 3) plus its own measurements/ files, superseded below
-    # for the three overlapping filenames.
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "extract_v2_measurements.py"),
-        "--session", str(args.session), "--offline-icp", str(args.offline_icp),
-        "--output-dir", str(work_dir),
-    ])
+    if args.skip_to_dataset:
+        if not (work_dir / "reference.csv").is_file():
+            raise SystemExit(
+                f"--skip-to-dataset requires an existing {work_dir / 'reference.csv'} "
+                "from a prior full run of this session -- none found.")
+        print("Skipping Stages 1-5 (--skip-to-dataset): reusing existing reference.csv")
+    else:
+        # Stage 2: extract_v2_measurements.py (Task 2) -- audit/tf_static.yaml
+        # (needed by Stage 3) plus its own measurements/ files, superseded below
+        # for the three overlapping filenames.
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "extract_v2_measurements.py"),
+            "--session", str(args.session), "--offline-icp", str(args.offline_icp),
+            "--output-dir", str(work_dir),
+        ])
 
-    # Stage 1: offline_reference.py (Task 1) -- measurements/ + graph/. Runs
-    # after Stage 2 so its icp.csv/track_odom.csv/zed_odom.csv are the ones
-    # that persist (see comment above).
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "offline_reference.py"),
-        str(args.session), "--offline-icp", str(args.offline_icp),
-        "--icp-approved-by", args.icp_approved_by,
-        "--output-dir", str(work_dir),
-    ])
+        # Stage 1: offline_reference.py (Task 1) -- measurements/ + graph/. Runs
+        # after Stage 2 so its icp.csv/track_odom.csv/zed_odom.csv are the ones
+        # that persist (see comment above).
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "offline_reference.py"),
+            str(args.session), "--offline-icp", str(args.offline_icp),
+            "--icp-approved-by", args.icp_approved_by,
+            "--output-dir", str(work_dir),
+        ])
 
-    # Stage 3: build_gt_v2_100hz.py (Task 3)
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "build_gt_v2_100hz.py"),
-        "--graph-dir", str(work_dir / "graph"),
-        "--audit-dir", str(work_dir / "audit"),
-        "--out-dir", str(work_dir / "poses"),
-    ])
+        # Stage 3: build_gt_v2_100hz.py (Task 3)
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "build_gt_v2_100hz.py"),
+            "--graph-dir", str(work_dir / "graph"),
+            "--audit-dir", str(work_dir / "audit"),
+            "--out-dir", str(work_dir / "poses"),
+        ])
 
-    # Stage 4: qualify_gt_v2.py (Task 4)
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "qualify_gt_v2.py"),
-        "--base-dir", str(work_dir), "--out-dir", str(work_dir / "qualification"),
-    ])
+        # Stage 4: qualify_gt_v2.py (Task 4)
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "qualify_gt_v2.py"),
+            "--base-dir", str(work_dir), "--out-dir", str(work_dir / "qualification"),
+        ])
 
-    # Stage 5: build_gt_reference_csv.py (Task 5)
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "build_gt_reference_csv.py"),
-        "--pose", str(work_dir / "poses" / "pose_robot_gt_100hz.csv"),
-        "--output", str(work_dir / "reference.csv"),
-    ])
+        # Stage 5: build_gt_reference_csv.py (Task 5)
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "build_gt_reference_csv.py"),
+            "--pose", str(work_dir / "poses" / "pose_robot_gt_100hz.csv"),
+            "--output", str(work_dir / "reference.csv"),
+        ])
 
     # Stage 6: build_session_dataset.py (unmodified, already compliant)
     dataset_dir.mkdir(parents=True, exist_ok=True)
@@ -234,7 +259,10 @@ def main() -> int:
         "--reference-source", args.reference_source,
         "--reference-world-frame", args.reference_world_frame,
         "--offline-icp", str(args.offline_icp),
-    ])
+    ] + (
+        ["--lidar-articulation-smoothed", str(args.lidar_articulation_smoothed)]
+        if args.lidar_articulation_smoothed is not None else []
+    ))
 
     # Stage 7: copy map reference file(s) atomically. Named after the source
     # file's own stem (not just its suffix) -- multiple --map-reference
@@ -243,15 +271,33 @@ def main() -> int:
     # destination name, with only the last one surviving.
     for src in args.map_reference:
         dst = dataset_dir / f"map_reference_{src.stem}{src.suffix}"
+        # Map files are large (hundreds of MB) and read/written over the same
+        # slow link that's the current bottleneck (LaCie over USB) -- if an
+        # identical-size copy already exists (from an earlier run of this
+        # same session), re-copying is pure wasted I/O. Size match is a
+        # cheap-enough sanity check; a genuinely different map file would
+        # need a different source path in practice, not a same-name overwrite.
+        if dst.exists() and dst.stat().st_size == src.stat().st_size:
+            print(f"Stage 7: reusing existing {dst} (same size, skip copy)")
+            continue
         tmp = dst.with_suffix(dst.suffix + ".tmp")
         tmp.write_bytes(src.read_bytes())
         tmp.replace(dst)
 
-    # Stage 8: preview video (export_bag_preview.py is already generic)
-    run_checked([
-        sys.executable, str(repo_root / "scripts" / "export_bag_preview.py"),
-        str(args.session), str(dataset_dir / "preview.mp4"), "--force",
-    ])
+    # Stage 8: preview video (export_bag_preview.py is already generic).
+    # Deterministic from the raw bag -- if dataset/preview.mp4 already exists
+    # (from an earlier run of this pipeline, or a prior standalone export),
+    # re-encoding it is pure wasted time (real cost: ffmpeg decoding every
+    # RGB frame in the bag). Skip and reuse it; --skip-to-dataset or a
+    # missing/deleted preview.mp4 are the only cases that regenerate it.
+    preview_path = dataset_dir / "preview.mp4"
+    if preview_path.exists():
+        print(f"Stage 8: reusing existing {preview_path} (skip re-encode)")
+    else:
+        run_checked([
+            sys.executable, str(repo_root / "scripts" / "export_bag_preview.py"),
+            str(args.session), str(preview_path), "--force",
+        ])
 
     # Stage 9: provenance + catalog
     failures = validate_dataset_dir(dataset_dir)
@@ -267,11 +313,19 @@ def main() -> int:
         "git_dirty": git_is_dirty(repo_root),
         "config": vars(args) | {"session": str(args.session), "output": str(args.output),
                                   "offline_icp": str(args.offline_icp),
-                                  "map_reference": [str(p) for p in args.map_reference]},
+                                  "map_reference": [str(p) for p in args.map_reference],
+                                  "lidar_articulation_smoothed": (
+                                      str(args.lidar_articulation_smoothed)
+                                      if args.lidar_articulation_smoothed is not None else None)},
         "files": {
             "canonical_100hz.csv.gz": file_record(dataset_dir / "canonical_100hz.csv.gz"),
             "trajectory_reference.ply": file_record(dataset_dir / "trajectory_reference.ply"),
-            "preview.mp4": file_record(dataset_dir / "preview.mp4"),
+            # export_bag_preview.py legitimately produces no output for a
+            # session with no recorded RGB stream ("no RGB stream") -- that
+            # is real session content (e.g. no camera running that day), not
+            # a pipeline failure, so preview.mp4 is optional in the manifest.
+            **({"preview.mp4": file_record(dataset_dir / "preview.mp4")}
+               if (dataset_dir / "preview.mp4").exists() else {}),
             **{f"map_reference_{p.stem}{p.suffix}": file_record(
                    dataset_dir / f"map_reference_{p.stem}{p.suffix}")
                for p in args.map_reference},
@@ -290,7 +344,7 @@ def main() -> int:
         "canonical_status": "ready",
         "canonical_sha256": manifest["files"]["canonical_100hz.csv.gz"]["sha256"],
         "trajectory_reference_sha256": manifest["files"]["trajectory_reference.ply"]["sha256"],
-        "preview_sha256": manifest["files"]["preview.mp4"]["sha256"],
+        "preview_sha256": manifest["files"].get("preview.mp4", {}).get("sha256", ""),
         "canonical_relpath": relpath_or_absolute(
             dataset_dir / "canonical_100hz.csv.gz", catalog_path.parent),
     })

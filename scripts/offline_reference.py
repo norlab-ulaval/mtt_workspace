@@ -624,8 +624,19 @@ def validate_offline_icp_csv(path: Path) -> None:
     t = full["timestamp_sec"].to_numpy(dtype=float) + full["timestamp_nanosec"].to_numpy(dtype=float) * 1e-9
     if not np.all(np.isfinite(t)):
         raise ValueError(f"{path}: non-finite timestamps present.")
-    if not np.all(np.diff(t) > 0):
-        raise ValueError(f"{path}: timestamps are not strictly increasing.")
+    # Reject genuine out-of-order/decreasing timestamps (real corruption) but
+    # tolerate exact duplicates (harmless double-publish jitter from the
+    # mapper's own logger -- observed as a single repeated timestamp in an
+    # otherwise-clean 46k-row norlab session; downstream nearest-index
+    # lookups handle a duplicate sample fine, there is nothing to "fix").
+    diffs = np.diff(t)
+    if not np.all(diffs >= 0):
+        raise ValueError(f"{path}: timestamps are not monotonically non-decreasing "
+                          f"({int(np.sum(diffs < 0))} decreasing transition(s)).")
+    n_dupes = int(np.sum(diffs == 0))
+    if n_dupes:
+        print(f"NOTE: {path}: {n_dupes} exact-duplicate consecutive timestamp(s), "
+              "tolerated.", file=sys.stderr)
     pose_cols = ["x", "y", "z", "qx", "qy", "qz", "qw"]
     if not np.all(np.isfinite(full[pose_cols].to_numpy(dtype=float))):
         raise ValueError(f"{path}: non-finite pose values present.")

@@ -71,6 +71,8 @@ services:
         mapfile -t workspace_paths < <(bash ./scripts/workspace_source_paths)
         colcon build \
           --base-paths "$${workspace_paths[@]}" \
+          --metas dependencies/colcon.meta \
+          --packages-ignore isaac_ros_visual_slam isaac_ros_visual_slam_interfaces \
           --cmake-args \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_C_COMPILER_LAUNCHER=ccache \

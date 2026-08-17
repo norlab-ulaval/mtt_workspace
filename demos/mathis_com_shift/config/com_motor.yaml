@@ -7,8 +7,9 @@
 #
 # Workflow after changing these values:
 #   1. Save this file (no recompile needed — it's a YAML override).
-#   2. Restart the com_motor container:
-#        docker compose -f demos/live_robot/compose.yaml --profile com restart com_motor
+#   2. Restart the com_motor container (no profile here — it's an always-on
+#      dependency of mapping in this demo):
+#        docker compose -f demos/mathis_com_shift/compose.yaml restart com_motor
 ################################################################################
 
 # ── motor_driver_node ──

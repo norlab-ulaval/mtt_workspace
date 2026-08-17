@@ -1,0 +1,13 @@
+{
+  "names": {
+    "romea_core_common": {
+      "cmake-args": ["-DCMAKE_INSTALL_INCLUDEDIR=include"]
+    },
+    "romea_core_path": {
+      "cmake-args": ["-DCMAKE_INSTALL_INCLUDEDIR=include"]
+    },
+    "romea_core_path_matching": {
+      "cmake-args": ["-DCMAKE_INSTALL_INCLUDEDIR=include"]
+    }
+  }
+}

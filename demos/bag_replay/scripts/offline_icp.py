@@ -1371,7 +1371,9 @@ def main() -> int:
             print(f"  FAILED  {result.get('error', status)}", flush=True)
         print("", flush=True)
 
-    report_path = workspace_root / "data" / f"offline_icp_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
+    report_dir = workspace_root / "data" / "reports" / "offline_icp"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"offline_icp_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
     report_path.write_text(yaml.safe_dump(results, sort_keys=False), encoding="utf-8")
 
     ok_count = sum(1 for item in results if item["status"] == "ok")

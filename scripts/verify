@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+release=false
+case "${1-}" in
+  "") ;;
+  --release) release=true ;;
+  -h|--help)
+    cat <<'EOF'
+Usage: ./scripts/verify [--release]
+
+Run offline workspace checks. This does not start ROS or contact hardware.
+
+  --release  also require the parent and every nested repository to be clean
+EOF
+    exit 0
+    ;;
+  *) echo "Unknown option: ${1}" >&2; exit 2 ;;
+esac
+
+echo "[verify] shell syntax"
+while IFS= read -r file; do
+  first_line="$(head -n 1 "${file}" 2>/dev/null || true)"
+  [[ "${first_line}" == *bash* || "${first_line}" == *"/sh"* ]] || continue
+  bash -n "${file}"
+done < <(find scripts docker -maxdepth 2 -type f | sort)
+
+echo "[verify] Compose files"
+compose_files=(
+  compose.yaml
+  demos/bag_replay/compose.yaml
+  demos/data_collection/compose.yaml
+  demos/description/compose.yaml
+  demos/live_robot/compose.yaml
+  demos/mathis_com_shift/compose.yaml
+  demos/monitor/compose.yaml
+  demos/simulation/compose.yaml
+)
+for file in "${compose_files[@]}"; do
+  docker compose -f "${file}" config --quiet
+done
+
+echo "[verify] whitespace and repository structure"
+git diff --check
+./scripts/status --doctor
+
+if [[ "${release}" == true ]]; then
+  echo "[verify] release cleanliness"
+  ./scripts/status --summary
+fi
+
+echo "[verify] OK"

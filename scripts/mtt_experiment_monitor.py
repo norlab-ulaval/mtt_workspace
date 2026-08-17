@@ -58,7 +58,12 @@ from nav_msgs.msg import Odometry
 from rclpy.node import Node
 from rclpy.qos import QoSDurabilityPolicy, QoSHistoryPolicy, QoSProfile, QoSReliabilityPolicy
 from sensor_msgs.msg import Imu
-from std_msgs.msg import Float64, String
+from std_msgs.msg import Bool, Float32, Float64, String
+
+try:
+    from zone_map import ZoneMap  # scripts/zone_map.py, same directory
+except ImportError:
+    ZoneMap = None  # zone display stays unavailable; never blocks the rest of the monitor
 
 
 RED = "\033[91m"
@@ -97,6 +102,8 @@ KIND_TO_SERIES = {
     "hold_arc": "B - phi->kappa map",
     "phi_ramp": "D/B-split - ramp & standstill split",
     "figure8": "E - held-out",
+    "circle": "G - trajectory library (extended)",
+    "line": "G - trajectory library (extended)",
     "prbs_phi": "E - held-out",
     "slalom_sine": "E - held-out (extended)",
     "combined_v_phi": "E - held-out (extended)",
@@ -150,6 +157,11 @@ class MttExperimentMonitor(Node):
              12.5, 17.5, 25.0, 35.0, 40.0],
         )
         self.declare_parameter("target_reps_per_cell", 2)
+        self.declare_parameter("obstacle_stop_topic", "/mtt_obstacle/stop_requested")
+        self.declare_parameter("zone_map_path", "")
+        self.declare_parameter("zone_display_warn_margin_m", 2.0)
+        self.declare_parameter("obstacle_status_topic", "/mtt_obstacle/hazard_status")
+        self.declare_parameter("obstacle_clearance_topic", "/mtt_obstacle/front_clearance_m")
 
         self._phi_sign = float(self.get_parameter("phi_sign").value)
         self._v_gate_kappa = float(self.get_parameter("speed_gate_kappa_ms").value)
@@ -165,6 +177,18 @@ class MttExperimentMonitor(Node):
         self._v_edges = np.array(self.get_parameter("v_bin_edges_ms").value, dtype=float)
         self._phi_edges = np.array(self.get_parameter("phi_bin_edges_deg").value, dtype=float)
         self._target_reps = int(self.get_parameter("target_reps_per_cell").value)
+        self._zone_warn_margin_m = float(self.get_parameter("zone_display_warn_margin_m").value)
+        self._zone_map: Optional[ZoneMap] = None
+        zone_map_path_str = str(self.get_parameter("zone_map_path").value).strip()
+        if zone_map_path_str:
+            if ZoneMap is None:
+                self.get_logger().error("zone_map_path set but zone_map module failed to import -- zone display DISABLED.")
+            else:
+                try:
+                    self._zone_map = ZoneMap.load(Path(zone_map_path_str))
+                    self.get_logger().info(f"Zone display ACTIVE: {zone_map_path_str}")
+                except Exception as exc:
+                    self.get_logger().error(f"Failed to load zone_map_path={zone_map_path_str!r}: {exc} -- zone display DISABLED.")
 
         # --- live raw state ---
         self._tach_v_signed: Optional[float] = None
@@ -196,6 +220,10 @@ class MttExperimentMonitor(Node):
         self._active_pose_source = "none"
         self._active_pose_gap_flag = False
         self._active_pose_jump_flag = False
+        self._obstacle_stop_active: Optional[bool] = None
+        self._obstacle_status_text = ""
+        self._obstacle_clearance_m: Optional[float] = None
+        self._obstacle_stamp: Optional[float] = None
         self._node_start_wall = self._now_s()
         self._vslam_ever_seen = False
         self._icp_ever_seen = False
@@ -243,6 +271,15 @@ class MttExperimentMonitor(Node):
         self.create_subscription(Imu, str(self.get_parameter("imu_topic").value), self._on_imu, sensor_qos)
         self.create_subscription(
             String, str(self.get_parameter("segment_topic").value), self._on_segment, volatile_qos
+        )
+        self.create_subscription(
+            Bool, str(self.get_parameter("obstacle_stop_topic").value), self._on_obstacle_stop, volatile_qos
+        )
+        self.create_subscription(
+            String, str(self.get_parameter("obstacle_status_topic").value), self._on_obstacle_status, volatile_qos
+        )
+        self.create_subscription(
+            Float32, str(self.get_parameter("obstacle_clearance_topic").value), self._on_obstacle_clearance, volatile_qos
         )
 
         self._coverage_pub = self.create_publisher(String, str(self.get_parameter("coverage_topic").value), 5)
@@ -364,6 +401,30 @@ class MttExperimentMonitor(Node):
         if self._vslam_stamp is not None and (now - self._vslam_stamp) < self._vslam_staleness_s:
             return self._vslam_ground_speed, self._vslam_yaw_rate, "vslam", self._vslam_gap_flag, self._vslam_jump_flag
         return self._ground_speed, self._icp_yaw_rate, "icp_fallback", self._icp_gap_flag, self._icp_jump_flag
+
+    def _active_position(self, now: float):
+        """Mirrors _select_pose_source's VSLAM-primary/ICP-fallback freshness logic,
+        for the (x, y) needed by the zone map. Returns (x, y, source) or (None, None,
+        'none') if neither is fresh -- 2026-07-30, added after a field incident where
+        manual reverse recovery near an obstacle had no distance/direction feedback
+        and made things worse."""
+        if self._vslam_stamp is not None and (now - self._vslam_stamp) < self._vslam_staleness_s and self._vslam_prev_pose is not None:
+            x, y, _yaw = self._vslam_prev_pose
+            return x, y, "vslam"
+        if self._odom_prev_pose is not None:
+            x, y, _yaw = self._odom_prev_pose
+            return x, y, "icp_fallback"
+        return None, None, "none"
+
+    def _on_obstacle_stop(self, msg: Bool) -> None:
+        self._obstacle_stop_active = bool(msg.data)
+        self._obstacle_stamp = self._now_s()
+
+    def _on_obstacle_status(self, msg: String) -> None:
+        self._obstacle_status_text = msg.data
+
+    def _on_obstacle_clearance(self, msg: Float32) -> None:
+        self._obstacle_clearance_m = float(msg.data)
 
     def _on_segment(self, msg: String) -> None:
         try:
@@ -508,6 +569,9 @@ class MttExperimentMonitor(Node):
         report["active_pose_jump_flag"] = self._active_pose_jump_flag
         report["icp_gap_flag"] = self._icp_gap_flag
         report["icp_jump_flag"] = self._icp_jump_flag
+        report["obstacle_stop_active"] = self._obstacle_stop_active
+        report["obstacle_clearance_m"] = self._obstacle_clearance_m
+        report["obstacle_status_text"] = self._obstacle_status_text
         return report
 
     def _grid_ascii(self) -> str:
@@ -565,10 +629,47 @@ class MttExperimentMonitor(Node):
 
         return alerts
 
+    def _obstacle_alerts(self) -> list[str]:
+        """Mirrors _pose_source_alerts: mtt_front_obstacle_monitor is a default
+        service in this stack and fails safe on its own, but if THIS node hasn't
+        heard from it at all, that's worth a loud flag too -- same philosophy as
+        the pose-source alerts, purely informational here (the conductor is the
+        one that actually gates on it, via the same _is_engaged() AND condition)."""
+        now = self._now_s()
+        since_start = now - self._node_start_wall
+        if self._obstacle_stamp is None:
+            if since_start > self._pose_source_startup_grace_s:
+                return [f"OBSTACLE MONITOR: NEVER received a message ({since_start:.0f}s since startup) -- "
+                        "check the 'localization' service (mtt_front_obstacle_monitor)."]
+            return []
+        age = now - self._obstacle_stamp
+        if age > self._pose_source_dead_s:
+            return [f"OBSTACLE MONITOR: silent for {age:.0f}s (was alive) -- conductor is failing closed (disengaged) on this."]
+        return []
+
+    def _zone_alerts(self) -> list[str]:
+        """Loud version of the zone-map distance line: fires when close enough
+        that the operator should actively be looking at safe_direction_deg before
+        moving, not just glancing at the normal dashboard line."""
+        if self._zone_map is None:
+            return []
+        x, y, src = self._active_position(self._now_s())
+        if x is None:
+            return []
+        d = self._zone_map.distance_to_boundary_m(x, y)
+        if d < self._zone_warn_margin_m:
+            direction = self._zone_map.safe_direction_deg(x, y)
+            dir_str = f"{direction:.0f} deg" if direction == direction else "unknown (at/beyond mapped boundary)"
+            return [
+                f"ZONE MAP [{src}]: only {d:.2f}m from the wall -- safe direction to move: {dir_str} "
+                "(recenter articulation to ~0 before reversing on this vehicle)."
+            ]
+        return []
+
     def _on_dashboard_tick(self) -> None:
         checklist = self._series_checklist()
         quality = self._quality_report()
-        alerts = self._pose_source_alerts()
+        alerts = self._pose_source_alerts() + self._obstacle_alerts() + self._zone_alerts()
 
         if alerts:
             banner = ["!" * 78, f"{RED}{BOLD}  POSE SOURCE ALERT -- DATA QUALITY AT RISK{RESET}"]
@@ -610,6 +711,23 @@ class MttExperimentMonitor(Node):
                 f"p10-p90={split['p10_p90'][0]:.2f}..{split['p10_p90'][1]:.2f} (nominal ~0.62)"
             )
         lines.append(f"  ICP gap flag={quality['icp_gap_flag']}  ICP jump flag={quality['icp_jump_flag']}")
+        clearance_str = f"{self._obstacle_clearance_m:.2f}m" if self._obstacle_clearance_m is not None else "n/a"
+        lines.append(
+            f"  Obstacle monitor: stop={self._obstacle_stop_active}  clearance={clearance_str}  "
+            f"({self._obstacle_status_text or 'no status yet'})"
+        )
+        if self._zone_map is not None:
+            zx, zy, zsrc = self._active_position(self._now_s())
+            if zx is None:
+                lines.append("  Zone map: no fused position yet")
+            else:
+                zd = self._zone_map.distance_to_boundary_m(zx, zy)
+                zdir = self._zone_map.safe_direction_deg(zx, zy)
+                dir_str = f"{zdir:.0f}deg (away from nearest wall)" if zd == zd else "n/a"  # zd==zd: not nan
+                lines.append(
+                    f"  Zone map [{zsrc}]: distance_to_wall={zd:.2f}m  safe_direction={dir_str}"
+                    + ("  << CLOSE, use safe_direction before reversing" if zd < self._zone_warn_margin_m else "")
+                )
         active = self._active_uid or "(disengaged / pause)"
         lines.append(f"Active segment: {active}")
         lines.append("=" * 78)

@@ -17,7 +17,8 @@ Examples:
   ./scripts/autosync_ws --watch <robot_user>@192.168.2.2 /home/<robot_user>/Project/mtt_ws
 
 The sync sends the workspace files that matter:
-  compose.yaml  src/  docker/  scripts/  demos/  documentations/  README.md
+  compose.yaml  src/  docker/  scripts/  demos/  dependencies/  docs/
+  documentations/  README.md  CONTRIBUTING.md  .gitmodules
 
 It skips local files:
   .git  .vscode  .devcontainer  .env  build/install/log  caches  local data
@@ -146,8 +147,13 @@ sync_entries=(
   docker
   scripts
   demos
+  dependencies
+  docs
   documentations
   README.md
+  CONTRIBUTING.md
+  .gitmodules
+  .gitignore
   .dockerignore
 )
 

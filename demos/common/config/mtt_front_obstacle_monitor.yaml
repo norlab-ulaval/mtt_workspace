@@ -10,9 +10,9 @@ mtt_front_obstacle_monitor:
     z_min_m: -0.05
     z_max_m: 1.50
     stop_x_min_m: 0.85
-    stop_x_max_m: 2.00
+    stop_x_max_m: 3.00
     stop_half_width_m: 0.85
-    slow_x_min_m: 2.00
+    slow_x_min_m: 3.00
     slow_x_max_m: 5.00
     slow_half_width_m: 1.25
     min_stop_points: 20

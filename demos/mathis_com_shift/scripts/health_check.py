@@ -48,6 +48,8 @@ import rclpy
 import rclpy.executors
 from rclpy.qos import QoSProfile, QoSReliabilityPolicy, QoSHistoryPolicy
 import yaml
+from std_msgs.msg import Float64MultiArray
+from rcl_interfaces.msg import Log as RosoutLog
 
 # ── ANSI colors ──
 GREEN  = "\033[92m"
@@ -175,6 +177,19 @@ def build_topics() -> list[TopicSpec]:
     TopicSpec("/mapping/map",              "ICP Map",            1.0, 50.0, required=False, group="mapping"),
     TopicSpec("/mapping/trajectory_path",  "ICP Trajectory",     1.0, 50.0, required=False, group="mapping"),
 
+    # ── Individual odometry sources feeding factor_graph_node ──
+    # None required here: each is optional depending on which stack/profile is
+    # running (isaac profile, ZED pos_tracking, bag-replay-only imu_odom).
+    # Coherence between them is checked separately below via the factor
+    # graph's own innovation diagnostics -- see the Localization / Factor
+    # Graph health section in Phase 4.
+    TopicSpec("/mtt_odometry",             "MTT Odom (tacho)",  50.0, 30.0, required=False, group="localization"),
+    TopicSpec("/zed/zed_node/odom",        "ZED Odom",          13.0, 40.0, required=False, group="localization"),
+    TopicSpec("/isaac/vslam/odometry",     "Isaac VSLAM Odom",  50.0, 40.0, required=False, group="localization"),
+    TopicSpec("/mti100/imu_odom",          "IMU Odom (replay)",  0.5, 500.0, required=False, group="localization"),
+    TopicSpec("/localization/odom",        "Factor Graph Odom",  8.0, 60.0, required=False, group="localization"),
+    TopicSpec("/localization/odom_fast",   "Factor Graph 100Hz", 80.0, 30.0, required=False, group="localization"),
+
     # ── Optional perception diagnostics ──
     TopicSpec("/trailer/articulation_angle",     "Trailer Angle",      5.0, 80.0, required=False, group="mapping"),
     TopicSpec("/trailer/pose",                   "Trailer Pose",       5.0, 80.0, required=False, group="mapping"),
@@ -297,6 +312,14 @@ GROUP_HINTS = {
         "(base_link causes TF loop → odom never published). "
         "(3) verify TF chain with: docker compose run --rm audit_tf. "
         "If ENABLE_CLOUD_MERGER=false (default), /merged_points_filtered absent is expected."
+    ),
+    "localization": (
+        "Odometry sources are all optional individually (which ones exist depends on "
+        "the profile: isaac_vslam profile for Isaac odom, ZED pos_tracking for ZED odom, "
+        "imu_odom only runs in bag replay). localization/odom absent means "
+        "factor_graph_node isn't running (start the 'localization' service). "
+        "See the Localization / Factor Graph health section below for whether the "
+        "sources that ARE present actually agree with each other."
     ),
     "com_motor": (
         "COM motor: start the com_motor service and check /motor/driver_status. "
@@ -509,6 +532,66 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
 
     LATCHED = {"/tf_static", "/robot_description", "/session/events", "/mtt_repeat/state", "/mtt_repeat/ready"}
 
+    # ── Factor graph innovation diagnostics: per-source agreement with the
+    # graph's own IMU-predicted state. This is what actually answers "does
+    # ICP odom jump/diverge from VSLAM (or vice versa)": both are z-scored
+    # against the SAME predicted reference each tick, so a spike in one
+    # channel while the others stay calm IS the divergence signal — no need
+    # to re-derive frame/extrinsic handling here, factor_graph_node.cpp
+    # already does it correctly. Layout: see setup_publishers() in
+    # factor_graph_node.cpp (22 elements as of 2026-07-27).
+    DIAG_CHANNELS = {
+        "gps":          (0, 2),   # (valid_idx, zscore_idx)
+        "articulation": (3, 5),
+        "lidar_odom":   (6, 9),
+        "trailer":      (10, 13),
+        "visual_odom":  (14, 17),
+        "map_anchor":   (18, 21),
+    }
+    diag_stats = {
+        name: {"valid_count": 0, "max_abs_zscore": 0.0} for name in DIAG_CHANNELS
+    }
+    diag_msg_count = 0
+
+    def on_innovation_diag(msg: Float64MultiArray):
+        nonlocal diag_msg_count
+        with lock:
+            diag_msg_count += 1
+            data = msg.data
+            for name, (valid_idx, zscore_idx) in DIAG_CHANNELS.items():
+                if len(data) <= zscore_idx:
+                    continue
+                if data[valid_idx] < 0.5:
+                    continue
+                diag_stats[name]["valid_count"] += 1
+                z = abs(data[zscore_idx])
+                if z > diag_stats[name]["max_abs_zscore"]:
+                    diag_stats[name]["max_abs_zscore"] = z
+
+    diag_sub = node.create_subscription(
+        Float64MultiArray, "/localization/factor_graph/innovation_diagnostics",
+        on_innovation_diag, best_effort_qos)
+    subs.append(diag_sub)
+
+    # ── ISAM2 stability: count "Smoother update failed" / "Resetting
+    # smoother" ERRORs from factor_graph_node during the window. Any reset
+    # means the smoother lost its history within the lag window (3s
+    # default) — the published pose doesn't jump, but recent corrections
+    # are gone. Zero during a healthy window is expected; recurring resets
+    # mean don't trust the output right now.
+    smoother_reset_count = 0
+
+    def on_rosout(msg: RosoutLog):
+        nonlocal smoother_reset_count
+        if msg.name != "factor_graph_node" or msg.level < 40:  # ERROR=40
+            return
+        if "Smoother update failed" in msg.msg or "Resetting smoother" in msg.msg:
+            with lock:
+                smoother_reset_count += 1
+
+    rosout_sub = node.create_subscription(RosoutLog, "/rosout", on_rosout, reliable_qos)
+    subs.append(rosout_sub)
+
     def make_counter(topic: str):
         def cb(msg):
             with lock:
@@ -604,6 +687,10 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
             counts[k] = 0
         for k in gps_fix_worst:
             gps_fix_worst[k] = +99
+        for k in diag_stats:
+            diag_stats[k] = {"valid_count": 0, "max_abs_zscore": 0.0}
+        diag_msg_count = 0
+        smoother_reset_count = 0
 
     # ── Phase 3: Measure ──
     print(f"{BOLD}{CYAN}── Phase 3: Measuring for {duration:.0f}s ─────────────────{RESET}")
@@ -739,6 +826,60 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
             print(f"  {color}{label} ({gps_topic}): {fix_label}  — {note}{RESET}")
     else:
         print(f"\n{BOLD}GPS fix quality:{RESET} {DIM}skipped (ENABLE_GPS=false){RESET}")
+
+    # ── Localization / Factor Graph health ──
+    # Individual source Hz is already in the topic table above (localization
+    # group: mtt_odometry, zed odom, isaac vslam odom, imu_odom,
+    # localization/odom, localization/odom_fast). This section is the
+    # cross-check: does each source actually AGREE with the graph's own
+    # IMU-predicted state (which is how a divergence between two sources,
+    # e.g. ICP vs VSLAM, shows up — as elevated z-score on one or both,
+    # against the same reference), and is the ISAM2 solver itself stable
+    # (converging, not resetting).
+    print(f"\n{BOLD}Localization / Factor Graph health:{RESET}")
+    if diag_msg_count == 0:
+        print(f"  {DIM}–  factor_graph_node not running or not publishing "
+              f"innovation_diagnostics (start the 'localization' service).{RESET}")
+    else:
+        print(f"  {DIM}{diag_msg_count} diagnostics samples over the window{RESET}")
+        ZSCORE_WARN, ZSCORE_FAIL = 3.0, 6.0
+        for name, stats in diag_stats.items():
+            vc = stats["valid_count"]
+            mz = stats["max_abs_zscore"]
+            if vc == 0:
+                print(f"  {DIM}–  {name:<13} no valid factors this window "
+                      f"(source not active, or not enabled, or OOSM-lagged every tick){RESET}")
+                continue
+            if mz >= ZSCORE_FAIL:
+                color, verdict = RED, "DIVERGING — jump vs the fused estimate"
+                has_warning = True
+            elif mz >= ZSCORE_WARN:
+                color, verdict = YELLOW, "elevated disagreement"
+                has_warning = True
+            else:
+                color, verdict = GREEN, "OK"
+            mark = "✓" if color == GREEN else "⚠"
+            print(f"  {color}{mark}  {name:<13} n={vc:<4} max|z|={mz:5.2f}  {verdict}{RESET}")
+
+        if smoother_reset_count > 0:
+            print(f"  {RED}⚠  ISAM2 smoother reset {smoother_reset_count}x during window "
+                  f"(IndeterminantLinearSystemException) — recent corrections within the "
+                  f"lag window were lost; the published pose itself did not jump, but "
+                  f"don't trust it as fully converged right now.{RESET}")
+            has_warning = True
+        else:
+            print(f"  {GREEN}✓  ISAM2 smoother: stable, 0 resets{RESET}")
+
+        odom_active = counts.get("/localization/odom", 0) > 0
+        odom_fast_active = counts.get("/localization/odom_fast", 0) > 0
+        graph_trustworthy = (
+            odom_active and odom_fast_active and smoother_reset_count == 0
+            and all(s["max_abs_zscore"] < ZSCORE_FAIL for s in diag_stats.values())
+        )
+        color = GREEN if graph_trustworthy else YELLOW
+        mark = "✓" if graph_trustworthy else "⚠"
+        verdict = "safe to use for control/localization" if graph_trustworthy else "review warnings above before trusting for control"
+        print(f"  {color}{mark}  Overall: {verdict}{RESET}")
 
     # ── Group-level hints for missing sensors ──
     if missing_by_group:

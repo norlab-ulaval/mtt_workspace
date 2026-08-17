@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+print_usage() {
+  cat <<'EOF'
+Usage: ./scripts/setup [--no-build] [--with-isaac]
+
+Prepare a new MTT workspace without starting any robot service.
+
+  --no-build  initialize .env and repositories, but skip Docker/ROS build
+  --with-isaac also build the optional Isaac ROS sidecar image
+EOF
+}
+
+build=true
+with_isaac=false
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --no-build) build=false ;;
+    --with-isaac) with_isaac=true ;;
+    -h|--help) print_usage; exit 0 ;;
+    *) print_usage >&2; exit 2 ;;
+  esac
+  shift
+done
+
+if [[ "${build}" != true && "${with_isaac}" == true ]]; then
+  echo "[setup] --with-isaac cannot be combined with --no-build." >&2
+  exit 2
+fi
+
+if [[ "$(uname -s)" != "Linux" ]]; then
+  echo "[setup] Linux is required." >&2
+  exit 1
+fi
+
+for command_name in git docker; do
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "[setup] missing command: ${command_name}" >&2
+    exit 1
+  fi
+done
+
+if ! docker compose version >/dev/null 2>&1; then
+  echo "[setup] Docker Compose plugin is missing." >&2
+  exit 1
+fi
+
+echo "[setup] initialize environment and repositories"
+./scripts/create_ws
+
+if [[ "${build}" == true ]]; then
+  echo "[setup] build Docker images and ROS workspace"
+  ./scripts/compile
+fi
+
+if [[ "${with_isaac}" == true ]]; then
+  echo "[setup] build optional Isaac ROS sidecar"
+  docker compose -f demos/live_robot/compose.yaml --profile isaac build isaac_vslam
+fi
+
+echo "[setup] run workspace checks"
+if ! ./scripts/verify --release; then
+  cat >&2 <<'EOF'
+[setup] setup finished, but the workspace doctor found warnings or failures.
+Read the findings above before using the live robot.
+EOF
+  exit 1
+fi
+
+cat <<'EOF'
+[setup] ready
+
+Safe next step:
+  ./scripts/replay_bag.sh /absolute/path/to/session_or_bag
+
+Live robot instructions:
+  demos/live_robot/README.md
+EOF

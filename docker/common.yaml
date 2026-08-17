@@ -16,6 +16,7 @@ services:
     volumes:
       - ${WORKSPACE}:${WORKSPACE}
       - /data:/data
+      - /media/mohamed/LaCie:/media/mohamed/LaCie
       - ${HOME}/.ros:/home/mtt/.ros
       - ${HOME}/.bash_history:/home/mtt/.bash_history
       - ${HOME}/.config/ros.org:/home/mtt/.config/ros.org

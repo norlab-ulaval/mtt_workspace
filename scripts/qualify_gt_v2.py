@@ -289,26 +289,42 @@ def main() -> int:
     log(f"  {'PASS' if statistics.pstdev(dists) < 1e-9 else 'FLAG'}: constant to numerical precision (exact rigid composition)")
 
     # ── 9. Articulation coherence: graph phi vs raw hardware encoder ──
-    artic = read_csv_rows(meas_dir / "articulation_state.csv")
+    # articulation_state.csv is only written by extract_v2_measurements.py when
+    # /mtt/articulation_state was actually recorded in the bag -- absent for
+    # sessions with no articulation topic (e.g. trailer detached, or predates
+    # the topic). hardware_fresh=="1" may also never fire even when the file
+    # exists (hardware encoder offline for that session, see solver log). Both
+    # are real, legitimate data states, not qualification failures -- report
+    # them as "no data" rather than crashing.
+    artic_path = meas_dir / "articulation_state.csv"
     phi_resid = []
-    traj_idx = 0
-    for row in artic:
-        if row["hardware_fresh"] != "1":
-            continue
-        ta = float(row["t"])
-        while traj_idx + 1 < len(t) and abs(t[traj_idx + 1] - ta) < abs(t[traj_idx] - ta):
-            traj_idx += 1
-        phi_graph = float(traj[traj_idx]["phi_rad"])
-        phi_meas = float(row["hardware_rad"])
-        phi_resid.append(abs(wrap(phi_graph - phi_meas)))
     log("\n## 9. Articulation (hitch yaw) coherence: graph H(k) vs raw hardware encoder")
-    log(f"- mean residual: {statistics.mean(phi_resid)*180/math.pi:.3f} deg, "
-        f"p95: {sorted(phi_resid)[int(0.95*len(phi_resid))]*180/math.pi:.3f} deg")
-    log("- LiDAR-fused hitch angle (/mtt/articulation_state.lidar_rad) never fired in this bag "
-        "(0% lidar_detected, see audit_report.md) — H(k) is hardware-encoder-only, stated not hidden.")
-    log("- RS-Airy raw point cloud was NOT reprocessed offline (would require re-implementing "
-        "trailer_pose_node's PCA pipeline — out of scope for this CSV pipeline); trailer pose is "
-        "kinematic-only (hitch_kinematics::computeDelta on graph-optimized phi/alpha), not LiDAR-corrected.")
+    if not artic_path.exists():
+        log("- SKIPPED: articulation_state.csv not present (no /mtt/articulation_state "
+            "recorded in this bag).")
+    else:
+        artic = read_csv_rows(artic_path)
+        traj_idx = 0
+        for row in artic:
+            if row["hardware_fresh"] != "1":
+                continue
+            ta = float(row["t"])
+            while traj_idx + 1 < len(t) and abs(t[traj_idx + 1] - ta) < abs(t[traj_idx] - ta):
+                traj_idx += 1
+            phi_graph = float(traj[traj_idx]["phi_rad"])
+            phi_meas = float(row["hardware_rad"])
+            phi_resid.append(abs(wrap(phi_graph - phi_meas)))
+        if not phi_resid:
+            log("- SKIPPED: hardware_fresh never '1' in this session (hardware encoder "
+                "reported no fresh readings) — no residual to compute.")
+        else:
+            log(f"- mean residual: {statistics.mean(phi_resid)*180/math.pi:.3f} deg, "
+                f"p95: {sorted(phi_resid)[int(0.95*len(phi_resid))]*180/math.pi:.3f} deg")
+        log("- LiDAR-fused hitch angle (/mtt/articulation_state.lidar_rad) never fired in this bag "
+            "(0% lidar_detected, see audit_report.md) — H(k) is hardware-encoder-only, stated not hidden.")
+        log("- RS-Airy raw point cloud was NOT reprocessed offline (would require re-implementing "
+            "trailer_pose_node's PCA pipeline — out of scope for this CSV pipeline); trailer pose is "
+            "kinematic-only (hitch_kinematics::computeDelta on graph-optimized phi/alpha), not LiDAR-corrected.")
 
     # ── 10. Frame/origin jump check ──
     jumps = [i for i, d in enumerate(step_dists) if d > 2.0]
@@ -420,7 +436,7 @@ def main() -> int:
         ax.set_title("Revisit heading-difference distribution (same-heading vs crossing)")
         plt.tight_layout(); plt.savefig(fig_dir / "revisit_heading_hist.png", dpi=140); plt.close()
 
-        print(f"Figures written to {FIG_DIR}")
+        print(f"Figures written to {fig_dir}")
     except ImportError:
         log("\n(matplotlib not available — figures skipped)")
 
@@ -437,7 +453,7 @@ def main() -> int:
         "icp_innovation_mean_m": statistics.mean(innov_trans),
         "icp_innovation_p95_m": sorted(innov_trans)[int(0.95 * len(innov_trans))],
         "rigidity_hesai_std_m": statistics.pstdev(dists),
-        "articulation_residual_mean_deg": statistics.mean(phi_resid) * 180 / math.pi,
+        "articulation_residual_mean_deg": (statistics.mean(phi_resid) * 180 / math.pi) if phi_resid else None,
         "revisit_same_heading_count": len(same_heading),
         "revisit_same_heading_mean_trans_err_m": statistics.mean(same_heading) if same_heading else None,
         "invalid_pose_fraction": len(invalid) / len(robot),

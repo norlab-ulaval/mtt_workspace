@@ -2,7 +2,9 @@ mtt_route_manager:
   ros__parameters:
     routes_dir: "data/wiln_routes"
     route_file_name: "route.ltr"
-    icp_odom_topic: "/mapping/icp_measurement"
+    # upstream ros2 has no odom-bridge, no /mapping/icp_measurement (see
+    # dependencies/robot.repos, 2026-07-28) — read /mapping/icp_odom directly.
+    icp_odom_topic: "/mapping/icp_odom"
     health_topic: "/mtt_health"
     selected_mode_topic: "mtt_control/selected_mode"
     selected_source_topic: "mtt_control/selected_source"

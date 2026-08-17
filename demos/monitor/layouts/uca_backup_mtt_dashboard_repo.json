@@ -1,0 +1,288 @@
+{
+  "configById": {
+    "3D!main": {
+      "cameraState": {
+        "distance": 10,
+        "perspective": true,
+        "phi": 0.65,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0.5
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 0.3,
+        "fovy": 45,
+        "near": 0.1,
+        "far": 5000
+      },
+      "followTf": "base_footprint",
+      "followMode": "follow-pose",
+      "topics": {
+        "/robot_description": {
+          "visible": true
+        },
+        "/tf": {
+          "visible": false
+        },
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointSize": 2,
+          "decayTime": 0
+        },
+        "/rsairy_ns/points": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "rainbow",
+          "pointSize": 2,
+          "decayTime": 0
+        },
+        "/mapping/scan_after_deskew": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointSize": 2
+        },
+        "/mapping/icp_odom": {
+          "visible": true,
+          "type": "arrow"
+        },
+        "/mtt_odometry": {
+          "visible": true,
+          "type": "arrow"
+        },
+        "/gps/fix": {
+          "visible": true
+        },
+        "/initialpose": {
+          "visible": true
+        },
+        "/trailer/angle": {
+          "visible": false
+        }
+      },
+      "publish": {
+        "type": "pose",
+        "poseTopic": "/initialpose",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "layers": {},
+      "scene": {},
+      "transforms": {},
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Image!zed": {
+      "cameraTopic": "/zed/zed_node/rgb/color/rect/image/compressed",
+      "customMarkerTopicOptions": [],
+      "flipHorizontal": false,
+      "flipVertical": false,
+      "rotation": 0,
+      "minValue": 0,
+      "maxValue": 10000,
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Image!oak": {
+      "cameraTopic": "/oak/rgb/image_rect/compressed",
+      "customMarkerTopicOptions": [],
+      "flipHorizontal": false,
+      "flipVertical": false,
+      "rotation": 0,
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Plot!speed": {
+      "title": "Speed & Articulation",
+      "paths": [
+        {
+          "value": "/cmd_vel.linear.x",
+          "label": "cmd_vel (m/s)",
+          "enabled": true,
+          "timestampMethod": "headerStamp",
+          "showLine": true,
+          "lineSize": 1.5,
+          "color": "#4fc3f7"
+        },
+        {
+          "value": "/mtt_odometry.twist.twist.linear.x",
+          "label": "mtt_odom vx (m/s)",
+          "enabled": true,
+          "timestampMethod": "headerStamp",
+          "showLine": true,
+          "lineSize": 1.5,
+          "color": "#81c784"
+        },
+        {
+          "value": "/mtt_articulation_angle.data",
+          "label": "articulation (rad)",
+          "enabled": true,
+          "timestampMethod": "headerStamp",
+          "showLine": true,
+          "lineSize": 1.5,
+          "color": "#ffb74d"
+        }
+      ],
+      "xAxisVal": "timestamp",
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": true,
+      "isSynced": true,
+      "xAxisPath": {
+        "value": "",
+        "enabled": true,
+        "timestampMethod": "receiveTime"
+      },
+      "minXValue": null,
+      "maxXValue": null,
+      "minYValue": null,
+      "maxYValue": null,
+      "followingViewWidth": 20
+    },
+    "StateTransitions!status": {
+      "paths": [
+        {
+          "value": "/mtt_status.drive_mode",
+          "timestampMethod": "headerStamp"
+        }
+      ],
+      "isSynced": true
+    },
+    "RawMessages!gps": {
+      "topicPath": "/gps/fix",
+      "diffEnabled": false,
+      "defaultExpanded": false
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "linkedGlobalVariables": [],
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": {
+    "direction": "row",
+    "first": "3D!main",
+    "second": {
+      "direction": "column",
+      "first": {
+        "direction": "row",
+        "first": "Image!zed",
+        "second": "Image!oak",
+        "splitPercentage": 60
+      },
+      "second": {
+        "direction": "column",
+        "first": "Plot!speed",
+        "second": {
+          "direction": "row",
+          "first": "RawMessages!gps",
+          "second": "StateTransitions!status",
+          "splitPercentage": 60
+        },
+        "splitPercentage": 65
+      },
+      "splitPercentage": 55
+    },
+    "splitPercentage": 60
+  }
+}

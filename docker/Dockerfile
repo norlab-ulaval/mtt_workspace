@@ -53,6 +53,8 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
          s|http://ca.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' \
         /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true && \
     apt-get update && apt-get install -y --no-install-recommends \
+    # GSL is required by romea_core_path (cubic solver in PathCurve2D).
+    libgsl-dev \
     # Keep the Fast-DDS / Fast-CDR stack explicit here. The robot often reuses an
     # older `mtt_workspace:base` image, and ZED message binaries can otherwise end
     # up newer than the middleware serialization libs available in that base image.
@@ -97,11 +99,15 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 
 # --- Layer 8: pip ---
 RUN pip3 install --break-system-packages --no-cache-dir --ignore-installed \
+        "numpy<2" \
+        "setuptools<80" \
         cantools \
         "open3d>=0.13" \
         scipy \
         opencv-python-headless \
-        pysoem && \
+        pysoem \
+        mcap \
+        mcap-ros2-support && \
     chmod -R a+rX /usr/local/lib/python3.12/dist-packages/
 
 # --- Layer 8b: SOEM (Simple Open EtherCAT Master, GPLv2) ---
@@ -118,6 +124,47 @@ RUN git clone --depth 1 https://github.com/OpenEtherCATsociety/SOEM.git /tmp/soe
     cmake --install /tmp/soem/build && \
     ldconfig && \
     rm -rf /tmp/soem
+
+# --- Layer 8c: PCAN driver + CAN bus configuration ---
+# PEAK PCAN-USB adapter driver for BMS communication.
+# The config assigns PCI adapter → can0, USB adapter → can32.
+# The setup script + systemd service configure can32 at 250 kbit/s at boot.
+#
+# NOTE: The PCAN kernel module cannot be built inside Docker (kernel headers
+# mismatch between build and host). The driver source is downloaded so it can
+# be built on the target robot with:
+#   cd /opt/pcan && make clean && make netdev && sudo make install_with_dkms
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libpopt-dev \
+        dkms \
+        && \
+    wget -q https://www.peak-system.com/quick/PCAN-Linux-Driver -O /tmp/PCAN-Linux-Driver && \
+    tar -xzf /tmp/PCAN-Linux-Driver -C /opt/ && \
+    mv /opt/peak-linux-driver-* /opt/pcan && \
+    rm -f /tmp/PCAN-Linux-Driver && \
+    mkdir -p /etc/modprobe.d && \
+    echo 'options pcan assign=peak' > /etc/modprobe.d/pcan.conf && \
+    echo 'install pcan modprobe --ignore-install pcan' >> /etc/modprobe.d/pcan.conf && \
+    mkdir -p /usr/local/bin && \
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'sudo ip link set can32 up type can bitrate 250000' \
+        > /usr/local/bin/setup_socketcan.sh && \
+    chmod +x /usr/local/bin/setup_socketcan.sh && \
+    printf '%s\n' \
+        '[Unit]' \
+        'Description=Setup SocketCAN Interface' \
+        'After=network.target' \
+        '' \
+        '[Service]' \
+        'Type=oneshot' \
+        'ExecStart=/usr/local/bin/setup_socketcan.sh' \
+        'RemainAfterExit=yes' \
+        '' \
+        '[Install]' \
+        'WantedBy=multi-user.target' \
+        > /etc/systemd/system/socketcan.service && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # ══════════════════════════════════════════════════════════════════════════════
 # devel stage — workspace source + colcon build

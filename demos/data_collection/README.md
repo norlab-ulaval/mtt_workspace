@@ -26,7 +26,8 @@ docker compose --profile record up
 ```
 
 That starts:
-- `robot`
+- the split live services (`robot_driver`, description, sensors, mapping,
+  localization and perception)
 - `socketcan_bridge`
 - `record`
 

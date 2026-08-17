@@ -1,0 +1,1620 @@
+{
+  "configById": {
+    "3D!3f0tw8": {
+      "cameraState": {
+        "distance": 259.9260046295705,
+        "perspective": true,
+        "phi": 0.000057571192095410896,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          21.76223875243381,
+          21.976722758859033,
+          -1.0666992817857926E-21
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": -62.607719054082715,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000,
+        "logDepth": false
+      },
+      "followMode": "follow-none",
+      "followTf": "map",
+      "scene": {
+        "transforms": {
+          "visible": false,
+          "editable": false,
+          "showLabel": false,
+          "enablePreloading": true,
+          "offsetReferenceFrame": "display-frame"
+        },
+        "enableStats": false,
+        "labelScaleFactor": 1.6,
+        "ignoreColladaUpAxis": true,
+        "meshUpAxis": "z_up",
+        "syncCamera": false
+      },
+      "transforms": {
+        "frame:base_footprint": {
+          "visible": true
+        },
+        "frame:base_link": {
+          "visible": true
+        },
+        "frame:lidar_link": {
+          "visible": true
+        },
+        "frame:reference_point": {
+          "visible": true
+        },
+        "frame:center_lidar_link": {
+          "visible": true
+        },
+        "frame:gps_left_link": {
+          "visible": true
+        },
+        "frame:gps_right_link": {
+          "visible": true
+        },
+        "frame:hesai_lidar": {
+          "visible": true
+        },
+        "frame:imu_link": {
+          "visible": true
+        },
+        "frame:mti10_imu_link_left": {
+          "visible": true
+        },
+        "frame:mti10_imu_link_right": {
+          "visible": true
+        },
+        "frame:rsairy": {
+          "visible": true
+        },
+        "frame:oak": {
+          "visible": true
+        },
+        "frame:zed_camera_link": {
+          "visible": true
+        },
+        "frame:front_lidar_link": {
+          "visible": true
+        },
+        "frame:gps_rover_link": {
+          "visible": true
+        },
+        "frame:rear_lidar_link": {
+          "visible": true
+        },
+        "frame:mtt_robot": {
+          "visible": true
+        },
+        "frame:mtt_robot/remorque_roue_BL": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_1": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_19": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_17": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_16": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_15": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_12": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_4": {
+          "visible": true
+        },
+        "frame:mtt_robot/base_footprint": {
+          "visible": true
+        },
+        "frame:default": {
+          "visible": true
+        },
+        "frame:mtt_robot/Remorque_lien_roue_droite": {
+          "visible": true
+        },
+        "frame:mtt_robot/remorque_roue_FL": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_11": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_5": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_20": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_2": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_3": {
+          "visible": true
+        },
+        "frame:mtt_robot/Remorque_lien_roue_gauche": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_6": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_7": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_8": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_9": {
+          "visible": true
+        },
+        "frame:mtt_robot/Frame_fixation_articule": {
+          "visible": true
+        },
+        "frame:mtt_robot/joint_remorque_simple": {
+          "visible": true
+        },
+        "frame:mtt_robot/MTT_remorque": {
+          "visible": true
+        },
+        "frame:mtt_robot/remorque_roue_BR": {
+          "visible": true
+        },
+        "frame:mtt_robot/remorque_roue_FR": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_13": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_18": {
+          "visible": true
+        },
+        "frame:Frame_fixation_articule": {
+          "visible": true
+        },
+        "frame:joint_remorque_simple": {
+          "visible": true
+        },
+        "frame:MTT_remorque": {
+          "visible": true
+        },
+        "frame:Remorque_lien_roue_droite": {
+          "visible": true
+        },
+        "frame:remorque_roue_BR": {
+          "visible": true
+        },
+        "frame:remorque_roue_FR": {
+          "visible": true
+        },
+        "frame:Remorque_lien_roue_gauche": {
+          "visible": true
+        },
+        "frame:remorque_roue_BL": {
+          "visible": true
+        },
+        "frame:remorque_roue_FL": {
+          "visible": true
+        },
+        "frame:Rouleau_track_1": {
+          "visible": true
+        },
+        "frame:Rouleau_track_10": {
+          "visible": true
+        },
+        "frame:Rouleau_track_11": {
+          "visible": true
+        },
+        "frame:Rouleau_track_12": {
+          "visible": true
+        },
+        "frame:Rouleau_track_13": {
+          "visible": true
+        },
+        "frame:Rouleau_track_14": {
+          "visible": true
+        },
+        "frame:Rouleau_track_15": {
+          "visible": true
+        },
+        "frame:Rouleau_track_16": {
+          "visible": true
+        },
+        "frame:Rouleau_track_17": {
+          "visible": true
+        },
+        "frame:Rouleau_track_18": {
+          "visible": true
+        },
+        "frame:Rouleau_track_19": {
+          "visible": true
+        },
+        "frame:Rouleau_track_2": {
+          "visible": true
+        },
+        "frame:Rouleau_track_20": {
+          "visible": true
+        },
+        "frame:Rouleau_track_3": {
+          "visible": true
+        },
+        "frame:Rouleau_track_4": {
+          "visible": true
+        },
+        "frame:Rouleau_track_5": {
+          "visible": true
+        },
+        "frame:Rouleau_track_6": {
+          "visible": true
+        },
+        "frame:Rouleau_track_7": {
+          "visible": true
+        },
+        "frame:Rouleau_track_8": {
+          "visible": true
+        },
+        "frame:Rouleau_track_9": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_14": {
+          "visible": true
+        },
+        "frame:mtt_robot/Rouleau_track_10": {
+          "visible": true
+        },
+        "frame:odom": {
+          "visible": true
+        }
+      },
+      "topics": {
+        "/rsairy_ns/points": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "stixelsEnabled": false,
+          "decayTime": 0,
+          "pointShape": "square",
+          "pointSize": 2,
+          "cubeSize": 0.02
+        },
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointShape": "circle",
+          "pointSize": 1.5
+        },
+        "/robot_description": {
+          "visible": false,
+          "links": {
+            "base_footprint": {
+              "visible": true
+            }
+          },
+          "controlMode": "jointStates",
+          "jointStatesTopic": "/runtime_joint_states",
+          "displayMode": "auto",
+          "showOutlines": true,
+          "showAxis": false,
+          "axisScale": 1
+        },
+        "/zed/zed_node/rgb/color/rect/image/zstd": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/rgb/color/rect/image/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5,
+          "projectionFrameId": "odom"
+        },
+        "/zed/zed_node/rgb/color/rect/image/compressed": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/rgb/color/rect/image/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/zed/zed_node/rgb/color/rect/image/camera_info": {
+          "visible": false
+        },
+        "/zed/zed_node/rgb/color/rect/image": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/rgb/color/rect/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/zed/zed_node/rgb/color/rect/camera_info": {
+          "visible": false
+        },
+        "/zed/zed_node/point_cloud/cloud_registered": {
+          "visible": false,
+          "colorField": "rgb",
+          "colorMode": "rgb",
+          "colorMap": "turbo"
+        },
+        "/zed/zed_node/depth/depth_registered/zstd": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/depth/depth_registered/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/zed/zed_node/depth/depth_registered/compressedDepth": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/depth/depth_registered/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/zed/zed_node/depth/depth_registered/compressed": {
+          "visible": false
+        },
+        "/zed/zed_node/depth/depth_registered/camera_info": {
+          "visible": false
+        },
+        "/zed/zed_node/depth/depth_registered": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/depth/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/zed/zed_node/depth/camera_info": {
+          "visible": false
+        },
+        "/oak/rgb/image_rect/compressedDepth": {
+          "visible": false
+        },
+        "/oak/rgb/image_rect/compressed": {
+          "visible": false
+        },
+        "/oak/rgb/image_rect": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/oak/rgb/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/oak/rgb/image_raw/zstd": {
+          "visible": false
+        },
+        "/oak/rgb/image_raw/compressedDepth": {
+          "visible": false
+        },
+        "/oak/rgb/image_raw/compressed": {
+          "visible": true,
+          "cameraInfoTopic": "/oak/stereo/camera_info",
+          "projectionFrameId": "odom"
+        },
+        "/oak/rgb/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/oak/rgb/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/initialpose": {
+          "visible": true
+        },
+        "/image_rect/zstd": {
+          "visible": false
+        },
+        "/oak/points": {
+          "visible": false,
+          "flatColor": "#ffffffff",
+          "stixelsEnabled": false,
+          "colorMode": "rgb",
+          "colorField": "rgb",
+          "explicitAlpha": 1,
+          "pointSize": 2
+        },
+        "/mapping/map": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointShape": "circle",
+          "pointSize": 3
+        },
+        "/mapping/scan_after_deskew": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/oak/rgb/camera_info": {
+          "visible": false,
+          "distance": 1
+        },
+        "/mapping/scan_after_input_filters": {
+          "visible": false,
+          "colorField": "x",
+          "colorMode": "flat",
+          "colorMap": "rainbow",
+          "pointSize": 4,
+          "flatColor": "#ed8080ff"
+        },
+        "/oak/stereo/camera_info": {
+          "visible": false
+        },
+        "/oak/stereo/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/oak/stereo/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/oak/stereo/image_raw/compressed": {
+          "visible": false
+        },
+        "/oak/stereo/image_raw/compressedDepth": {
+          "visible": false
+        },
+        "/oak/stereo/image_raw/zstd": {
+          "visible": false
+        },
+        "/move_base_simple/goal": {
+          "visible": true
+        },
+        "/mapping/pose_in": {
+          "visible": false
+        },
+        "/camera/rs_d435i/aligned_depth_to_color/camera_info": {
+          "visible": false
+        },
+        "/camera/rs_d435i/color/camera_info": {
+          "visible": false
+        },
+        "/camera/rs_d435i/color/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/camera/rs_d435i/color/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "base_link",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5
+        },
+        "/camera/rs_d435i/depth/camera_info": {
+          "visible": false
+        },
+        "/camera/rs_d435i/depth/color/points": {
+          "visible": true,
+          "colorField": "rgb",
+          "colorMode": "rgb",
+          "colorMap": "turbo"
+        },
+        "/rslidar32/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/merged_points_filtered": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/merged_points": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/zed/zed_node/rgb/color/rect/image/compressedDepth": {
+          "visible": false
+        },
+        "/real_trajectory": {
+          "visible": true
+        },
+        "/planned_trajectory": {
+          "visible": true
+        },
+        "/mtt_path_follower/reference_path": {
+          "visible": false
+        },
+        "/wiln/pose": {
+          "visible": true
+        },
+        "/trailer/articulation_axis_marker": {
+          "visible": false
+        },
+        "/trailer/articulation_roi_cloud": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mtt_path_follower/target_pose": {
+          "visible": false
+        },
+        "/rear_lidar/scan": {
+          "visible": true
+        },
+        "/front_lidar/scan": {
+          "visible": true
+        },
+        "/center_lidar/scan": {
+          "visible": true,
+          "pointSize": 0.28
+        },
+        "/trailer/pose": {
+          "visible": false
+        },
+        "/trailer/pose_prior": {
+          "visible": false
+        },
+        "/trailer/pose_raw": {
+          "visible": false
+        },
+        "/wiln/debug/horizon": {
+          "visible": true
+        },
+        "/wiln/debug/deformed_plan": {
+          "visible": true
+        },
+        "/wiln/control/local_plan": {
+          "visible": true
+        },
+        "/wiln/markers": {
+          "visible": true
+        },
+        "/merged_points_raw": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/trailer/body_markers": {
+          "visible": false
+        },
+        "/trailer/trailer_roi_cloud": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/hesai_in_base": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/goal_pose": {
+          "visible": false
+        },
+        "/rear_lidar/points": {
+          "visible": true
+        },
+        "/front_lidar/points": {
+          "visible": true
+        },
+        "/center_lidar/points": {
+          "visible": true
+        },
+        "/mtt_route/active_path": {
+          "visible": true
+        },
+        "/wiln/global_plan": {
+          "visible": true
+        },
+        "/genz/trajectory": {
+          "visible": true,
+          "lineWidth": 0.3153,
+          "gradient": [
+            "#f10000ff",
+            "rgba(124, 107, 255, 0.5)"
+          ]
+        },
+        "/mtt_route/error_marker": {
+          "visible": true
+        },
+        "/mtt_obstacle/debug_cloud": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "flat",
+          "colorMap": "turbo",
+          "flatColor": "#ff0000ff",
+          "pointSize": 22.86
+        },
+        "/rsairy_in_base": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/wiln/obstacles": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mtt_route/closest_pose": {
+          "visible": true
+        },
+        "/mtt_route/start_pose": {
+          "visible": true
+        },
+        "/genz/local_map": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "gradient",
+          "colorMap": "rainbow",
+          "flatColor": "#796d6dff",
+          "pointSize": 1,
+          "stixelsEnabled": false
+        },
+        "/genz/non_planar_points": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mapping/trajectory_path": {
+          "visible": true,
+          "gradient": [
+            "rgba(124, 107, 255, 1)",
+            "#f80000ff"
+          ]
+        },
+        "/kiss/local_map": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "explicitAlpha": 0.7,
+          "pointSize": 2
+        },
+        "/kiss/frame": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/kiss/keypoints": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/genz/planar_points": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/zed/detection_markers": {
+          "visible": true
+        },
+        "/zed/zed_node/pose": {
+          "visible": false,
+          "axisScale": 0.251,
+          "type": "axis"
+        },
+        "/zed/markers": {
+          "visible": false
+        },
+        "/zed/path": {
+          "visible": false,
+          "gradient": [
+            "#e8ff00ff",
+            "rgba(124, 107, 255, 0.5)"
+          ]
+        },
+        "/wiln_path_follower/target_pose": {
+          "visible": true
+        },
+        "/hesai_lidar/points_colored": {
+          "visible": false,
+          "colorField": "rgb",
+          "colorMode": "rgb",
+          "colorMap": "turbo",
+          "stixelsEnabled": false
+        },
+        "/mapping/aligned_scan": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/debug/hesai_points_voxel": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/kiss_icp/input_points": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/trailer/pose_in_map": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "drawBehind": true,
+          "label": "Grid",
+          "instanceId": "f315e63f-c7d2-42ce-97a3-d0620b723587",
+          "layerId": "foxglove.Grid",
+          "size": 26,
+          "divisions": 75,
+          "lineWidth": 1,
+          "color": "#0e4580ff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "frameId": "map"
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {},
+      "fixedFrame": "map"
+    },
+    "3D!1zsfbg": {
+      "cameraState": {
+        "distance": 47.833119595852324,
+        "perspective": true,
+        "phi": 24.622698814121414,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": -134.42146789267758,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {
+        "transforms": {
+          "visible": false
+        }
+      },
+      "transforms": {},
+      "topics": {
+        "/mapping/map": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointSize": 2
+        },
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mapping/trajectory_path": {
+          "visible": true,
+          "gradient": [
+            "#ff0000ff",
+            "rgba(124, 107, 255, 0.5)"
+          ]
+        },
+        "/rsairy_ns/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/zed/zed_node/point_cloud/cloud_registered": {
+          "visible": true,
+          "colorField": "rgb",
+          "colorMode": "rgb",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "drawBehind": false,
+          "instanceId": "7fb3ba30-5cb8-4cb4-a50b-342130985f7f",
+          "layerId": "foxglove.Grid",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {},
+      "followTf": "odom",
+      "fixedFrame": "odom"
+    },
+    "Image!2ed4azt": {
+      "imageMode": {
+        "imageTopic": "/zed/zed_node/rgb/color/rect/image/compressed",
+        "calibrationTopic": "/zed/zed_node/rgb/color/rect/image/camera_info"
+      },
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false
+    },
+    "Plot!368rbly": {
+      "paths": [
+        {
+          "value": "/mti100/data.angular_velocity.x",
+          "enabled": true,
+          "color": "#cad660"
+        },
+        {
+          "value": "/mti100/data.angular_velocity.y",
+          "enabled": true,
+          "color": "#4e98e2"
+        },
+        {
+          "value": "/mti100/data.angular_velocity.z",
+          "enabled": true,
+          "color": "#f5774d"
+        }
+      ],
+      "showLegend": false,
+      "foxglovePanelTitle": "Velocity"
+    },
+    "Plot!1s45gls": {
+      "paths": [
+        {
+          "value": "/mtt_odometry.twist.twist.linear.x",
+          "enabled": true,
+          "color": "#cad660"
+        },
+        {
+          "value": "",
+          "enabled": true,
+          "color": "#4e98e2"
+        },
+        {
+          "value": "/cmd_vel.twist.linear.x",
+          "enabled": true,
+          "color": "#f5774d"
+        }
+      ],
+      "showLegend": false,
+      "foxglovePanelTitle": "Odometry"
+    },
+    "Plot!4iyqgdt": {
+      "paths": [
+        {
+          "value": "/mti100/data.linear_acceleration.x",
+          "enabled": true,
+          "color": "#f7df71"
+        },
+        {
+          "value": "/mti100/data.linear_acceleration.y",
+          "enabled": true,
+          "color": "#5cd6a9"
+        },
+        {
+          "value": "/mti100/data.linear_acceleration.z",
+          "enabled": true,
+          "color": "#61cbff"
+        }
+      ],
+      "showLegend": false,
+      "foxglovePanelTitle": "Acceleration"
+    },
+    "Plot!41u7w8t": {
+      "paths": [
+        {
+          "value": "/mtt_articulation_angle.data",
+          "enabled": true,
+          "color": "#f7df71",
+          "lineSize": 3
+        },
+        {
+          "value": "/trailer/articulation_angle.data",
+          "enabled": false,
+          "color": "#5cd6a9",
+          "lineSize": 1.6
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/hardware/articulation_pitch_rad.data",
+          "enabled": true,
+          "color": "#4e98e2",
+          "id": "4265c981-3daa-4bea-88cb-f7501a5fc4ba"
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/mtt_articulation_angle.data",
+          "enabled": true,
+          "color": "#61cbff",
+          "id": "e573337f-c30b-4a94-911c-5a92b5735637"
+        }
+      ],
+      "showLegend": false,
+      "foxglovePanelTitle": "Articulation"
+    },
+    "RawMessages!3dbp130": {
+      "topicPath": "/localization/odom.pose",
+      "defaultExpanded": false
+    },
+    "RawMessages!qmepz6": {
+      "topicPath": "/trailer/articulation_angle.data",
+      "defaultExpanded": false
+    },
+    "Plot!1xtiakb": {
+      "foxglovePanelTitle": "Health Check",
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/mtt_health.ambient_temp_c",
+          "enabled": true,
+          "color": "#4e98e2",
+          "id": "69772f6e-e501-4d2d-80e8-f333b468f5ce"
+        }
+      ]
+    },
+    "3D!3npt8ry": {
+      "cameraState": {
+        "distance": 68.49572529389198,
+        "perspective": true,
+        "phi": 25.63676857303685,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          5.0286419850544055,
+          0.33502741470644576,
+          1.7309382350420242E-17
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 169.42383692641027,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {
+        "transforms": {
+          "visible": false
+        }
+      },
+      "transforms": {},
+      "topics": {
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/zed/zed_node/point_cloud/cloud_registered": {
+          "visible": false,
+          "colorField": "rgb",
+          "colorMode": "rgb",
+          "colorMap": "turbo"
+        },
+        "/zed/zed_node/depth/depth_registered/camera_info": {
+          "visible": false
+        },
+        "/zed/zed_node/depth/depth_registered/compressedDepth": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/depth/depth_registered/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5,
+          "syncModeEnabled": false
+        },
+        "/zed/zed_node/depth/depth_registered/zstd": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/zed/zed_node/depth/depth_registered/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5,
+          "syncModeEnabled": false
+        },
+        "/mapping/map": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "flat",
+          "colorMap": "turbo"
+        },
+        "/rsairy_ns/points": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "drawBehind": false,
+          "instanceId": "c61e4b4a-5a22-4397-a7b3-8fe592b72794",
+          "layerId": "foxglove.Grid",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {},
+      "followTf": "map",
+      "fixedFrame": "map"
+    },
+    "Image!14kogw9": {
+      "imageMode": {
+        "imageTopic": "/zed/zed_node/rgb/color/rect/image/compressed",
+        "calibrationTopic": "/zed/zed_node/rgb/color/rect/image/camera_info"
+      },
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false
+    },
+    "Gauge!xvfhki": {
+      "path": "/mtt_tachometer.speed_kmh",
+      "style": "dial",
+      "minValue": 0,
+      "maxValue": 20,
+      "tickInterval": 1,
+      "showTicks": true,
+      "colorMap": "red-yellow-green",
+      "colorMode": "colormap",
+      "gradient": [
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "reverse": false,
+      "reverseDirection": false
+    },
+    "Gauge!2kh8j6v": {
+      "path": "/hardware/articulation_angle.data",
+      "style": "dial",
+      "minValue": -0.5,
+      "maxValue": 0.5,
+      "tickInterval": 0.1,
+      "showTicks": true,
+      "colorMap": "red-yellow-green",
+      "colorMode": "colormap",
+      "gradient": [
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "reverse": false,
+      "reverseDirection": false
+    },
+    "3D!73m4tl": {
+      "cameraState": {
+        "distance": 12.604988194490213,
+        "perspective": true,
+        "phi": 33.10350556782872,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          83.79898789403883,
+          55.143361718486126,
+          -5.970826033814197E-16
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 46.93790440288728,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-none",
+      "fixedFrame": "map",
+      "scene": {
+        "transforms": {
+          "visible": false
+        }
+      },
+      "transforms": {},
+      "topics": {
+        "/trailer/articulation_axis_marker": {
+          "visible": true
+        },
+        "/trailer/articulation_roi_cloud": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/rsairy_ns/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/merged_points": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mapping/scan_after_deskew": {
+          "visible": false
+        },
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/robot_description": {
+          "visible": false
+        },
+        "/real_trajectory": {
+          "visible": false
+        },
+        "/trailer/body_markers": {
+          "visible": true
+        },
+        "/trailer/pose": {
+          "visible": true
+        },
+        "/planned_trajectory": {
+          "visible": false
+        },
+        "/mtt_path_follower/reference_path": {
+          "visible": false
+        },
+        "/trailer/trailer_roi_cloud": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/trailer/pose_prior": {
+          "visible": true
+        },
+        "/trailer/pose_raw": {
+          "visible": true
+        },
+        "/mapping/map": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/mapping/scan_after_input_filters": {
+          "visible": false,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/oak/rgb/image_raw": {
+          "visible": false,
+          "frameLocked": true,
+          "cameraInfoTopic": "/oak/rgb/camera_info",
+          "distance": 1,
+          "planarProjectionFactor": 0,
+          "renderMode": "default",
+          "projectionFrameId": "map",
+          "color": "#ffffff",
+          "rectifyImage": true,
+          "pointSize": 1.5,
+          "syncModeEnabled": false
+        },
+        "/wiln/markers": {
+          "visible": false
+        },
+        "/wiln/pose": {
+          "visible": false
+        },
+        "/wiln/control/local_plan": {
+          "visible": false
+        },
+        "/wiln/debug/deformed_plan": {
+          "visible": false
+        },
+        "/wiln/debug/horizon": {
+          "visible": false
+        },
+        "/wiln/global_plan": {
+          "visible": false
+        },
+        "/mtt_route/active_path": {
+          "visible": false
+        },
+        "/wiln/obstacles": {
+          "visible": false,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "turbo"
+        },
+        "/wiln_path_follower/target_pose": {
+          "visible": true
+        },
+        "/trailer/pose_in_map": {
+          "visible": true
+        },
+        "/rsairy_ns/rslidar_points": {
+          "visible": false
+        },
+        "/mapping/trajectory_path": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "visible": true,
+          "drawBehind": false,
+          "instanceId": "adeaa50b-f729-448a-9da2-2d8570cef044",
+          "layerId": "foxglove.Grid",
+          "size": 10,
+          "divisions": 10,
+          "lineWidth": 1,
+          "color": "#248eff",
+          "position": [
+            0,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ]
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Plot!3fjk2ms": {
+      "paths": [
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/mtt_articulation_angle.data",
+          "enabled": true,
+          "color": "#4e98e2",
+          "id": "3005e482-1ddd-4d76-a665-dcbf941264fe",
+          "lineSize": 2.6
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/trailer/articulation_angle.data",
+          "enabled": true,
+          "color": "#f5774d",
+          "id": "fe820d89-6eae-4bbf-83ba-4ce56d22d4f5",
+          "lineSize": 2.6
+        },
+        {
+          "timestampMethod": "receiveTime",
+          "value": "/hardware/articulation_angle.data",
+          "enabled": true,
+          "color": "#f7df71",
+          "id": "a58919df-24dd-43d6-a12c-9ff539b1b520"
+        }
+      ]
+    },
+    "RawMessages!4cdjgfn": {
+      "defaultExpanded": false,
+      "topicPath": "/trailer/pose"
+    },
+    "Tab!25pjix2": {
+      "activeTabIdx": 1,
+      "tabs": [
+        {
+          "title": "MAP",
+          "layout": "3D!3f0tw8"
+        },
+        {
+          "title": "Overview",
+          "layout": {
+            "direction": "column",
+            "first": {
+              "direction": "row",
+              "first": "3D!1zsfbg",
+              "second": "Image!2ed4azt",
+              "splitPercentage": 50
+            },
+            "second": {
+              "direction": "column",
+              "first": {
+                "direction": "column",
+                "first": {
+                  "first": "Plot!368rbly",
+                  "second": "Plot!1s45gls",
+                  "direction": "row"
+                },
+                "second": {
+                  "first": "Plot!4iyqgdt",
+                  "second": "Plot!41u7w8t",
+                  "direction": "row"
+                },
+                "splitPercentage": 52.46478873239436
+              },
+              "second": {
+                "first": {
+                  "first": "RawMessages!3dbp130",
+                  "second": "RawMessages!qmepz6",
+                  "direction": "column",
+                  "splitPercentage": 64.24457769142487
+                },
+                "second": "Plot!1xtiakb",
+                "direction": "row"
+              },
+              "splitPercentage": 38.652482269503544
+            },
+            "splitPercentage": 44.70588235294118
+          }
+        },
+        {
+          "title": "Dashboard",
+          "layout": {
+            "direction": "column",
+            "first": {
+              "direction": "row",
+              "first": "3D!3npt8ry",
+              "second": "Image!14kogw9",
+              "splitPercentage": 45.28169014084507
+            },
+            "second": {
+              "first": "Gauge!xvfhki",
+              "second": "Gauge!2kh8j6v",
+              "direction": "row"
+            },
+            "splitPercentage": 56.1093740420575
+          }
+        },
+        {
+          "title": "Articulation",
+          "layout": {
+            "first": "3D!73m4tl",
+            "second": {
+              "first": "Plot!3fjk2ms",
+              "second": "RawMessages!4cdjgfn",
+              "direction": "column"
+            },
+            "direction": "row",
+            "splitPercentage": 58.550420927123604
+          }
+        }
+      ]
+    }
+  },
+  "layout": "Tab!25pjix2",
+  "globalVariables": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "userNodes": {}
+}

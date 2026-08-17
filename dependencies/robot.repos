@@ -40,7 +40,15 @@ repositories:
   src/external/norlab_icp_mapper_ros:
     type: git
     url: git@github.com:norlab-ulaval/norlab_icp_mapper_ros.git
-    version: mohamed
+    # Switched back to upstream ros2 (was: mohamed) 2026-07-28 — the mohamed
+    # fork's mapper code caused a spiral/double-wall divergence in replay and
+    # real-time mapping that upstream does not reproduce (see documentations/
+    # audit and the mapper-works-in-norlab-ws debugging session). The mohamed
+    # branch is kept on the remote for reference / revert; it is not deleted.
+    # Lost vs mohamed: filtering_frame (base_link self-filter bboxes),
+    # deskew_source=imu, dynamic trailer self-filter, all mapper_node gates/
+    # recovery/odom_bridge/snapshot params (now silently unused, harmless).
+    version: ros2
 
   src/external/libpointmatcher_ros:
     type: git
@@ -134,3 +142,37 @@ repositories:
     type: git
     url: git@github.com:norlab-ulaval/mtt_motor_driver.git
     version: main
+
+  # ROMEA path libraries (GPS teach & repeat)
+  src/external/romea_core_common:
+    type: git
+    url: https://github.com/Romea/romea-core-common.git
+    version: main
+
+  src/external/romea_core_path:
+    type: git
+    url: https://github.com/Romea/romea-core-path.git
+    version: main
+
+  src/external/romea_core_path_matching:
+    type: git
+    url: https://github.com/Romea/romea_core_path_matching.git
+    version: main
+
+  src/external/romea_path_tools:
+    type: git
+    url: https://github.com/Romea/romea-ros-path-tools.git
+    version: main
+
+  src/external/badger_driver:
+    type: git
+    url: https://github.com/norlab-ulaval/Badger_driver.git
+    version: fix/badger-feedback-only
+
+  # Reference source for NVIDIA Isaac ROS Visual SLAM (cuVSLAM). Installed via
+  # apt (ros-jazzy-isaac-ros-visual-slam) in docker/Dockerfile.isaac, NOT built
+  # from source here — COLCON_IGNORE'd, kept for launch file / param reference.
+  src/external/isaac_ros_visual_slam:
+    type: git
+    url: https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam.git
+    version: release-4.5

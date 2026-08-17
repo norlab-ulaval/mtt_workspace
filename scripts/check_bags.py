@@ -1,11 +1,15 @@
 #!/usr/bin/env python3
 """
-check_bags.py — Vérifie les message counts de tous les bags MTT.
-Lit les metadata.yaml directement — aucun ROS requis, marche partout.
+check_bags.py — Comprehensive Health Check for MTT ROS2 Bags.
+
+Reads metadata.yaml directly (zero ROS runtime required).
+Calculates exact message frequencies (Hz), checks hardware vs software signals,
+trailer articulation topics, and parses session_info.yaml metadata.
 
 Usage:
-  python3 Workspace/mtt_workspace/scripts/check_bags.py
-  python3 ~/Project/mtt_ws/scripts/check_bags.py --data-dir /chemin/vers/data
+  python3 scripts/check_bags.py
+  python3 scripts/check_bags.py --data-dir /media/mohamed/SSD-Mathis/bag_mohamed/
+  python3 scripts/check_bags.py --verbose
 """
 
 import sys, argparse
@@ -17,6 +21,7 @@ try:
 except ImportError:
     HAS_YAML = False
 
+
 def infer_workspace_root(script_path: Path) -> Path:
     for candidate in [script_path.parent, *script_path.parents]:
         if (candidate / "src").exists() and (candidate / "demos").exists():
@@ -26,304 +31,357 @@ def infer_workspace_root(script_path: Path) -> Path:
 
 DATA_DIR = infer_workspace_root(Path(__file__).resolve()) / "data"
 
-BOLD  = "\033[1m"; RED   = "\033[91m"; YELLOW = "\033[93m"
-GREEN = "\033[92m"; CYAN  = "\033[96m"; DIM   = "\033[2m"
-ORANGE = "\033[38;5;208m"; RESET = "\033[0m"
+# ANSI Colors
+BOLD   = "\033[1m"
+RED    = "\033[91m"
+YELLOW = "\033[93m"
+GREEN  = "\033[92m"
+CYAN   = "\033[96m"
+DIM    = "\033[2m"
+ORANGE = "\033[38;5;208m"
+RESET  = "\033[0m"
 
-# ── Topics surveillés ──
-# Format: { group_label: [(topic, is_primary)] }
-# is_primary=True → topic DOIT avoir des msgs pour que le groupe soit OK
+# ── Topics & Expected Frequencies (Hz) ──
+# Format: { group_label: [(topic, is_primary, display_name, min_expected_hz)] }
 WATCH = {
-    "ZED": [
-        ("/zed/zed_node/rgb/color/rect/image/compressed",          True,  "rgb/compressed"),
-        ("/zed/zed_node/depth/depth_registered/compressedDepth",   True,  "depth/compressedDepth"),
-        ("/zed/zed_node/imu/data",                                 False, "imu/data"),
+    "LiDAR (HW)": [
+        ("/hesai_lidar/points",          True,  "hesai/points",          5.0),
+        ("/rsairy_ns/points",            True,  "rsairy/points",         5.0),
+        ("/merged_points_filtered",      False, "merged_points",         5.0),
     ],
-    "OAK": [
-        ("/oak/rgb/image_rect",                                    True,  "rgb/image_rect"),
-        ("/oak/stereo/image_raw",                                  True,  "stereo/image_raw"),
-        ("/oak/points",                                            False, "points"),
+    "IMU (HW)": [
+        ("/mti100/data",                 True,  "mti100/data",          50.0),
+        ("/mti10/data",                  True,  "mti10/data",           50.0),
+        ("/zed/zed_node/imu/data",       False, "zed/imu/data",        100.0),
     ],
-    "GPS Single": [
-        ("/gps/fix",                                               True,  "gps/fix"),
-        ("/gps/time_reference",                                    False, "gps/time_reference"),
-        ("/gps/nmea_sentence",                                     False, "gps/nmea_sentence"),
+    "CAN/Odom (HW)": [
+        ("/mtt_tachometer",              True,  "mtt_tachometer",       20.0),
+        ("/mtt_status",                  True,  "mtt_status (HW angle)", 20.0),
+        ("/mtt_odometry",                False, "mtt_odometry",         20.0),
+        ("/from_can_bus",                False, "from_can_bus",         10.0),
     ],
-    "GPS Dual": [
-        ("/gps_left/fix",                                          True,  "gps_left/fix"),
-        ("/gps_right/fix",                                         True,  "gps_right/fix"),
-        ("/gps/heading",                                           True,  "gps/heading"),
-        ("/gps_left/nmea_sentence",                                False, "gps_left/nmea"),
-        ("/gps_right/nmea_sentence",                               False, "gps_right/nmea"),
+    "BMS (HW)": [
+        ("/mtt_battery/status",          True,  "mtt_battery/status",   20.0),
     ],
-    "LiDAR": [
-        ("/hesai_lidar/points",                                    True,  "hesai/points"),
-        ("/rsairy_ns/points",                                      True,  "rsairy/points"),
+    "Trailer (HW/SW)": [
+        ("/trailer/angle",               False, "trailer/angle (SW)",    5.0),
+        ("/trailer/articulation_angle",  False, "trailer/art_angle",     5.0),
+        ("/trailer/odom",                False, "trailer/odom",          5.0),
+        ("/trailer/pose",                False, "trailer/pose",          5.0),
     ],
-    "IMU": [
-        ("/mti100/data",                                           True,  "mti100/data"),
-        ("/mti10/data",                                            True,  "mti10/data"),
+    "ZED Cam (HW/VSLAM)": [
+        ("/zed/zed_node/rgb/color/rect/image/compressed",         True,  "rgb/compressed",        1.0),
+        ("/zed/zed_node/depth/depth_registered/compressedDepth",  True,  "depth/compressedDepth", 1.0),
+        ("/zed/zed_node/odom",                                    False, "zed/odom (VSLAM)",       5.0),
+        ("/zed/zed_node/pose",                                    False, "zed/pose (VSLAM)",       5.0),
     ],
-    "CAN/Odom": [
-        ("/mtt_tachometer",                                        True,  "mtt_tachometer"),
-        ("/mtt_status",                                            False, "mtt_status"),
-        ("/mtt_odometry",                                          False, "mtt_odometry"),
+    "OAK Cam (HW)": [
+        ("/oak/rgb/image_rect",          True,  "oak/rgb/image_rect",    1.0),
+        ("/oak/stereo/image_raw",        True,  "oak/stereo/image_raw",  1.0),
+        ("/oak/points",                  False, "oak/points",            1.0),
     ],
-    "ICP": [
-        ("/merged_points_filtered",                                  False, "merged_points_filtered"),
-        ("/mapping/icp_odom",                                      True,  "mapping/icp_odom"),
-        ("/trailer/angle",                                         False, "trailer/angle"),
+    "GPS Single (HW)": [
+        ("/gps/fix",                     True,  "gps/fix",               1.0),
+        ("/gps/time_reference",          False, "gps/time_reference",    1.0),
+        ("/gps/nmea_sentence",           False, "gps/nmea_sentence",     1.0),
     ],
-    "BMS": [
-        ("/mtt_battery/status",                                    True,  "mtt_battery/status"),
-        ("/from_can_bus",                                          False, "from_can_bus"),
+    "GPS Dual RTK (HW)": [
+        ("/gps_left/fix",                True,  "gps_left/fix",          1.0),
+        ("/gps_right/fix",               True,  "gps_right/fix",         1.0),
+        ("/gps/heading",                 True,  "gps/heading",           1.0),
+    ],
+    "Control (SW)": [
+        ("/cmd_vel",                     True,  "cmd_vel",               5.0),
+        ("/teleop_estop",                False, "teleop_estop",          1.0),
+        ("/teleop_deadman",              False, "teleop_deadman",        1.0),
+    ],
+    "ICP (SW Ref)": [
+        ("/mapping/icp_odom",            True,  "mapping/icp_odom",      1.0),
     ],
 }
 
-# ── Causes racines connues ──
+# ── Root Cause Catalog ──
 KNOWN_CAUSES = {
     "/zed/zed_node/rgb/color/rect/image/compressed":
-        "QoS mismatch: ZED SDK force BEST_EFFORT, recorder attend RELIABLE\n"
-        "     FIX: qos_override.yaml + --qos-profile-overrides-path dans compose.yaml ✅ FAIT",
+        "QoS mismatch: ZED SDK forces BEST_EFFORT, recorder expects RELIABLE.\n"
+        "     FIX: qos_override.yaml + --qos-profile-overrides-path in compose.yaml ✅ DONE",
     "/zed/zed_node/depth/depth_registered/compressedDepth":
-        "QoS mismatch: même cause ZED\n"
-        "     FIX: inclus dans qos_override.yaml ✅ FAIT",
+        "QoS mismatch: ZED depth stream.\n"
+        "     FIX: included in qos_override.yaml ✅ DONE",
     "/zed/zed_node/imu/data":
-        "QoS mismatch: même cause ZED (2-3 msgs = bruit, pas réel)\n"
-        "     FIX: inclus dans qos_override.yaml ✅ FAIT",
+        "QoS mismatch: ZED IMU stream.\n"
+        "     FIX: included in qos_override.yaml ✅ DONE",
     "/gps_left/fix":
-        "Driver GPS tente TCP port 5001 → Reach RS écoute sur 9001 ou 9696\n"
-        "     FIX: corriger host/port dans gps_tcp.yaml ⚠️  À FAIRE",
+        "GPS Driver attempts TCP port 5001 -> Reach RS listens on 9001/9696.\n"
+        "     FIX: check host/port in gps_tcp.yaml",
     "/gps_right/fix":
-        "Driver GPS tente TCP port 5001 → Reach RS écoute sur 9001 ou 9696\n"
-        "     FIX: corriger host/port dans gps_tcp.yaml ⚠️  À FAIRE",
+        "GPS Driver attempts TCP port 5001 -> Reach RS listens on 9001/9696.\n"
+        "     FIX: check host/port in gps_tcp.yaml",
     "/gps/fix":
-        "Le Reach RS publie du NMEA mais aucun GGA valide n'est converti en NavSatFix\n"
-        "     FIX: vérifier GGA 5 Hz + RMC 1 Hz côté ReachView3 et lire les compteurs du driver GPS",
-    "/gps/time_reference":
-        "Pas de date RMC valide ou pas de GGA valide → pas de GPS UTC publié\n"
-        "     FIX: vérifier la sortie RMC côté Reach et les diagnostics du parser",
-    "/gps/heading":
-        "Dépend de gps_left/fix + gps_right/fix → mort si GPS morts",
-    "/gps_left/nmea_sentence":
-        "Reach RS n'émet pas NMEA sur ce port (config ReachView3 requise)",
-    "/gps_right/nmea_sentence":
-        "Reach RS n'émet pas NMEA sur ce port (config ReachView3 requise)",
+        "Reach RS emits NMEA but no valid GGA is converted to NavSatFix.\n"
+        "     FIX: verify GGA 5 Hz + RMC 1 Hz in ReachView3",
     "/mtt_tachometer":
-        "Encodeur inductif mort avant 14h58 (disque 10 dents a frotté face capteur)\n"
-        "     FIX: remplacement matériel + vérifier gap 1-2mm 🔧 MATÉRIEL",
+        "Inductive encoder failed or disk gap incorrect.\n"
+        "     FIX: hardware replacement / verify 1-2mm sensor gap",
     "/mapping/icp_odom":
-        "ICP absent ou inutilisable — vérifier le topic, le délai de lancement, et surtout le mode deskew\n"
-        "     Avec tachometer_mode=cmd_sim, traiter /mapping/icp_odom comme référence locale, pas comme ground truth",
-    "/merged_points_filtered":
-        "Le cloud merger ne publie pas ce que le mapper consomme\n"
-        "     FIX: vérifier TF lidar->base_link, /hesai_lidar/points, /rsairy_ns/points et perception.launch.py",
+        "Live ICP absent or broken. Rerunning offline ICP + factor graph is REQUIRED for Ground Truth.",
     "/oak/stereo/image_raw":
-        "Le pipeline RGBD OAK ne sort pas — souvent câble USB desserré après vibration\n"
-        "     FIX: rebrancher l'OAK, vérifier /dev/bus/usb et relancer le driver",
-    "/oak/points":
-        "Le point cloud OAK n'est pas activé ou l'entrée depth RGBD ne sort pas\n"
-        "     FIX: activer pointcloud.enable=true et vérifier /oak/stereo/image_raw",
+        "OAK USB disconnected or power failure.\n"
+        "     FIX: reconnect OAK USB and check /dev/bus/usb",
     "/mtt_battery/status":
-        "BMS decoding non compile avant aujourd'hui — rebuild mtt_driver et redéployer\n"
-        "     FIX: colcon build --packages-select mtt_msgs mtt_driver && dc up --build robot",
-    "/from_can_bus":
-        "socketcan_bridge non lance — service 'socketcan_bridge' absent du compose ou can0 down\n"
-        "     FIX: dc up socketcan_bridge (ou vérifier que can0 est up: ip link show can0)",
+        "BMS driver uncompiled or CAN interface down.\n"
+        "     FIX: colcon build --packages-select mtt_driver && ip link show can0",
+    "/cmd_vel":
+        "No autonomous or teleop commands published during recording.",
 }
 
 
 def parse_metadata(meta_path: Path):
-    """Parse metadata.yaml → (counts dict, duration_s, total_msgs)."""
-    text = meta_path.read_text()
+    """Parse metadata.yaml -> (counts dict, duration_s, total_msgs)."""
+    text = meta_path.read_text(encoding="utf-8", errors="ignore")
 
     if HAS_YAML:
-        data  = yaml.safe_load(text)
-        info  = data.get("rosbag2_bagfile_information", data)
-        counts = {
-            e["topic_metadata"]["name"]: e["message_count"]
-            for e in info.get("topics_with_message_count", [])
-        }
-        dur_s = info.get("duration", {}).get("nanoseconds", 0) / 1e9
-        total = info.get("message_count", 0)
-        return counts, dur_s, total
-    else:
-        # Minimal parser — no yaml module
-        counts: dict = {}
-        current_name = None
-        dur_s, total = 0, 0
-        for line in text.splitlines():
-            s = line.strip()
-            if s.startswith("name:") and "/" in s:
-                current_name = s.split("name:", 1)[1].strip().strip('"')
-            elif s.startswith("message_count:") and current_name:
-                try:
-                    counts[current_name] = int(s.split(":", 1)[1].strip())
-                except ValueError:
-                    pass
-                current_name = None
-            elif s.startswith("nanoseconds:") and dur_s == 0:
-                try:
-                    dur_s = int(s.split(":", 1)[1].strip()) / 1e9
-                except ValueError:
-                    pass
-        return counts, dur_s, sum(counts.values())
+        try:
+            data = yaml.safe_load(text) or {}
+            info = data.get("rosbag2_bagfile_information", data)
+            counts = {
+                e["topic_metadata"]["name"]: e["message_count"]
+                for e in info.get("topics_with_message_count", [])
+            }
+            dur_s = info.get("duration", {}).get("nanoseconds", 0) / 1e9
+            total = info.get("message_count", 0)
+            return counts, dur_s, total
+        except Exception:
+            pass
+
+    # Fallback parser
+    counts = {}
+    current_name = None
+    dur_s, total = 0, 0
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith("name:") and "/" in s:
+            current_name = s.split("name:", 1)[1].strip().strip('"')
+        elif s.startswith("message_count:") and current_name:
+            try:
+                counts[current_name] = int(s.split(":", 1)[1].strip())
+            except ValueError:
+                pass
+            current_name = None
+        elif s.startswith("nanoseconds:") and dur_s == 0:
+            try:
+                dur_s = int(s.split(":", 1)[1].strip()) / 1e9
+            except ValueError:
+                pass
+    return counts, dur_s, sum(counts.values())
 
 
-def group_status(entries, counts):
+def parse_session_info(session_dir: Path) -> dict:
+    """Parse session_info.yaml if present."""
+    info_path = session_dir / "session_info.yaml"
+    if not info_path.exists():
+        return {}
+    try:
+        raw = info_path.read_bytes().decode("utf-8", errors="ignore")
+        if HAS_YAML:
+            return yaml.safe_load(raw) or {}
+        # Fallback simple key-value
+        res = {}
+        for line in raw.splitlines():
+            if ":" in line and not line.strip().startswith("#"):
+                k, v = line.split(":", 1)
+                res[k.strip()] = v.strip().strip('"').strip("'")
+        return res
+    except Exception:
+        return {}
+
+
+def group_status(entries, counts, dur_s):
     """
-    Returns 'ok', 'dead', 'partial', 'missing'.
-    ok      = tous les topics primaires ont des msgs
-    partial = certains topics ont des msgs, mais des primaires en manquent
-    dead    = tous les primaires à 0 (mais présents dans le bag)
-    missing = aucun topic du groupe n'est dans le bag
+    Returns 'ok', 'low_hz', 'partial', 'dead', 'missing'.
     """
-    primary_counts   = [(t, counts.get(t, -1)) for t, primary, _ in entries if primary]
-    secondary_counts = [(t, counts.get(t, -1)) for t, primary, _ in entries if not primary]
+    primary_entries = [e for e in entries if e[1]]
+    if not primary_entries:
+        primary_entries = entries
 
-    if all(c == -1 for t, c in primary_counts):
+    primary_counts = [(t, counts.get(t, -1), min_hz) for t, p, s, min_hz in primary_entries]
+
+    if all(c == -1 for t, c, _ in primary_counts):
         return "missing"
 
-    primary_ok = [c for t, c in primary_counts if c > 0]
+    primary_alive = [(c, min_hz) for t, c, min_hz in primary_counts if c > 0]
 
-    if all(c > 0 for t, c in primary_counts):
-        return "ok"
-    if primary_ok:
+    if not primary_alive:
+        return "dead"
+
+    if len(primary_alive) < len(primary_counts):
         return "partial"
-    return "dead"
+
+    # Check frequencies
+    if dur_s > 0:
+        low_hz = any((c / dur_s) < (min_hz * 0.5) for c, min_hz in primary_alive)
+        if low_hz:
+            return "low_hz"
+
+    return "ok"
 
 
 STATUS_ICON = {
     "ok":      f"{GREEN}✓ OK     {RESET}",
-    "partial": f"{ORANGE}~ PARTIAL{RESET}",
+    "low_hz":  f"{ORANGE}~ LOW HZ {RESET}",
+    "partial": f"{YELLOW}~ PARTIAL{RESET}",
     "dead":    f"{RED}✗ DEAD   {RESET}",
     "missing": f"{DIM}— NOT REC{RESET}",
 }
 
 
-def analyze_session(session_dir: Path) -> set:
-    """Returns set of broken (0 msgs) primary topic names."""
+def analyze_session(session_dir: Path, verbose: bool = False) -> tuple:
+    """Analyze a single session directory."""
     bag_dir   = session_dir / "bag"
     meta_path = bag_dir / "metadata.yaml"
+    if not meta_path.exists():
+        meta_path = session_dir / "metadata.yaml"
 
     name = session_dir.name
-    ts   = name.rsplit("_", 2)
-    ts_str = (ts[-2] + " " + ts[-1].replace("-", ":")) if len(ts) >= 3 else "?"
+    sinfo = parse_session_info(session_dir)
 
-    if not bag_dir.exists() or not meta_path.exists():
-        print(f"\n  {DIM}{name}{RESET}")
-        print(f"    {YELLOW}⚠  pas de bag/ ou metadata.yaml{RESET}")
-        return set()
+    exp_name = sinfo.get("experiment_name", "N/A")
+    s_type   = sinfo.get("session_type", "N/A")
+    terrain  = sinfo.get("terrain", "N/A")
+    trailer  = sinfo.get("trailer_attached", None)
+    operator = sinfo.get("operator", "N/A")
+
+    if not meta_path.exists():
+        print(f"\n  {BOLD}{name}{RESET}")
+        print(f"    {YELLOW}⚠  No bag/ or metadata.yaml found!{RESET}")
+        return set(), name, "missing", {}, 0
 
     counts, dur_s, total = parse_metadata(meta_path)
-    total_k = total / 1000
+    total_k = total / 1000.0
 
-    print(f"\n  {BOLD}{name}{RESET}")
-    print(f"  {DIM}{ts_str}  {dur_s:.0f}s  {total_k:.0f}k msgs{RESET}")
+    print(f"\n  {BOLD}{CYAN}{name}{RESET}")
 
-    broken = set()
+    # Metadata banner
+    meta_str = f"Exp: {exp_name} | Type: {s_type} | Terrain: {terrain} | Trailer: {trailer}"
+    print(f"    {DIM}{meta_str}{RESET}")
+    print(f"    {DIM}Duration: {dur_s:.1f}s ({dur_s/60.0:.1f} min) | Total Msgs: {total_k:.1f}k | Op: {operator}{RESET}")
+
+    broken_primaries = set()
+    group_statuses = {}
 
     for group, entries in WATCH.items():
-        status = group_status(entries, counts)
-        icon   = STATUS_ICON[status]
-        print(f"    {BOLD}{group:12s}{RESET} {icon}")
+        status = group_status(entries, counts, dur_s)
+        group_statuses[group] = status
 
-        for topic, is_primary, short in entries:
-            c = counts.get(topic, -1)
-            marker = f"{'[P]' if is_primary else '   '}"
-            if c == -1:
-                print(f"      {DIM}{marker} {short:<40s} —{RESET}")
-            elif c == 0:
-                col = RED if is_primary else YELLOW
-                print(f"      {col}{marker} {short:<40s} 0 msgs{RESET}")
-                if is_primary:
-                    broken.add(topic)
-            else:
-                print(f"      {GREEN}{marker} {short:<40s} {c:,}{RESET}")
+        if verbose or status in ("dead", "partial", "low_hz"):
+            icon = STATUS_ICON[status]
+            print(f"      {BOLD}{group:18s}{RESET} {icon}")
 
-    return broken
+            for topic, is_primary, short_name, min_hz in entries:
+                c = counts.get(topic, -1)
+                marker = "[P]" if is_primary else "   "
 
+                if c == -1:
+                    if verbose:
+                        print(f"        {DIM}{marker} {short_name:<30s} — (not recorded){RESET}")
+                elif c == 0:
+                    col = RED if is_primary else YELLOW
+                    print(f"        {col}{marker} {short_name:<30s} 0 msgs (DEAD){RESET}")
+                    if is_primary:
+                        broken_primaries.add(topic)
+                else:
+                    hz = (c / dur_s) if dur_s > 0 else 0.0
+                    if hz < (min_hz * 0.5):
+                        col = ORANGE
+                        hz_str = f"{hz:6.1f} Hz (LOW, expected >={min_hz:.1f}Hz)"
+                    else:
+                        col = GREEN
+                        hz_str = f"{hz:6.1f} Hz"
+                    print(f"        {col}{marker} {short_name:<30s} {c:8,d} msgs ({hz_str}){RESET}")
 
-def print_root_causes(all_broken: set):
-    print(f"\n{BOLD}{RED}══ CAUSES RACINES (topics primaires à 0) ══{RESET}\n")
-
-    explained   = {}
-    unexplained = []
-
-    for topic in sorted(all_broken):
-        cause = KNOWN_CAUSES.get(topic)
-        if cause:
-            explained.setdefault(cause, []).append(topic)
-        else:
-            unexplained.append(topic)
-
-    for cause, topics in explained.items():
-        print(f"  {RED}●{RESET} {topics[0].split('/')[-1] if len(topics)==1 else ', '.join(t.split('/')[-1] for t in topics)}")
-        print(f"    {cause}")
-        print()
-
-    if unexplained:
-        print(f"  {YELLOW}● Cause inconnue :{RESET}")
-        for t in unexplained:
-            print(f"    {t}")
-        print()
+    return broken_primaries, name, group_statuses, counts, dur_s
 
 
 def print_summary_table(session_results: list):
-    """One-line per session summary."""
-    groups = list(WATCH.keys())
-    header = f"  {'Session':42s}" + "".join(f" {g[:5]:5s}" for g in groups)
-    print(f"\n{BOLD}{CYAN}══ Tableau récapitulatif ══{RESET}\n")
-    print(f"{DIM}{header}{RESET}")
-    print(f"  {'-'*42}" + "-" * (len(groups) * 6))
+    """Print overall summary table."""
+    groups = ["LiDAR", "IMU", "CAN/Odom", "BMS", "Trailer", "ZED", "GPS", "Control", "ICP"]
+    group_keys = ["LiDAR (HW)", "IMU (HW)", "CAN/Odom (HW)", "BMS (HW)", "Trailer (HW/SW)", "ZED Cam (HW/VSLAM)", "GPS Single (HW)", "Control (SW)", "ICP (SW Ref)"]
 
-    icons = {"ok": f"{GREEN}  ✓  {RESET}", "partial": f"{ORANGE}  ~  {RESET}",
-             "dead": f"{RED}  ✗  {RESET}", "missing": f"{DIM}  —  {RESET}"}
+    print(f"\n{BOLD}{CYAN}══ Overall Health Check Summary Table ══{RESET}\n")
 
-    for name, statuses in session_results:
-        short = name[-42:]
-        row = f"  {short:42s}" + "".join(icons.get(s, "  ?  ") for s in statuses)
+    header = f"  {'Session Directory':48s} {'Dur(m)':>6s} {'Trail':>5s}" + "".join(f" {g[:6]:>6s}" for g in groups)
+    print(f"{BOLD}{header}{RESET}")
+    print(f"  {'-'*48} {'-'*6} {'-'*5}" + " ".join(["------"] * len(groups)))
+
+    icons = {
+        "ok":      f"{GREEN}  ✓   {RESET}",
+        "low_hz":  f"{ORANGE}  ~   {RESET}",
+        "partial": f"{YELLOW}  ~   {RESET}",
+        "dead":    f"{RED}  ✗   {RESET}",
+        "missing": f"{DIM}  —   {RESET}"
+    }
+
+    for name, dur_s, sinfo, statuses in session_results:
+        dur_min = f"{dur_s/60.0:.1f}m" if dur_s > 0 else "—"
+        trailer = str(sinfo.get("trailer_attached", "?"))[:5]
+
+        short_name = name if len(name) <= 48 else ("..." + name[-45:])
+        row = f"  {short_name:48s} {dur_min:>6s} {trailer:>5s}"
+
+        for key in group_keys:
+            st = statuses.get(key, "missing")
+            row += icons.get(st, "  ?   ")
+
         print(row)
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data-dir", type=Path, default=DATA_DIR)
+    parser = argparse.ArgumentParser(description="Check ROS2 Bag Health & Topic Frequencies")
+    parser.add_argument("--data-dir", type=Path, default=DATA_DIR, help="Path to bags directory")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Print all topics regardless of status")
     args = parser.parse_args()
 
     data_dir = args.data_dir
     if not data_dir.exists():
-        print(f"{RED}Data dir not found: {data_dir}{RESET}")
+        print(f"{RED}Data directory not found: {data_dir}{RESET}")
         sys.exit(1)
 
-    print(f"\n{BOLD}{CYAN}══════════════════════════════════════════════════════{RESET}")
-    print(f"{BOLD}{CYAN}   MTT Bag Health Check — {data_dir}{RESET}")
-    print(f"{BOLD}{CYAN}══════════════════════════════════════════════════════{RESET}")
-    print(f"  {DIM}[P] = topic primaire (doit avoir des msgs pour que le groupe soit OK){RESET}")
+    print(f"\n{BOLD}{CYAN}══════════════════════════════════════════════════════════════════════{RESET}")
+    print(f"{BOLD}{CYAN}   MTT ROS2 Bag Detailed Health & Topic Frequency Checker{RESET}")
+    print(f"{BOLD}{CYAN}   Target Directory: {data_dir}{RESET}")
+    print(f"{BOLD}{CYAN}══════════════════════════════════════════════════════════════════════{RESET}")
+    print(f"  {DIM}[P] = Primary required topic | Hz = Calculated message frequency{RESET}")
 
-    sessions = sorted([d for d in data_dir.iterdir()
-                       if d.is_dir() and d.name.startswith("mtt_")])
+    # Discover all bag directories (folders containing bag/ or metadata.yaml or .mcap)
+    candidates = [d for d in data_dir.iterdir() if d.is_dir() and not d.name.startswith(".")]
+    sessions = []
+    for d in candidates:
+        if (d / "bag").exists() or (d / "metadata.yaml").exists() or any(d.glob("*.mcap")) or (d / "bag" / "metadata.yaml").exists():
+            sessions.append(d)
 
-    all_broken: set = set()
-    session_results = []
+    sessions = sorted(sessions, key=lambda x: x.name)
+
+    if not sessions:
+        print(f"{YELLOW}No bag directories found in {data_dir}{RESET}")
+        sys.exit(0)
+
+    all_broken = set()
+    summary_results = []
 
     for s in sessions:
-        broken = analyze_session(s)
+        broken, name, group_statuses, counts, dur_s = analyze_session(s, verbose=args.verbose)
         all_broken.update(broken)
+        sinfo = parse_session_info(s)
+        summary_results.append((name, dur_s, sinfo, group_statuses))
 
-        # collect per-group status for summary table
-        bag_dir   = s / "bag"
-        meta_path = bag_dir / "metadata.yaml"
-        if meta_path.exists():
-            counts, _, _ = parse_metadata(meta_path)
-            statuses = [group_status(entries, counts) for entries in WATCH.values()]
-        else:
-            statuses = ["missing"] * len(WATCH)
-        session_results.append((s.name, statuses))
+    print_summary_table(summary_results)
 
-    print_summary_table(session_results)
-    print()
-    print_root_causes(all_broken)
+    if all_broken:
+        print(f"\n{BOLD}{RED}══ Root Cause Analysis for Missing Primary Topics ══{RESET}\n")
+        for topic in sorted(all_broken):
+            cause = KNOWN_CAUSES.get(topic, "Unknown cause — verify node execution and QoS configuration.")
+            print(f"  {RED}● {topic}{RESET}")
+            print(f"    {cause}\n")
 
 
 if __name__ == "__main__":

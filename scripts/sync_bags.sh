@@ -141,7 +141,7 @@ if $list_only; then
   # shellcheck disable=SC2029
   ssh "${SSH_TARGET}" "ls -1t ${ROBOT_WS}/data/ 2>/dev/null | grep -v '^\.' | grep -v gitkeep" \
     | while read -r session; do
-        size=$(ssh "${SSH_TARGET}" "du -sh '${ROBOT_WS}/data/${session}' 2>/dev/null | cut -f1" 2>/dev/null || echo "?")
+        size=$(ssh -n "${SSH_TARGET}" "du -sh '${ROBOT_WS}/data/${session}' 2>/dev/null | cut -f1" 2>/dev/null || echo "?")
         printf "  %-55s %s\n" "$session" "$size"
       done
   echo ""

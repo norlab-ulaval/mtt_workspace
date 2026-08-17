@@ -126,3 +126,82 @@ src/mtt_core/mtt_description/urdf/*.sdf
 *.vtk
 frames_*.gv
 frames_*.pdf
+
+# Manual dated backup copies (e.g. compose.yaml.bak.20260602_120604) — keep
+# these local-only, promoted here from .git/info/exclude so every clone is
+# protected, not just this one.
+*.bak.*
+
+# Local research and paper work. These files are not required to build or run
+# the robot. Keep reusable final results in a dedicated research repository.
+/.scratch_test/
+/articulation_offline_results/
+/deliverables_mapping/
+/identified/
+/docs/superpowers/
+/documentations/DATASET_SCHEMA.md
+/documentations/dataset_catalog.csv
+/documentations/*_report_*.md
+/documentations/*_runbook.md
+/documentations/audit_*_2026-*.md
+/documentations/icra_*.md
+/documentations/m5_*.md
+/documentations/paper_*.md
+
+# Root-level one-off analysis scripts and generated summaries.
+/check_*.py
+/inspect_*.py
+/create_tf_static_patch.py
+/dump_urdf.py
+/export_mathis_csv.py
+/mtt_kiss_mapper.py
+/run_kiss_batch.py
+/test_*_ws.py
+/test_ws_*.py
+/test_foxglove_ws.py
+/dead_results.txt
+/final_dead_bags.txt
+/kiss_batch_report.csv
+/kiss_config.yaml
+/rink_boundary.json
+/zone_map.npz
+/zone_map.png
+/*_plan.png
+/gps.png
+/--save.png
+
+# Unpublished ICRA/dataset work kept local during the workspace freeze.
+/scripts/audit_m5_phidot_transition.py
+/scripts/build_gt_v2_overlay.py
+/scripts/build_icerink_motion_validation_dataset.py
+/scripts/build_msa_canonical_dataset.py
+/scripts/build_session_dataset.py
+/scripts/build_zone_map.py
+/scripts/calibrate_tachometer_against_msa.py
+/scripts/collect_boundary_polygon.py
+/scripts/compare_m0_m5_command_only.py
+/scripts/evaluate_covariances.py
+/scripts/evaluate_m0_m5_against_msa.py
+/scripts/evaluate_pose_sources_against_msa.py
+/scripts/export_bag_preview.py
+/scripts/export_trailer_roi_cloud.py
+/scripts/extract_articulation_topics_mcap.py
+/scripts/extract_lidar_articulation_offline.py
+/scripts/fix_bag_timestamps.py
+/scripts/index_mcap_inplace.py
+/scripts/invert_vtk_180.py
+/scripts/invert_vtk_axes.py
+/scripts/isaac_vslam_frame_bridge.py
+/scripts/load_reconciled_dataset.py
+/scripts/merge_articulation_into_msa_canonical.py
+/scripts/mtt_motion_model/m5_full_dissipative.py
+/scripts/pick_boundary_polygon.py
+/scripts/plan_arcs_in_zone.py
+/scripts/plan_circles_in_zone.py
+/scripts/plot_msa_reference_qualification.py
+/scripts/render_gt_v2_map_png.py
+/scripts/replay_trailer_detector_offline.py
+/scripts/run_gt_pipeline_auto.py
+/scripts/smooth_lidar_csv.py
+/scripts/validate_m0_m5_icerink.py
+/scripts/zone_map.py

@@ -1,71 +1,82 @@
-# demos
+# Demos
 
-This directory holds the runtime entry points around the workspace.
+Compose files are the operator entry points. Run commands from the demo
+directory so the correct `.env`, relative paths and project name are used.
 
-Use the demo that matches the machine you are on:
-- `common/`
-  shared runtime YAML config used by the live demos
-- `live_robot/`
-  robot-side runtime stack
-- `monitor/`
-  laptop-side operator stack for a live session
-- `data_collection/`
-  robot-side bagging workflow with session metadata
-- `bag_replay/`
-  local replay workflow for recorded sessions
-- `description/`
-  local description and RViz checks
-- `simulation/`
-  local simulation stack
+## Choose one
 
-## Common commands
+| Need | Directory | Normal command |
+| --- | --- | --- |
+| replay an MCAP bag | `bag_replay` | `BAG_PATH=/abs/path docker compose up` |
+| test locally in Gazebo | `simulation` | `docker compose up simulation control rviz` |
+| monitor a live robot from a laptop | `monitor` | `docker compose up monitor` |
+| run the robot | `live_robot` | `docker compose up` |
+| record a field session | `data_collection` | `docker compose --profile record up` |
+| reproduce the COM-shift setup | `mathis_com_shift` | read its README first |
 
-From the repository root:
+Bag replay and simulation are the first-run paths. The other stacks can connect
+to or move hardware.
 
-```bash
-xhost +si:localuser:$USER
-./scripts/create_ws
-./scripts/compile
-docker compose run --rm bash
-```
+## Common rules
 
-`scripts/compile` checks Docker access and the image UID/GID. It rebuilds the
-images when required, then builds the ROS workspace.
+- Run `../../scripts/compile` after changing ROS source, launch files or package
+  metadata.
+- Run `docker compose config --quiet` after changing Compose or environment
+  files.
+- Use `docker compose down` when switching stacks on the same machine.
+- Use `docker compose down --remove-orphans` after service names change.
+- Do not run two robot stacks at once. They can duplicate TF, command, CAN and
+  sensor publishers.
+- Runtime tuning belongs in `common/config` and the selected demo `config`.
 
-Advanced explicit image build:
+## Profiles
 
-```bash
-docker compose --profile build -f compose.yaml build base devel_image
-```
-
-On the robot:
+Profiles are opt-in services. List them without starting anything:
 
 ```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml up
+docker compose config --profiles
+docker compose --profile '*' config --services
 ```
 
-That starts the `robot` service only by default. If the host-side Zenoh router and Foxglove bridge are disabled on the robot, use:
+Common names:
 
-```bash
-docker compose --env-file .env -f demos/live_robot/compose.yaml --profile infra up
+| Profile | Purpose | Risk |
+| --- | --- | --- |
+| `debug` | shell in the configured image | low unless commands are then run manually |
+| `check` | health and topic checks | read-only but joins the live ROS graph |
+| `viz` | RViz or visualization tools | read-only but high bandwidth |
+| `record` | bag recorder | disk and bandwidth load |
+| `manual` | joystick/manual command tools | can move the robot |
+| `wiln-ctrl` or `wiln` | teach-and-repeat controls | can start autonomous motion |
+| `com` / `com_button` / `com_speed` | EtherCAT COM motor | can move hardware |
+| `command` | direct command publisher | can move the robot |
+
+Exact profile names vary by demo. Always use `config --profiles` on the file you
+are about to run.
+
+## Shared configuration
+
+The normal tuning surface is:
+
+```text
+demos/common/config/mtt_driver.yaml
+demos/common/config/mtt_control.yaml
+demos/common/config/mtt_front_obstacle_monitor.yaml
+demos/common/config/mtt_path_follower.yaml
+demos/common/config/mtt_repeat_supervisor.yaml
+demos/common/config/mtt_route_manager.yaml
+demos/common/config/wiln.yaml
 ```
 
-On the operator laptop:
+Demo-specific `runtime.env` files enable services and select devices. They can
+change live behavior even when the shared YAML files are unchanged.
 
-```bash
-docker compose --env-file .env -f demos/monitor/compose.yaml up
-```
+## Detailed guides
 
-That starts the Foxglove bridge only. Open Foxglove Studio separately and connect to `ws://localhost:8766`.
-
-For local description or simulation checks:
-
-```bash
-docker compose --env-file .env -f demos/description/compose.yaml up description
-docker compose --env-file .env -f demos/simulation/compose.yaml up simulation
-docker compose --env-file .env -f demos/simulation/compose.yaml up rviz
-docker compose --env-file .env -f demos/simulation/compose.yaml up foxglove
-docker compose --env-file .env -f demos/simulation/compose.yaml up control
-```
-
-Before using a live demo, run `./scripts/status` from the repo root. The parent repo is only one layer of the workspace state.
+- [live robot](./live_robot/README.md)
+- [data collection](./data_collection/README.md)
+- [laptop monitor](./monitor/README.md)
+- [bag replay](./bag_replay/README.md)
+- [simulation](./simulation/README.md)
+- [Mathis COM shift](./mathis_com_shift/README.md)
+- [shared configuration](./common/README.md)

@@ -1,0 +1,878 @@
+{
+  "configById": {
+    "3D!drive": {
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "cameraState": {
+        "distance": 25,
+        "perspective": true,
+        "phi": 55,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 90,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "scene": {
+        "enableStats": false
+      },
+      "transforms": {},
+      "topics": {
+        "/hesai_lidar/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointSize": 2
+        },
+        "/rsairy_ns/points": {
+          "visible": false
+        },
+        "/mapping/map": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "rainbow",
+          "pointSize": 1
+        },
+        "/mtt_odometry": {
+          "visible": true,
+          "type": "arrow"
+        },
+        "/mapping/icp_odom": {
+          "visible": true
+        },
+        "/wiln/global_plan": {
+          "visible": true,
+          "lineWidth": 0.3
+        },
+        "/trailer/body_markers": {
+          "visible": true
+        },
+        "/gps/fix": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "visible": true,
+          "size": 100,
+          "divisions": 100,
+          "label": "Grid"
+        }
+      },
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Indicator!mode": {
+      "path": "/mtt_control/selected_mode.data",
+      "style": "background",
+      "fallbackColor": "#6b7280",
+      "fallbackLabel": "MODE ?",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "MANUAL",
+          "color": "#16a34a",
+          "label": "MANUEL"
+        },
+        {
+          "operator": "=",
+          "rawValue": "AUTO",
+          "color": "#2563eb",
+          "label": "AUTO"
+        },
+        {
+          "operator": "=",
+          "rawValue": "STOP",
+          "color": "#f59e0b",
+          "label": "STOP"
+        },
+        {
+          "operator": "=",
+          "rawValue": "ESTOP",
+          "color": "#dc2626",
+          "label": "E-STOP"
+        }
+      ],
+      "fontSize": 36
+    },
+    "Indicator!estop": {
+      "path": "/mtt_control/teleop_estop.data",
+      "style": "background",
+      "fallbackColor": "#6b7280",
+      "fallbackLabel": "E-STOP ?",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "true",
+          "color": "#dc2626",
+          "label": "E-STOP ACTIF"
+        },
+        {
+          "operator": "=",
+          "rawValue": "false",
+          "color": "#16a34a",
+          "label": "E-STOP OK"
+        }
+      ],
+      "fontSize": 36
+    },
+    "CallService!manual": {
+      "serviceName": "/mtt_control/request_manual",
+      "requestPayload": "{}",
+      "editingMode": false,
+      "buttonText": "🕹️ MODE MANUEL",
+      "buttonTooltip": "Passer en mode manuel (joystick)",
+      "buttonColor": "#16a34a",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!auto": {
+      "serviceName": "/mtt_control/request_auto",
+      "requestPayload": "{}",
+      "editingMode": false,
+      "buttonText": "🤖 MODE AUTO",
+      "buttonTooltip": "Passer en mode autonome",
+      "buttonColor": "#2563eb",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "CallService!stop": {
+      "serviceName": "/mtt_control/request_stop",
+      "requestPayload": "{}",
+      "editingMode": false,
+      "buttonText": "🛑 STOP",
+      "buttonTooltip": "Arrêter le robot (mode STOP)",
+      "buttonColor": "#dc2626",
+      "layout": "vertical",
+      "timeoutSeconds": 10
+    },
+    "Gauge!speed": {
+      "path": "/mtt_tachometer.speed_kmh",
+      "minValue": 0,
+      "maxValue": 12,
+      "colorMode": "colormap",
+      "colorMap": "red-yellow-green",
+      "reverse": true,
+      "style": "dial",
+      "tickInterval": 0.1,
+      "showTicks": false,
+      "gradient": [
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "reverseDirection": false
+    },
+    "Plot!speed": {
+      "paths": [
+        {
+          "value": "/cmd_vel.twist.linear.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "cmd vx"
+        },
+        {
+          "value": "/mtt_odometry.twist.twist.linear.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "odom vx"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 30
+    },
+    "Image!zed": {
+      "imageMode": {
+        "imageTopic": "/zed/zed_node/rgb/color/rect/image/compressed"
+      },
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 60,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "scene": {},
+      "transforms": {},
+      "topics": {},
+      "layers": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false
+    },
+    "3D!tr": {
+      "followMode": "follow-none",
+      "cameraState": {
+        "distance": 48.8703749999996,
+        "perspective": false,
+        "phi": 0.1,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          0,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 90.00000000000455,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "topics": {
+        "/mapping/map": {
+          "visible": true,
+          "colorField": "z",
+          "colorMode": "colormap",
+          "colorMap": "rainbow",
+          "pointSize": 1
+        },
+        "/hesai_lidar/points": {
+          "visible": false
+        },
+        "/mapping/icp_odom": {
+          "visible": true
+        },
+        "/mtt_odometry": {
+          "visible": false
+        },
+        "/wiln/global_plan": {
+          "visible": true,
+          "lineWidth": 0.4
+        },
+        "/gps/fix": {
+          "visible": false
+        }
+      },
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "visible": true,
+          "size": 200,
+          "divisions": 200,
+          "label": "Grid"
+        }
+      },
+      "scene": {},
+      "transforms": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "StateTransitions!wiln": {
+      "paths": [
+        {
+          "value": "/wiln/teach/state.state",
+          "timestampMethod": "receiveTime",
+          "label": "teach"
+        },
+        {
+          "value": "/wiln/replay/state.state",
+          "timestampMethod": "receiveTime",
+          "label": "replay"
+        },
+        {
+          "value": "/wiln/route/state.state",
+          "timestampMethod": "receiveTime",
+          "label": "route"
+        }
+      ],
+      "isSynced": true
+    },
+    "Publish!rec_start": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "⏺️ DÉMARRER ENREGISTREMENT",
+      "buttonTooltip": "Commencer l'enregistrement du trajet (teach)",
+      "buttonColor": "#16a34a",
+      "advancedView": false,
+      "value": "{\"data\": \"start_recording\"}"
+    },
+    "Publish!rec_stop": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "⏹️ ARRÊTER ENREG.",
+      "buttonTooltip": "Terminer l'enregistrement du trajet",
+      "buttonColor": "#f59e0b",
+      "advancedView": false,
+      "value": "{\"data\": \"stop_recording\"}"
+    },
+    "Publish!smooth": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "〰️ LISSER",
+      "buttonTooltip": "Lisser la trajectoire enregistrée",
+      "buttonColor": "#0ea5e9",
+      "advancedView": false,
+      "value": "{\"data\": \"smooth_trajectory\"}"
+    },
+    "Publish!play": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "▶️ REJOUER (REPEAT)",
+      "buttonTooltip": "Lancer le repeat de la trajectoire — vérifier MODE AUTO d'abord",
+      "buttonColor": "#2563eb",
+      "advancedView": false,
+      "value": "{\"data\": \"play\"}"
+    },
+    "Publish!cancel": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "✖️ ANNULER REPLAY",
+      "buttonTooltip": "Annuler le repeat en cours",
+      "buttonColor": "#dc2626",
+      "advancedView": false,
+      "value": "{\"data\": \"cancel\"}"
+    },
+    "Publish!clear": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "🗑️ EFFACER",
+      "buttonTooltip": "Effacer la trajectoire courante",
+      "buttonColor": "#6b7280",
+      "advancedView": false,
+      "value": "{\"data\": \"clear_trajectory\"}"
+    },
+    "Publish!save": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "💾 SAUVER ROUTE",
+      "buttonTooltip": "Sauvegarder route + carte sous le nom demo_route (éditer le panel pour changer le nom)",
+      "buttonColor": "#7c3aed",
+      "advancedView": false,
+      "value": "{\"data\": \"save:demo_route\"}"
+    },
+    "Publish!load": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "📂 CHARGER ROUTE",
+      "buttonTooltip": "Charger route + carte demo_route (éditer le panel pour changer le nom)",
+      "buttonColor": "#7c3aed",
+      "advancedView": false,
+      "value": "{\"data\": \"load:demo_route\"}"
+    },
+    "RawMessages!teachstate": {
+      "topicPath": "/wiln/teach/state",
+      "defaultExpanded": false
+    },
+    "RawMessages!replaystate": {
+      "topicPath": "/wiln/replay/state",
+      "defaultExpanded": false
+    },
+    "3D!trailer": {
+      "followMode": "follow-pose",
+      "followTf": "base_link",
+      "cameraState": {
+        "distance": 12,
+        "perspective": true,
+        "phi": 50,
+        "target": [
+          0,
+          0,
+          0
+        ],
+        "targetOffset": [
+          -2,
+          0,
+          0
+        ],
+        "targetOrientation": [
+          0,
+          0,
+          0,
+          1
+        ],
+        "thetaOffset": 180,
+        "fovy": 45,
+        "near": 0.2,
+        "far": 1000
+      },
+      "topics": {
+        "/rsairy_ns/points": {
+          "visible": true,
+          "colorField": "intensity",
+          "colorMode": "colormap",
+          "colorMap": "turbo",
+          "pointSize": 3
+        },
+        "/hesai_lidar/points": {
+          "visible": false
+        },
+        "/trailer/body_markers": {
+          "visible": true
+        },
+        "/trailer/pose": {
+          "visible": true
+        }
+      },
+      "layers": {
+        "grid": {
+          "layerId": "foxglove.Grid",
+          "visible": true,
+          "size": 30,
+          "divisions": 30,
+          "label": "Grid"
+        }
+      },
+      "scene": {},
+      "transforms": {},
+      "publish": {
+        "type": "point",
+        "poseTopic": "/move_base_simple/goal",
+        "pointTopic": "/clicked_point",
+        "poseEstimateTopic": "/initialpose",
+        "poseEstimateXDeviation": 0.5,
+        "poseEstimateYDeviation": 0.5,
+        "poseEstimateThetaDeviation": 0.26179939
+      },
+      "synchronize": false,
+      "imageMode": {}
+    },
+    "Gauge!artic": {
+      "path": "/hardware/articulation_angle.data",
+      "minValue": -0.7,
+      "maxValue": 0.7,
+      "colorMode": "colormap",
+      "colorMap": "red-yellow-green",
+      "reverse": false,
+      "style": "dial",
+      "tickInterval": 0.1,
+      "showTicks": false,
+      "gradient": [
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "reverseDirection": false
+    },
+    "RawMessages!trailerpose": {
+      "topicPath": "/trailer/pose",
+      "defaultExpanded": false
+    },
+    "Plot!artic": {
+      "paths": [
+        {
+          "value": "/hardware/articulation_angle.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "encodeur"
+        },
+        {
+          "value": "/trailer/articulation_angle.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "LiDAR (détecteur)"
+        },
+        {
+          "value": "/mtt_articulation_angle.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "driver"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 60
+    },
+    "Plot!articpitch": {
+      "paths": [
+        {
+          "value": "/hardware/articulation_pitch_rad.data",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "pitch articulation"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 60
+    },
+    "Indicator!estop2": {
+      "path": "/mtt_control/teleop_estop.data",
+      "style": "background",
+      "fallbackColor": "#6b7280",
+      "fallbackLabel": "E-STOP ?",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "true",
+          "color": "#dc2626",
+          "label": "E-STOP ACTIF"
+        },
+        {
+          "operator": "=",
+          "rawValue": "false",
+          "color": "#16a34a",
+          "label": "E-STOP OK"
+        }
+      ],
+      "fontSize": 36
+    },
+    "Indicator!deadman": {
+      "path": "/mtt_control/teleop_deadman.data",
+      "style": "background",
+      "fallbackColor": "#6b7280",
+      "fallbackLabel": "DEADMAN ?",
+      "rules": [
+        {
+          "operator": "=",
+          "rawValue": "true",
+          "color": "#16a34a",
+          "label": "DEADMAN PRESSÉ"
+        },
+        {
+          "operator": "=",
+          "rawValue": "false",
+          "color": "#374151",
+          "label": "DEADMAN RELÂCHÉ"
+        }
+      ],
+      "fontSize": 36
+    },
+    "Gauge!speed2": {
+      "path": "/mtt_tachometer.speed_kmh",
+      "minValue": 0,
+      "maxValue": 12,
+      "colorMode": "colormap",
+      "colorMap": "red-yellow-green",
+      "reverse": true,
+      "style": "dial",
+      "tickInterval": 0.1,
+      "showTicks": false,
+      "gradient": [
+        "#0000ff",
+        "#ff00ff"
+      ],
+      "reverseDirection": false
+    },
+    "Plot!temp": {
+      "paths": [
+        {
+          "value": "/mtt_health.ambient_temp_c",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "température ambiante (°C)"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 300
+    },
+    "RawMessages!status": {
+      "topicPath": "/mtt_status",
+      "defaultExpanded": false
+    },
+    "RawMessages!battery": {
+      "topicPath": "/mtt_battery/status",
+      "defaultExpanded": false
+    },
+    "Plot!imu": {
+      "paths": [
+        {
+          "value": "/mti100/data.angular_velocity.z",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "yaw rate"
+        },
+        {
+          "value": "/mti100/data.linear_acceleration.x",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "accel x"
+        },
+        {
+          "value": "/mti100/data.linear_acceleration.y",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "accel y"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 30
+    },
+    "RosOut!log": {
+      "searchTerms": [],
+      "minLogLevel": 2,
+      "nameFilter": {},
+      "fontSize": 12,
+      "showLevel": true,
+      "showDate": true,
+      "showTime": true,
+      "showTimezone": true,
+      "showName": true,
+      "showSourceLocation": false
+    },
+    "Parameters!tuning": {
+      "title": "Paramètres ROS (édition live)"
+    },
+    "Publish!custom": {
+      "topicName": "/wiln/command",
+      "datatype": "std_msgs/msg/String",
+      "buttonText": "ENVOYER COMMANDE",
+      "buttonTooltip": "Commande libre WILN : start_recording, stop_recording, smooth_trajectory, clear_trajectory, play, cancel, save:<nom>, load:<nom>",
+      "buttonColor": "#7c3aed",
+      "advancedView": true,
+      "value": "{\"data\": \"load:demo_route\"}"
+    },
+    "Tab!root": {
+      "activeTabIdx": 0,
+      "tabs": [
+        {
+          "title": "🎮 Pilotage",
+          "layout": {
+            "direction": "row",
+            "first": "3D!drive",
+            "second": {
+              "direction": "column",
+              "first": {
+                "direction": "row",
+                "first": "Indicator!mode",
+                "second": "Indicator!estop",
+                "splitPercentage": 50
+              },
+              "second": {
+                "direction": "column",
+                "first": {
+                  "direction": "row",
+                  "first": "CallService!manual",
+                  "second": {
+                    "direction": "row",
+                    "first": "CallService!auto",
+                    "second": "CallService!stop",
+                    "splitPercentage": 50
+                  },
+                  "splitPercentage": 33
+                },
+                "second": {
+                  "direction": "column",
+                  "first": {
+                    "direction": "row",
+                    "first": "Gauge!speed",
+                    "second": "Plot!speed",
+                    "splitPercentage": 32
+                  },
+                  "second": "Image!zed",
+                  "splitPercentage": 45
+                },
+                "splitPercentage": 14
+              },
+              "splitPercentage": 10
+            },
+            "splitPercentage": 58
+          }
+        },
+        {
+          "title": "🛤️ Teach & Repeat",
+          "layout": {
+            "direction": "row",
+            "first": "3D!tr",
+            "second": {
+              "direction": "column",
+              "first": "StateTransitions!wiln",
+              "second": {
+                "direction": "column",
+                "first": {
+                  "direction": "row",
+                  "first": "Publish!rec_start",
+                  "second": {
+                    "direction": "row",
+                    "first": "Publish!rec_stop",
+                    "second": "Publish!smooth",
+                    "splitPercentage": 50
+                  },
+                  "splitPercentage": 33
+                },
+                "second": {
+                  "direction": "column",
+                  "first": {
+                    "direction": "row",
+                    "first": "Publish!play",
+                    "second": {
+                      "direction": "row",
+                      "first": "Publish!cancel",
+                      "second": "Publish!clear",
+                      "splitPercentage": 50
+                    },
+                    "splitPercentage": 33
+                  },
+                  "second": {
+                    "direction": "column",
+                    "first": {
+                      "direction": "row",
+                      "first": "Publish!save",
+                      "second": "Publish!load",
+                      "splitPercentage": 50
+                    },
+                    "second": {
+                      "direction": "row",
+                      "first": "RawMessages!teachstate",
+                      "second": "RawMessages!replaystate",
+                      "splitPercentage": 50
+                    },
+                    "splitPercentage": 28
+                  },
+                  "splitPercentage": 22
+                },
+                "splitPercentage": 22
+              },
+              "splitPercentage": 18
+            },
+            "splitPercentage": 55
+          }
+        },
+        {
+          "title": "🚜 Remorque",
+          "layout": {
+            "direction": "row",
+            "first": "3D!trailer",
+            "second": {
+              "direction": "column",
+              "first": {
+                "direction": "row",
+                "first": "Gauge!artic",
+                "second": "RawMessages!trailerpose",
+                "splitPercentage": 40
+              },
+              "second": {
+                "direction": "column",
+                "first": "Plot!artic",
+                "second": "Plot!articpitch",
+                "splitPercentage": 55
+              },
+              "splitPercentage": 32
+            },
+            "splitPercentage": 55
+          }
+        },
+        {
+          "title": "❤️ Santé",
+          "layout": {
+            "direction": "column",
+            "first": {
+              "direction": "row",
+              "first": {
+                "direction": "row",
+                "first": "Indicator!estop2",
+                "second": "Indicator!deadman",
+                "splitPercentage": 50
+              },
+              "second": {
+                "direction": "row",
+                "first": "Gauge!speed2",
+                "second": "Plot!temp",
+                "splitPercentage": 30
+              },
+              "splitPercentage": 35
+            },
+            "second": {
+              "direction": "row",
+              "first": {
+                "direction": "column",
+                "first": "RawMessages!status",
+                "second": "RawMessages!battery",
+                "splitPercentage": 50
+              },
+              "second": {
+                "direction": "column",
+                "first": "Plot!imu",
+                "second": "RosOut!log",
+                "splitPercentage": 45
+              },
+              "splitPercentage": 40
+            },
+            "splitPercentage": 28
+          }
+        },
+        {
+          "title": "⚙️ Réglages",
+          "layout": {
+            "direction": "row",
+            "first": "Parameters!tuning",
+            "second": "Publish!custom",
+            "splitPercentage": 65
+          }
+        }
+      ]
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": "Tab!root"
+}

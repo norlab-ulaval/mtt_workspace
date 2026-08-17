@@ -2,6 +2,7 @@ x-monitor-base: &monitor_base
   extends:
     file: ../../compose.yaml
     service: bash
+  network_mode: host
   env_file:
     - ../../.env
   volumes:
@@ -32,6 +33,7 @@ services:
 
   bash:
     <<: [*monitor_base]
+    network_mode: host
     profiles: ["debug"]
     command:
       - scripts/run_with_zenoh_session.sh
@@ -39,6 +41,7 @@ services:
 
   monitor:
     <<: [*monitor_base]
+    network_mode: host
     command:
       - bash
       - -lc

@@ -60,7 +60,7 @@
 [submodule "src/external/norlab_icp_mapper_ros"]
 	path = src/external/norlab_icp_mapper_ros
 	url = git@github.com:norlab-ulaval/norlab_icp_mapper_ros.git
-	branch = mohamed
+	branch = ros2
 	update = checkout
 
 [submodule "src/external/norlab_imu_tools"]
@@ -164,3 +164,8 @@
 	path = src/external/isaac_ros_visual_slam
 	url = https://github.com/NVIDIA-ISAAC-ROS/isaac_ros_visual_slam.git
 	branch = release-4.5
+[submodule "src/external/badger_driver"]
+	path = src/external/badger_driver
+	url = https://github.com/norlab-ulaval/Badger_driver.git
+	branch = fix/badger-feedback-only
+	update = checkout

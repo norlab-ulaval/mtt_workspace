@@ -17,20 +17,23 @@
         - "^/mtt_.*"
         - "^/mtt/.*"
         - "^/trailer/.*"
-        - "^/mapping/icp_odom$"
-        - "^/mapping/icp_measurement$"
-        - "^/mapping/trajectory_path$"
-        - "^/mapping/aligned_scan$"
+        - "^/mapping/.*"
+        - "^/map$"
+        - "^/isaac/vslam/.*"
+        - "^/visual_slam/.*"
         - "^/mtt_obstacle/(?:hazard_status|front_clearance_m|stop_requested|slowdown_scale)$"
         - "^/mtt_obstacle/debug_cloud$"
         - "^/wiln/.*"
         - "^/debug/hesai_points_voxel$"
         - "^/zed/zed_node/(?:pose|odom|status/.*|obj_det/objects|body_trk/skeletons)$"
         - "^/zed/markers/.*"
+        - "^/sensor/.*"
         - "^/gps/.*"
+        - "^/gps_front/.*"
         - "^/gps_left/.*"
         - "^/gps_right/.*"
         - "^/navsat/.*"
+        - "^/localization/.*"
         - "^/mtt_battery/.*"
       param_whitelist:
         - ".*"
@@ -55,5 +58,10 @@
         - connectionGraph
         - assets
       include_hidden: false
+      subscribed_transient_local_qos_topic_whitelist:
+        - "^/tf_static$"
+        - "^/robot_description$"
+        - "^/mapping/.*"
+        - "^/map$"
       asset_uri_allowlist:
-        - "^package://(?:\\w+/)*\\w+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"
+        - "^package://(?:[\\w.-]+/)*[\\w.-]+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"

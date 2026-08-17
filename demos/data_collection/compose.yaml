@@ -38,7 +38,7 @@ x-dc-base: &dc_base
   build: *mtt_devel_build
   pull_policy: never
   privileged: true
-  environment:
+  environment: &dc_base_env
     ROS_DOMAIN_ID: ${LIVE_ROBOT_DOMAIN_ID:-2}
     RMW_IMPLEMENTATION: ${MTT_RMW_IMPLEMENTATION:-rmw_zenoh_cpp}
     ROBOT_NAME: ${ROBOT_NAME:-mtt-hl}
@@ -54,15 +54,6 @@ x-dc-base: &dc_base
     FOXGLOVE_BIND_ADDRESS: ${FOXGLOVE_BIND_ADDRESS:-192.168.50.2}
     FOXGLOVE_PARAMS_FILE: ${FOXGLOVE_PARAMS_FILE:-${WORKSPACE}/demos/live_robot/config/foxglove_bridge.yaml}
     FOXGLOVE_FIELD_PARAMS_FILE: ${FOXGLOVE_FIELD_PARAMS_FILE:-${WORKSPACE}/src/external/norlab_robot/config/_foxglove_bridge_field_light.yaml}
-    # Data collection session metadata — set by annotate_session.sh → .env
-    EXPERIMENT_NAME: ${EXPERIMENT_NAME:-exp}
-    SESSION_TYPE: ${SESSION_TYPE:-nominal}         # nominal | edge_case | calibration | motion_model
-    TERRAIN: ${TERRAIN:-unknown}                   # neige_dure | sloche | boue | mixte | ...
-    TRAILER_ATTACHED: ${TRAILER_ATTACHED:-false}   # true | false
-    OPERATOR: ${OPERATOR:-unknown}
-    WEATHER: ${WEATHER:-unknown}
-    TEMPERATURE: ${TEMPERATURE:-0}                 # °C
-    NOTES: ${NOTES:-}
     BAG_CACHE_SIZE_BYTES: ${BAG_CACHE_SIZE_BYTES:-268435456}
     BAG_DISK_MIN_GB: ${BAG_DISK_MIN_GB:-40}
     BAG_DISK_WARN_GB: ${BAG_DISK_WARN_GB:-80}
@@ -83,6 +74,25 @@ x-dc-base: &dc_base
     - /run/udev:/run/udev:ro
     # Bags go to workspace/data/ — persistent across container restarts
     - ${WORKSPACE}/data:${WORKSPACE}/data
+
+# Data collection session metadata — set by annotate_session.sh → .env.
+# Split out of x-dc-base (2026-08-04): this is only ever read by the `record`
+# service's own command script, never by sensors/perception/mapping/isaac_vslam/etc.
+# Keeping it in the shared base meant re-annotating an already-running session
+# (docker compose up after annotate_session.sh touched .env) changed the resolved
+# environment for EVERY service extending x-dc-base, so compose recreated the
+# whole stack -- sensors dropped, QoS/topics reset -- just to pick up a new
+# EXPERIMENT_NAME. Only `record` merges this anchor now, so re-annotating only
+# recreates `record`.
+x-dc-session-env: &dc_session_env
+  EXPERIMENT_NAME: ${EXPERIMENT_NAME:-exp}
+  SESSION_TYPE: ${SESSION_TYPE:-nominal}         # nominal | edge_case | calibration | motion_model
+  TERRAIN: ${TERRAIN:-unknown}                   # neige_dure | sloche | boue | mixte | ...
+  TRAILER_ATTACHED: ${TRAILER_ATTACHED:-false}   # true | false
+  OPERATOR: ${OPERATOR:-unknown}
+  WEATHER: ${WEATHER:-unknown}
+  TEMPERATURE: ${TEMPERATURE:-0}                 # °C
+  NOTES: ${NOTES:-}
 
 # Base for the Isaac ROS sidecar (isaac_vslam) -- separate image from
 # dc_base's mtt_workspace:devel, mirrors demos/live_robot/compose.yaml's
@@ -649,6 +659,8 @@ services:
   # Stop cleanly with Ctrl+C — SIGINT lets ros2 bag record finalize the mcap.
   record:
     <<: [*dc_base]
+    environment:
+      <<: [*dc_base_env, *dc_session_env]
     profiles: ["record"]
     stop_signal: SIGINT   # ros2 bag record needs SIGINT to finalize the bag cleanly
     stop_grace_period: 5m
@@ -798,6 +810,30 @@ services:
           return 1
         }
 
+        # wait_for_topic only proves a PUBLISHER exists (ros2 topic info), which is
+        # exactly the blind spot that let the 2026-07-30 ICE_ID_FULL session record
+        # 84.5GB with zero ZED messages: ZED was genuinely publishing, but
+        # ros2 bag record's default RELIABLE subscription silently never matched its
+        # BEST_EFFORT publishers, so nothing was ever received -- an operator eyeballing
+        # "topic exists" at the start sees no problem at all. `ros2 topic echo` (unlike
+        # `ros2 topic hz`, which has no QoS override flags in this distro) auto-negotiates
+        # a QoS profile COMPATIBLE with whatever's actually running, so `--once` genuinely
+        # proves a message can be received, not just that a publisher exists. This is
+        # BLOCKING (no `|| true`) for the ZED/VSLAM chain specifically -- added 2026-08-03
+        # after that incident, deliberately harder-nosed than the other soft checks below.
+        wait_for_topic_flowing() {
+          local topic="$$1"
+          local timeout_s="$$2"
+          local label="$$3"
+          if timeout "$$timeout_s" ros2 topic echo --once --timeout "$$timeout_s" "$$topic" > /dev/null 2>&1; then
+            echo "  $$label FLOWING (message actually received)"
+            return 0
+          fi
+          echo "  CRITICAL: $$label -- topic may exist but NO MESSAGE RECEIVED in $${timeout_s}s"
+          echo "    (QoS mismatch, publisher stalled, or the node never truly started -- 'topic exists' checks cannot catch this)"
+          return 1
+        }
+
         echo "Waiting for latched and runtime-critical topics..."
         wait_for_topic /tf 20 "dynamic TF" || true
         wait_for_topic /tf_static 20 "static TF" || true
@@ -809,6 +845,24 @@ services:
           wait_for_topic /zed/zed_node/rgb/color/rect/image/compressed 15 "ZED RGB" || true
           wait_for_topic /zed/zed_node/depth/depth_registered/compressedDepth 15 "ZED depth" || true
           wait_for_topic /zed/zed_node/point_cloud/cloud_registered 15 "ZED point cloud" || true
+
+          # ── Hard gate: ZED VIO stereo chain + Isaac VSLAM must actually deliver data ──
+          echo "  Verifying ZED VIO chain + Isaac VSLAM actually deliver messages (not just 'topic exists')..."
+          ZED_VSLAM_OK=true
+          wait_for_topic_flowing /zed/zed_node/imu/data 45 "ZED IMU" || ZED_VSLAM_OK=false
+          wait_for_topic_flowing /zed/zed_node/left/gray/rect/image 45 "ZED left gray rect" || ZED_VSLAM_OK=false
+          wait_for_topic_flowing /zed/zed_node/right/gray/rect/image 45 "ZED right gray rect" || ZED_VSLAM_OK=false
+          wait_for_topic_flowing /isaac/vslam/odometry 45 "Isaac VSLAM odometry" || ZED_VSLAM_OK=false
+          if [ "$${ZED_VSLAM_OK}" != "true" ]; then
+            echo ""
+            echo "  ############################################################"
+            echo "  # ZED/VSLAM CHAIN NOT DELIVERING DATA -- REFUSING TO RECORD #"
+            echo "  ############################################################"
+            echo "  Check: docker compose ps isaac_vslam sensors ; docker compose logs isaac_vslam sensors"
+            echo "  To record anyway without camera/VSLAM (not recommended): ENABLE_PERCEPTION=false"
+            exit 42
+          fi
+          echo "  ZED VIO chain + Isaac VSLAM confirmed flowing."
         else
           echo "  ZED skipped (ENABLE_PERCEPTION=false)"
         fi
@@ -919,18 +973,47 @@ services:
           "$${RECORD_TOPICS[@]}" &
         BAG_PID=$$!
 
-        # ── Background size + disk monitor ──
-        (while true; do
-          sleep 60
-          SIZE=$$(du -sh "$${BAG_DIR}" 2>/dev/null | cut -f1)
-          AVAIL_GB=$$(df -BG "${WORKSPACE}/data" | awk 'NR==2 {gsub("G",""); print $4}')
-          echo "  [$$(date +%H:%M:%S)] Session size: $${SIZE}  |  Free: $${AVAIL_GB} GB"
-          if [ "$${AVAIL_GB}" -lt 10 ]; then
-            echo "  CRITICAL: Less than 10 GB free — stopping record"
-            kill -INT "$${BAG_PID}" 2>/dev/null || true
-            break
-          fi
-        done) &
+        # ── Background size + disk + liveness monitor ──
+        # Liveness check added 2026-08-05: on the ice-rink session, ros2 bag record
+        # hung twice (CPU time frozen, container still "running", mcap byte-identical)
+        # while this loop kept logging the same "Session size" for 8+ minutes without
+        # acting -- 15/36 experiment segments ran with no data reaching disk before this
+        # was caught manually. STALL_LIMIT=3 means 3 consecutive unchanged readings
+        # (~3 min) triggers a clean SIGINT so the bag finalizes (recoverable via
+        # `ros2 bag reindex` if metadata.yaml is still missing after that) instead of
+        # silently continuing to record nothing. This does NOT auto-relaunch recording --
+        # a stall can also mean an upstream sensor wedged (e.g. the Hesai UDP-session
+        # wedge seen the same day), and blindly respawning `record` would mask that.
+        (
+          LAST_SIZE_BYTES=-1
+          STALL_COUNT=0
+          STALL_LIMIT=3
+          while true; do
+            sleep 60
+            SIZE=$$(du -sh "$${BAG_DIR}" 2>/dev/null | cut -f1)
+            SIZE_BYTES=$$(du -sb "$${BAG_DIR}" 2>/dev/null | cut -f1)
+            AVAIL_GB=$$(df -BG "${WORKSPACE}/data" | awk 'NR==2 {gsub("G",""); print $4}')
+            echo "  [$$(date +%H:%M:%S)] Session size: $${SIZE}  |  Free: $${AVAIL_GB} GB"
+            if [ "$${AVAIL_GB}" -lt 10 ]; then
+              echo "  CRITICAL: Less than 10 GB free — stopping record"
+              kill -INT "$${BAG_PID}" 2>/dev/null || true
+              break
+            fi
+            if [ "$${SIZE_BYTES}" = "$${LAST_SIZE_BYTES}" ]; then
+              STALL_COUNT=$$((STALL_COUNT + 1))
+              echo "  WARNING: bag size unchanged ($${STALL_COUNT}/$${STALL_LIMIT} checks) — recorder may be hung"
+              if [ "$${STALL_COUNT}" -ge "$${STALL_LIMIT}" ]; then
+                echo "  CRITICAL: recorder stalled for $${STALL_LIMIT} min (no bytes written) — finalizing bag and stopping"
+                echo "  CRITICAL: check upstream sensors before relaunching (a stalled writer can mean a wedged publisher, not just a hung recorder)"
+                kill -INT "$${BAG_PID}" 2>/dev/null || true
+                break
+              fi
+            else
+              STALL_COUNT=0
+            fi
+            LAST_SIZE_BYTES=$${SIZE_BYTES}
+          done
+        ) &
         MONITOR_PID=$$!
 
         wait "$${BAG_PID}"
@@ -962,17 +1045,85 @@ services:
       - ${WORKSPACE}/scripts/mtt_experiment_conductor.py
       - --ros-args
       - -p
+      - start_segment_id:=${START_SEGMENT_ID:-}
+      - -p
       - profile_path:=${WORKSPACE}/demos/data_collection/config/${EXPERIMENT_PROFILE:-ice_experiment_profiles.yaml}
       - -p
       - include_extended:=${EXPERIMENT_INCLUDE_EXTENDED:-false}
       - -p
       - auto_speed_cap_ms:=${EXPERIMENT_AUTO_SPEED_CAP_MS:-1.2}
       - -p
+      # Kill switch for the 2026-07-29 obstacle-monitor wiring (mtt_front_obstacle_monitor
+      # -> /mtt_obstacle/stop_requested, one more AND condition in _is_engaged()). Default
+      # on. If it misbehaves on ice tomorrow (false positives, unexpected disengages),
+      # set EXPERIMENT_USE_OBSTACLE_STOP=false and relaunch -- no code edit needed. This
+      # only REMOVES a disengage trigger; it can never add a way to command the robot, so
+      # turning it off returns to the exact behavior validated on grass/ice before tonight.
+      - use_obstacle_stop:=${EXPERIMENT_USE_OBSTACLE_STOP:-true}
+      - -p
+      # Geofence (2026-07-30): OFF by construction unless a zone map path resolves -- empty
+      # path means the conductor logs "geofence DISABLED" and _is_engaged() skips the check
+      # entirely, byte-identical to before this existed. Point it at a real zone map (built
+      # with build_zone_map.py --polygon, itself built with pick_boundary_polygon.py) to
+      # activate. EXPERIMENT_USE_GEOFENCE=false is an extra kill switch on top, for when a
+      # path is configured by default but you want it off without unsetting the path.
+      # Default below is the robot's real ice-rink zone map -- override with
+      # EXPERIMENT_ZONE_MAP_PATH=<path> docker compose ... for a different one.
+      # NOTE (2026-08-03): env_file entries (runtime.env) are NOT read for this ${...}
+      # substitution -- only shell env + the project .env are. Verified via
+      # `docker compose config`; do not "fix" this by adding the var to runtime.env again.
+      - use_geofence:=${EXPERIMENT_USE_GEOFENCE:-true}
+      - -p
+      - zone_map_path:=${EXPERIMENT_ZONE_MAP_PATH:-/home/mohamed/Project/mtt_ws/zone_map.npz}
+      - -p
+      - geofence_margin_m:=${EXPERIMENT_GEOFENCE_MARGIN_M:-1.0}
+      - -p
+      # Auto-reverse (2026-08-03): naive boundary-recovery reverse, deliberately dumb by
+      # design (center articulation, reverse straight, no path planning) so the robot
+      # never just sits frozen at a wall waiting for a manual takeover. Requires the same
+      # zone map as the geofence above (no-ops without EXPERIMENT_ZONE_MAP_PATH). Trigger
+      # margin MUST stay > geofence_margin_m (enforced at startup) so the hard critical
+      # stop always fires first if the trigger is ever misconfigured too tight.
+      - use_auto_reverse:=${EXPERIMENT_USE_AUTO_REVERSE:-true}
+      - -p
+      - auto_reverse_trigger_margin_m:=${EXPERIMENT_AUTO_REVERSE_TRIGGER_MARGIN_M:-1.5}
+      - -p
+      - auto_reverse_target_clearance_m:=${EXPERIMENT_AUTO_REVERSE_TARGET_CLEARANCE_M:-2.0}
+      - -p
+      - auto_reverse_max_duration_s:=${EXPERIMENT_AUTO_REVERSE_MAX_DURATION_S:-15.0}
+      - -p
+      - auto_reverse_speed_ms:=${EXPERIMENT_AUTO_REVERSE_SPEED_MS:--0.3}
+      - -p
+      - use_rear_obstacle_stop:=${EXPERIMENT_USE_REAR_OBSTACLE_STOP:-true}
+      - -p
       - cmd_vel_topic:=/mtt_control/auto/experiment/cmd_vel
       - -p
       - articulation_topic:=/mtt_control/auto/experiment/articulation_setpoint
       - -p
       - autonomy_owner:=experiment
+
+  # ── Rear obstacle monitor (2026-08-03) ──
+  # Naive/fast 2D rear-hazard check to cover the blind spot behind the trailer during
+  # reversing (front LiDAR monitor does not see back there). Narrow angular sector
+  # (+/-20deg) and narrow elevation slice (+/-3deg, mimics a 2D lidar sweep) anchored at
+  # the trailer rear (follows live articulation via /trailer/articulation_angle), out to
+  # 5m behind. Only ever consumed by the conductor while reversing is intended
+  # (auto-reverse or a segment with negative target speed) -- never gates forward motion,
+  # never forces MANUAL (see use_rear_obstacle_stop comment in experiment_conductor.py).
+  rear_obstacle_monitor:
+    <<: [*dc_base]
+    profiles: ["experiment"]
+    depends_on:
+      robot_driver:
+        condition: service_started
+      sensors:
+        condition: service_started
+      perception:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/mtt_rear_obstacle_monitor.py
 
   # ── Ice-rink real-time coverage & quality monitor ──
   # Companion to experiment_conductor: reads live sensor topics, computes
@@ -992,6 +1143,11 @@ services:
       - python3
       - -u
       - ${WORKSPACE}/scripts/mtt_experiment_monitor.py
+      - --ros-args
+      - -p
+      # Same default/override as experiment_conductor -- one var activates the live
+      # distance/safe-direction display here AND the geofence gate there together.
+      - zone_map_path:=${EXPERIMENT_ZONE_MAP_PATH:-/home/mohamed/Project/mtt_ws/zone_map.npz}
 
   # ── Foxglove live visualisation ──
   # No profile → starts automatically with dc up (same as zenoh and robot).

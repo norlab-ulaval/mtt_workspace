@@ -59,9 +59,8 @@ x-live-robot-base: &live_robot_base
     ROUTE_MANAGER_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_route_manager.yaml
     FRONT_OBSTACLE_PARAMS_FILE: ${WORKSPACE}/demos/common/config/mtt_front_obstacle_monitor.yaml
     WILN_PARAMS_FILE: ${WORKSPACE}/demos/common/config/wiln.yaml
-    # Keep the proven direct command chain. Future avoidance activation changes
-    # the topic and WILN_EXTERNAL_COMMAND_MUX together after shadow validation.
-    WILN_FOLLOWER_CMD_TOPIC: ${WILN_FOLLOWER_CMD_TOPIC:-/controller/cmd_vel}
+    # WILN uses its private input to the always-on WILN/GPS autonomy mux.
+    WILN_FOLLOWER_CMD_TOPIC: ${WILN_FOLLOWER_CMD_TOPIC:-/mtt_control/auto/wiln/cmd_vel}
     WILN_EXTERNAL_COMMAND_MUX: ${WILN_EXTERNAL_COMMAND_MUX:-false}
   volumes:
     - /dev:/dev
@@ -218,6 +217,19 @@ services:
           ZED_ARGS+=(zed_params_override_path:="$${WORKSPACE}/src/external/norlab_robot/config/_zed2i_isaac.yaml")
           echo "  zed profile: isaac"
         fi
+        # zed_left_camera_frame -> zed_imu_link static TF (SDK-calibrated),
+        # needed by Isaac VSLAM VIO mode. Only a launch ARGUMENT can set this
+        # (see sensors.launch.py comment) -- a ZED params override YAML cannot.
+        # Default true (was false) since 2026-07-27: isaac_vslam is now a
+        # default service and needs the real calibrated extrinsic to fuse
+        # IMU correctly, regardless of ZED_PROFILE (deliberately NOT
+        # defaulted to "isaac" -- that profile's NEURAL_LIGHT depth mode
+        # needs GPU/CUDA, which this TF publish does not: it just broadcasts
+        # a static transform already loaded from the SDK's own calibration,
+        # zero extra compute). Harmless when isaac_vslam isn't running.
+        if [ "$${ZED_PUBLISH_IMU_TF:-true}" = "true" ] || [ "$${ZED_PROFILE:-field}" = "isaac" ]; then
+          ZED_ARGS+=(zed_publish_imu_tf:=true)
+        fi
         exec ros2 launch norlab_robot sensors.launch.py \
           warnings:=false \
           enable_gps:=$${ENABLE_GPS:-false} \
@@ -282,7 +294,11 @@ services:
 
   isaac_vslam:
     <<: [*isaac_base]
-    profiles: ["isaac"]
+    # No profiles: -- default service as of 2026-07-27 (was profiles:
+    # ["isaac"], opt-in). Requires the mtt_workspace:isaac sidecar image
+    # (built via `docker compose --profile isaac build isaac_vslam` if
+    # missing -- `build:` in isaac_base can also build it on first `up`,
+    # which adds real startup time/network dependency on a fresh machine).
     depends_on:
       - sensors
       - description
@@ -294,12 +310,41 @@ services:
         [ -f "$${WORKSPACE}/install/setup.bash" ] && source "$${WORKSPACE}/install/setup.bash"
         [ -f /opt/isaac_ros_ws/install/setup.bash ] && source /opt/isaac_ros_ws/install/setup.bash
 
-        params_file="$${ISAAC_VSLAM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/isaac_vslam_rgbd.yaml}"
-        image_topic="$${ISAAC_VSLAM_IMAGE_TOPIC:-/zed/zed_node/left/gray/rect/image}"
-        camera_info_topic="$${ISAAC_VSLAM_CAMERA_INFO_TOPIC:-/zed/zed_node/left/gray/rect/camera_info}"
+        # ISAAC_VSLAM_MODE=vio (default since 2026-07-27: stereo + ZED IMU
+        # fusion, see isaac_vslam_vio.yaml) or =rgbd (camera+depth, no IMU
+        # fusion -- see isaac_vslam_rgbd.yaml header). rgbd is currently
+        # BROKEN on this hardware/release (cuVSLAM 15.0.0, release-4.5): 4
+        # parameter combinations tried 2026-07-26, all failed (error / silent
+        # hang / segfault) -- do not default back to it without fixing that
+        # first. isaac_ros_visual_slam release-4.5 only computes the
+        # camera<->IMU extrinsic and fuses IMU when tracking_mode==VIO; the
+        # two modes are mutually exclusive, not stackable.
+        mode="$${ISAAC_VSLAM_MODE:-vio}"
+        if [ "$${mode}" = "vio" ]; then
+          params_file="$${ISAAC_VSLAM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/isaac_vslam_vio.yaml}"
+        else
+          params_file="$${ISAAC_VSLAM_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/isaac_vslam_rgbd.yaml}"
+        fi
+        # RGBD wants the RAW (unrectified) left image -- cuVSLAM rectifies
+        # internally in that mode (see isaac_vslam_rgbd.yaml). VIO genuinely
+        # needs pre-rectified stereo (matches NVIDIA's own VIO reference).
+        if [ "$${mode}" = "vio" ]; then
+          image_topic="$${ISAAC_VSLAM_IMAGE_TOPIC:-/zed/zed_node/left/gray/rect/image}"
+          camera_info_topic="$${ISAAC_VSLAM_CAMERA_INFO_TOPIC:-/zed/zed_node/left/gray/rect/camera_info}"
+        else
+          image_topic="$${ISAAC_VSLAM_IMAGE_TOPIC:-/zed/zed_node/left/gray/raw/image}"
+          camera_info_topic="$${ISAAC_VSLAM_CAMERA_INFO_TOPIC:-/zed/zed_node/left/gray/raw/camera_info}"
+        fi
         depth_topic="$${ISAAC_VSLAM_DEPTH_TOPIC:-/zed/zed_node/depth/depth_registered}"
         depth_info_topic="$${ISAAC_VSLAM_DEPTH_INFO_TOPIC:-/zed/zed_node/depth/depth_registered/camera_info}"
         imu_topic="$${ISAAC_VSLAM_IMU_TOPIC:-/zed/zed_node/imu/data}"
+        if [ "$${mode}" = "vio" ]; then
+          image_right_topic="$${ISAAC_VSLAM_IMAGE_RIGHT_TOPIC:-/zed/zed_node/right/gray/rect/image}"
+          camera_info_right_topic="$${ISAAC_VSLAM_CAMERA_INFO_RIGHT_TOPIC:-/zed/zed_node/right/gray/rect/camera_info}"
+        else
+          image_right_topic="$${ISAAC_VSLAM_IMAGE_RIGHT_TOPIC:-/zed/zed_node/right/gray/raw/image}"
+          camera_info_right_topic="$${ISAAC_VSLAM_CAMERA_INFO_RIGHT_TOPIC:-/zed/zed_node/right/gray/raw/camera_info}"
+        fi
 
         if ! ros2 pkg prefix isaac_ros_visual_slam >/dev/null 2>&1; then
           echo "ERROR: isaac_ros_visual_slam is not installed in this container."
@@ -312,27 +357,69 @@ services:
           exit 43
         fi
 
-        echo "=== Isaac Visual SLAM RGB-D ==="
+        echo "=== Isaac Visual SLAM ($${mode}) ==="
         echo "params: $${params_file}"
         echo "image:  $${image_topic}"
-        echo "depth:  $${depth_topic}"
         echo "imu:    $${imu_topic}"
         echo "Waiting for ZED topics to settle..."
         sleep 5
-        exec ros2 run isaac_ros_visual_slam isaac_ros_visual_slam \
-          --ros-args \
-          --params-file "$${params_file}" \
-          -r visual_slam/image_0:="$${image_topic}" \
-          -r visual_slam/camera_info_0:="$${camera_info_topic}" \
-          -r visual_slam/depth_0:="$${depth_topic}" \
-          -r visual_slam/depth_camera_info_0:="$${depth_info_topic}" \
-          -r visual_slam/imu:="$${imu_topic}" \
-          -r visual_slam/tracking/odometry:=/isaac/vslam/odometry \
-          -r visual_slam/tracking/slam_path:=/isaac/vslam/slam_path \
-          -r visual_slam/tracking/vo_path:=/isaac/vslam/vo_path \
-          -r visual_slam/status:=/isaac/vslam/status \
-          -r visual_slam/vis/landmarks_cloud:=/isaac/vslam/landmarks_cloud \
-          -r visual_slam/vis/observations_cloud:=/isaac/vslam/observations_cloud
+        if [ "$${mode}" = "vio" ]; then
+          echo "image_1: $${image_right_topic}"
+          # DISABLED 2026-07-26: isaac_vslam_frame_bridge.py used to publish
+          # hesai_lidar -> isaac_map, but norlab_icp_mapper_ros's mapper_node
+          # ALSO claims isaac_map's parent (it broadcasts map -> odom_frame,
+          # and odom_frame was set to isaac_map) -- two broadcasters, same
+          # child, the exact conflict this script was written to avoid, just
+          # moved one frame over. Confirmed via `view_frames` inside the
+          # mapping container: "isaac_map: parent: 'map'" (the mapper) racing
+          # this script's "isaac_map: parent: 'hesai_lidar'".
+          # mapper_node.cpp has no topic-based prior input (only TF), and
+          # every URDF frame between isaac_odom and base_footprint already
+          # has a real parent (hesai_lidar owns zed_camera_link, odom owns
+          # base_footprint) -- there is no free TF attachment point left for
+          # an Isaac-derived ICP prior without a mapper code change or
+          # replacing the wheel-odom TF source outright. Left disabled;
+          # MAPPING_ODOM_FRAME reverted to "odom" (default, conflict-free).
+          # python3 "$${WORKSPACE}/scripts/isaac_vslam_frame_bridge.py" &
+          # zed_left_camera_frame -> zed_imu_link is published by the ZED node
+          # itself (real SDK-calibrated camera_imu_transform), enabled via the
+          # sensors service's zed_publish_imu_tf launch argument (see
+          # sensors.launch.py) -- root-caused and fixed 2026-07-26, no
+          # workaround TF needed here anymore.
+          exec ros2 run isaac_ros_visual_slam isaac_ros_visual_slam \
+            --ros-args \
+            --params-file "$${params_file}" \
+            -r visual_slam/image_0:="$${image_topic}" \
+            -r visual_slam/camera_info_0:="$${camera_info_topic}" \
+            -r visual_slam/image_1:="$${image_right_topic}" \
+            -r visual_slam/camera_info_1:="$${camera_info_right_topic}" \
+            -r visual_slam/imu:="$${imu_topic}" \
+            -r visual_slam/tracking/odometry:=/isaac/vslam/odometry \
+            -r visual_slam/tracking/slam_path:=/isaac/vslam/slam_path \
+            -r visual_slam/tracking/vo_path:=/isaac/vslam/vo_path \
+            -r visual_slam/status:=/isaac/vslam/status \
+            -r visual_slam/vis/landmarks_cloud:=/isaac/vslam/landmarks_cloud \
+            -r visual_slam/vis/observations_cloud:=/isaac/vslam/observations_cloud
+        else
+          echo "depth:  $${depth_topic}"
+          echo "image_1 (test: num_cameras=2 may need a real pair, not just image+depth): $${image_right_topic}"
+          exec ros2 run isaac_ros_visual_slam isaac_ros_visual_slam \
+            --ros-args \
+            --params-file "$${params_file}" \
+            -r visual_slam/image_0:="$${image_topic}" \
+            -r visual_slam/camera_info_0:="$${camera_info_topic}" \
+            -r visual_slam/image_1:="$${image_right_topic}" \
+            -r visual_slam/camera_info_1:="$${camera_info_right_topic}" \
+            -r visual_slam/depth_0:="$${depth_topic}" \
+            -r visual_slam/depth_camera_info_0:="$${depth_info_topic}" \
+            -r visual_slam/imu:="$${imu_topic}" \
+            -r visual_slam/tracking/odometry:=/isaac/vslam/odometry \
+            -r visual_slam/tracking/slam_path:=/isaac/vslam/slam_path \
+            -r visual_slam/tracking/vo_path:=/isaac/vslam/vo_path \
+            -r visual_slam/status:=/isaac/vslam/status \
+            -r visual_slam/vis/landmarks_cloud:=/isaac/vslam/landmarks_cloud \
+            -r visual_slam/vis/observations_cloud:=/isaac/vslam/observations_cloud
+        fi
 
   isaac_nvblox:
     <<: [*isaac_base]
@@ -472,7 +559,7 @@ services:
           mapping_odom_bridge_min_speed_ms:=$${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5} \
           mapping_allow_odom_bridge_map_insertion:=$${MAPPING_ALLOW_ODOM_BRIDGE_MAP_INSERTION:-false} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
-          mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config.yaml} \
+          mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_hesai_imu_norlabws.yaml} \
           mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME:-odom} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME:-base_footprint}
@@ -554,6 +641,106 @@ services:
           --ros-args \
           --params-file "$${params_file}" \
           "$${address_args[@]}"
+
+  # ── Localization: Factor Graph + Trailer Localizer ──
+  # Runs mtt_localization/localization.launch.py (live, no sim time).
+  # Launches two nodes:
+  #   - factor_graph_node: ISAM2 tractor pose + optimised phi
+  #     Publishes: /localization/odom (SE(3) with 6x6 covariance)
+  #                /localization/articulation_angle (optimised phi, std_msgs/Float64)
+  #   - mtt_trailer_localizer_node: trailer SE(3) pose in map
+  #     Publishes: /trailer/odom, /trailer/pose_in_map, TF map->trailer_body
+  #
+  # Core live service: starts by default with `dc up`. The GPS follower remains
+  # disarmed until /mtt_gps/replay is explicitly called and all gates are valid.
+  localization:
+    <<: [*live_robot_base]
+    restart: unless-stopped
+    depends_on:
+      - mapping
+    command:
+      - bash
+      - -lc
+      - |
+        echo "==================================================="
+        echo " MTT Localization (Factor Graph + Trailer)"
+        echo "==================================================="
+        echo "Waiting for /mtt/articulation_state..."
+        for i in $$(seq 1 60); do
+          ros2 topic info /mtt/articulation_state 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 60 ] && echo "  WARNING: /mtt/articulation_state not ready after 60s — launching anyway" && break
+          echo "  ($$i/60) Waiting..."
+          sleep 1
+        done
+        echo "Waiting for /mapping/icp_odom (Norlab ICP odom prior)..."
+        for i in $$(seq 1 45); do
+          ros2 topic info /mapping/icp_odom 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 45 ] && echo "  WARNING: /mapping/icp_odom not ready after 45s — launching anyway" && break
+          echo "  ($$i/45) Waiting..."
+          sleep 1
+        done
+        echo "Starting localization + GPS Teach & Repeat services..."
+        exec ros2 launch mtt_gps_teach_repeat gps_localization.launch.py \
+          use_sim_time:=false \
+          use_gps:=true \
+          use_gps_heading:=false \
+          gps_recorder_params_file:=$${GPS_RECORDER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_recorder.yaml} \
+          gps_path_server_params_file:=$${GPS_PATH_SERVER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_path_server.yaml} \
+          gps_path_follower_params_file:=$${GPS_PATH_FOLLOWER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_path_follower.yaml} \
+          front_obstacle_params_file:=$${FRONT_OBSTACLE_PARAMS_FILE}
+
+  # ── GPS teach & repeat: recorder ──
+  # Runs mtt_gps_teach_repeat/gps_recorder.launch.py — mtt_gps_recorder_node,
+  # Legacy standalone recorder (localization already includes the unified GPS stack).
+  # Do not start this together with localization.
+  # Services: ~/start_recording, ~/stop_recording (Trigger) — wired to the
+  # Foxglove GPS tab's record/stop buttons.
+  #
+  # Requires the "localization" service also running (different profile —
+  # docker compose can't depends_on across a profile boundary, so this waits
+  # on the topic instead) and a real anchor set — see "Setting the anchor"
+  # in src/mtt_core/mtt_gps_teach_repeat/README.md.
+  # Legacy only: `dc --profile gps up gps_recorder` (do not combine with localization).
+  gps_recorder:
+    <<: [*live_robot_base]
+    profiles: ["gps"]
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for localization/odom..."
+        for i in $$(seq 1 45); do
+          ros2 topic info localization/odom 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 45 ] && echo "  WARNING: localization/odom not ready after 45s — launching anyway" && break
+          sleep 1
+        done
+        exec ros2 launch mtt_gps_teach_repeat gps_recorder.launch.py \
+          gps_recorder_params_file:=$${GPS_RECORDER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_recorder.yaml}
+
+  # ── GPS teach & repeat: path server + follower ──
+  # Runs mtt_gps_teach_repeat/gps_path_following.launch.py — matches the live
+  # pose against a recorded route (mtt_gps_path_server_node) and drives the
+  # Frenet-error control law (mtt_gps_path_follower_node). Same AUTO+deadman
+  # safety contract as WILN. It may run together with wiln_path_follower: the
+  # REPLAY services select one controller through the autonomy mux.
+  # Requires "localization" also running — see gps_recorder's comment above.
+  # Legacy only: `dc --profile gps up gps_path_following` (do not combine with localization).
+  gps_path_following:
+    <<: [*live_robot_base]
+    profiles: ["gps"]
+    command:
+      - bash
+      - -lc
+      - |
+        echo "Waiting for localization/odom..."
+        for i in $$(seq 1 45); do
+          ros2 topic info localization/odom 2>/dev/null | grep -qE "Publisher count: [1-9]" && break
+          [ "$$i" -eq 45 ] && echo "  WARNING: localization/odom not ready after 45s — launching anyway" && break
+          sleep 1
+        done
+        exec ros2 launch mtt_gps_teach_repeat gps_path_following.launch.py \
+          gps_path_server_params_file:=$${GPS_PATH_SERVER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_path_server.yaml} \
+          gps_path_follower_params_file:=$${GPS_PATH_FOLLOWER_PARAMS_FILE:-$${WORKSPACE}/demos/common/config/gps_path_follower.yaml}
 
   # ── COM motor (EtherCAT stepper, optional) ──
   # Launches mtt_motor_driver (SOEM 1kHz RT) + mtt_motor_control (position).
@@ -672,7 +859,7 @@ services:
 
   wiln:
     <<: [*live_robot_base]
-    profiles: ["wiln"]
+    restart: unless-stopped
     depends_on:
       - mapping
     command:
@@ -692,7 +879,15 @@ services:
         }
         wait_for_topic /mapping/icp_odom 45 "Norlab ICP odom" || exit 1
         wait_for_topic /mapping/map 45 "Norlab ICP map" || exit 1
-        wait_for_topic /mapping/trajectory_path 45 "Norlab ICP trajectory path" || exit 1
+        # /mapping/trajectory_path was a mohamed-fork-only visualization topic
+        # (norlab_icp_mapper_ros switched to upstream ros2 2026-07-28, see
+        # dependencies/robot.repos). Upstream mapper_node only ever publishes
+        # map / scan_after_input_filters / scan_after_deskew / icp_odom — this
+        # topic will never exist again. WILN itself only consumes
+        # /mapping/icp_odom (wiln_path_follower.odom_topic in
+        # demos/common/config/wiln.yaml) — nothing subscribes to
+        # trajectory_path, it was Foxglove/rosbag decoration only. Non-fatal.
+        wait_for_topic /mapping/trajectory_path 45 "Norlab ICP trajectory path" || true
         echo "Norlab ICP ready — starting teach/repeat stack"
         echo ""
         echo "  Fresh route:"

@@ -2,29 +2,41 @@
 # annotate_session.sh — interactive session annotation
 #
 # Prompts the operator for experiment context, then writes:
-#   demos/data_collection/.env   — picked up automatically by docker compose
+#   demos/<DEMO>/.env             — picked up automatically by docker compose
 #   /tmp/mtt_session_info.txt    — human-readable summary printed before launch
 #
 # Usage:
-#   bash scripts/annotate_session.sh
-#   bash scripts/annotate_session.sh --noninteractive  # uses env vars as-is, no prompts
+#   bash scripts/annotate_session.sh                       # targets demos/data_collection
+#   bash scripts/annotate_session.sh --demo=mathis_com_shift
+#   bash scripts/annotate_session.sh --noninteractive       # uses env vars as-is, no prompts
+#
+# --demo defaults to data_collection for backward compatibility. Any demo
+# whose compose.yaml uses the EXPERIMENT_NAME/SESSION_TYPE/... session-vars
+# pattern (see x-dc-session-env in that demo's compose.yaml) can be targeted --
+# this script only writes .env, it doesn't know about a specific demo's
+# services. Added 2026-08-07: previously hardcoded to demos/data_collection/.env
+# even though demos/mathis_com_shift/compose.yaml's own comments already
+# referenced this script and expected demos/mathis_com_shift/.env.
 #
 # After running this, start the session:
-#   cd demos/data_collection && dc up
+#   cd demos/<DEMO> && docker compose --profile record up
 #
 set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORKSPACE="${WORKSPACE:-$(cd "${SCRIPT_DIR}/.." && pwd)}"
-ENV_FILE="${WORKSPACE}/demos/data_collection/.env"
+TARGET_DEMO="data_collection"
+non_interactive=false
+for arg in "$@"; do
+  case "$arg" in
+    --noninteractive) non_interactive=true ;;
+    --demo=*) TARGET_DEMO="${arg#*=}" ;;
+  esac
+done
+ENV_FILE="${WORKSPACE}/demos/${TARGET_DEMO}/.env"
 SUMMARY_FILE="/tmp/mtt_session_info.txt"
 
 BOLD="\033[1m"; CYAN="\033[96m"; GREEN="\033[92m"; YELLOW="\033[93m"; RESET="\033[0m"
-
-non_interactive=false
-for arg in "$@"; do
-  [[ "$arg" == "--noninteractive" ]] && non_interactive=true
-done
 
 # ── Prompt helper ─────────────────────────────────────────────────────────────
 prompt() {
@@ -61,7 +73,15 @@ choose() {
 }
 
 # ── Load existing .env as defaults ────────────────────────────────────────────
-if [[ -f "$ENV_FILE" ]]; then
+# Interactive mode only: this feeds the "shown default" in each prompt(), which
+# the operator can still override by typing a new value. In --noninteractive
+# mode there are no prompts to show defaults to, and the script's own contract
+# is "uses env vars as-is" (see usage comment above) -- sourcing the old .env
+# here would silently clobber whatever the caller exported, since a plain
+# assignment from the sourced file always overwrites, even a var the caller
+# just set. Confirmed live 2026-08-04: exported EXPERIMENT_NAME/TRAILER_ATTACHED/
+# TEMPERATURE were silently replaced by months-old values from a stale .env.
+if ! $non_interactive && [[ -f "$ENV_FILE" ]]; then
   # shellcheck disable=SC1090
   set -a; source "$ENV_FILE" 2>/dev/null || true; set +a
 fi
@@ -85,8 +105,8 @@ choose SESSION_TYPE "Session type:" "motion_model" \
 choose TERRAIN "Terrain:" "neige_dure" \
   "neige_dure" "sloche" "boue" "mixte" "herbe" "gravier" "asphalte"
 
-# Trailer
-choose TRAILER_ATTACHED "Trailer attached?" "false" "false" "true"
+# Trailer attached (default true for trailer sessions)
+choose TRAILER_ATTACHED "Trailer attached?" "true" "true" "false"
 
 # Weather
 choose WEATHER "Weather:" "ensoleille" \
@@ -165,7 +185,7 @@ echo "       └── bag/                 ← mcap bag files"
 echo ""
 echo -e "${BOLD}Next steps:${RESET}"
 echo "  1. bash scripts/pre_session_check.sh"
-echo "  2. cd demos/data_collection && dc up"
+echo "  2. cd demos/${TARGET_DEMO} && docker compose --profile record up"
 echo "  3. During recording: bash scripts/event_mark.sh \"<event description>\""
 echo "  4. After recording:  python3 scripts/post_session_report.py data/<session_dir>"
 echo ""

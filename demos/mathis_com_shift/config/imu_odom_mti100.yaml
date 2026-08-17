@@ -1,5 +1,11 @@
+# Node name must match the running node ("imu_odom_node", not "imu_odom") or
+# this file is silently ignored. robot_frame/imu_frame/rotation_only/
+# use_altitude/real_time are also passed as -p overrides in compose.yaml and
+# win over these values (ROS 2 CLI -p beats --params-file); only odom_frame
+# and use_sim_time are effectively set from here, and both already match the
+# node's built-in defaults.
 /**:
-  imu_odom:
+  imu_odom_node:
     ros__parameters:
       odom_frame: "odom"
       robot_frame: "base_footprint"

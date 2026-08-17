@@ -29,5 +29,8 @@
         - connectionGraph
         - assets
       include_hidden: false
+      subscribed_transient_local_qos_topic_whitelist:
+        - "^/tf_static$"
+        - "^/robot_description$"
       asset_uri_allowlist:
         - "^package://(?:[\\w-]+/)*[\\w.-]+\\.(?:dae|fbx|glb|gltf|jpeg|jpg|mtl|obj|png|stl|tif|tiff|urdf|webp|xacro)$"

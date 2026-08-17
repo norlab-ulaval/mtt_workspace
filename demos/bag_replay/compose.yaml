@@ -39,7 +39,10 @@ services:
 
   # ── Bag player with synthetic clock ──
   # --clock: republishes bag timestamps as /clock → all nodes use bag time
-  # --loop: loops the bag (remove for single-pass)
+  # --loop: single-pass by default (REPLAY_LOOP=true to loop). Looping rewinds
+  #   /clock on every wrap and re-latches the bag's /tf_static mid-run, which
+  #   confuses TF2 buffers and the mapper's internal state — norlab_ws's
+  #   working setup plays a single pass.
   # --rate: playback speed (1.0 = real-time, 0.5 = half speed for debug)
   bag_player:
     <<: [*replay_base]
@@ -81,7 +84,7 @@ services:
           echo "---"
         fi
         EXCLUDE_TOPICS=(
-          /robot_description /joint_states /runtime_joint_states /tf /tf_static
+          /robot_description /joint_states /runtime_joint_states
           /merged_points /merged_points_raw /merged_points_filtered /hesai_in_base /rsairy_in_base
           /trailer/angle /trailer/pose
           /trailer/body_markers /trailer/trailer_roi_cloud
@@ -100,6 +103,15 @@ services:
         if [ "$${REPLAY_KEEP_ZED_ODOM:-false}" != "true" ]; then
           EXCLUDE_TOPICS+=( /zed/zed_node/odom )
         fi
+        # Exclude the bag's recorded /tf (and /tf_static) by default: replaying it
+        # alongside a live odom node (imu_odom/runtime_odometry) puts two publishers
+        # on the same odom→base_footprint transform, which TF2 resolves by whichever
+        # message arrives last — a race that only shows up once the robot moves.
+        # norlab_ws's working mapper always excludes /tf. Set REPLAY_EXCLUDE_BAG_TF=false
+        # only when no odom node is running and you want the bag's own TF as prior.
+        if [ "$${REPLAY_EXCLUDE_BAG_TF:-true}" = "true" ]; then
+          EXCLUDE_TOPICS+=( /tf /tf_static )
+        fi
         if [ "$${REPLAY_USE_RECORDED_MAPPING:-false}" != "true" ]; then
           EXCLUDE_TOPICS+=(
             /mapping/icp_odom /mapping/map /mapping/pose_in
@@ -110,10 +122,14 @@ services:
           echo "Replay mode: keeping recorded /mapping/* topics from the bag."
           echo "Do not run this together with the 'mapping' profile."
         fi
+        LOOP_FLAG=()
+        if [ "$${REPLAY_LOOP:-false}" = "true" ]; then
+          LOOP_FLAG=(--loop)
+        fi
         exec ros2 bag play \
           --clock \
           --delay ${REPLAY_DELAY:-3} \
-          --loop \
+          "$${LOOP_FLAG[@]}" \
           --read-ahead-queue-size 10000 \
           --rate ${REPLAY_RATE:-1.0} \
           --start-offset ${REPLAY_START_OFFSET:-0} \
@@ -138,9 +154,13 @@ services:
       bag_player:
         condition: service_started
     command:
-      - ros2
-      - launch
-      - ${WORKSPACE}/demos/bag_replay/launch/description_calib.launch.py
+      - bash
+      - -lc
+      - |
+        echo "Waiting for /clock..."
+        ros2 topic wait /clock --timeout 30 2>&1 || echo "/clock wait timeout, continuing anyway"
+        echo "Starting robot_state_publisher..."
+        exec ros2 launch ${WORKSPACE}/demos/bag_replay/launch/description_calib.launch.py
 
   # ── ZED detections → Foxglove markers ──
   # Converts zed_msgs/ObjectsStamped into visualization_msgs/MarkerArray so
@@ -163,6 +183,7 @@ services:
   # tachometer/cmd_vel stream, but keep its outputs on replay-local topics.
   runtime_odometry:
     <<: [*replay_base]
+    profiles: ["wheel_odom"]
     depends_on:
       bag_player:
         condition: service_started
@@ -375,6 +396,7 @@ services:
   # falls through to the plain Float64 articulation_topic above).
   joint_state_builder:
     <<: [*replay_base]
+    profiles: ["wheel_odom"]
     depends_on:
       runtime_odometry:
         condition: service_started
@@ -506,8 +528,6 @@ services:
         condition: service_started
       description:
         condition: service_started
-      runtime_odometry:
-        condition: service_started
     command:
       - bash
       - -lc
@@ -621,99 +641,74 @@ services:
     environment:
       MAPPING_POINTS_TOPIC: ${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}
       MAPPING_RAW_POINTS_TOPIC: ${MAPPING_RAW_POINTS_TOPIC:-/hesai_lidar/points}
-      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_hesai_wheel_replay.yaml}
+      MAPPING_CONFIG: ${MAPPING_CONFIG:-${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_hesai_imu_replay.yaml}
       MAPPING_COMPRESSION_VOXEL_SIZE: ${MAPPING_COMPRESSION_VOXEL_SIZE:-0.50}
       MAPPING_MAP_PUBLICATION_SOURCE: ${MAPPING_MAP_PUBLICATION_SOURCE:-local}
       MAPPING_MAP_PUBLISH_RATE: ${MAPPING_MAP_PUBLISH_RATE:-1.0}
       MAPPING_MAP_TF_PUBLISH_RATE: ${MAPPING_MAP_TF_PUBLISH_RATE:-50.0}
       MAPPING_MIN_INPUT_POINTS: ${MAPPING_MIN_INPUT_POINTS:-200}
-      MAPPING_MAX_TRANSLATION_CORRECTION: ${MAPPING_MAX_TRANSLATION_CORRECTION:-2.50}
-      MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_ROTATION_CORRECTION_DEG:-35.0}
-      MAPPING_MAX_VELOCITY_MS: ${MAPPING_MAX_VELOCITY_MS:-8.0}
-      MAPPING_MAX_YAW_RATE_DEG_S: ${MAPPING_MAX_YAW_RATE_DEG_S:-80.0}
-      # Replay must stay tolerant to wheel-prior drift, but not accept a false
-      # ICP branch. 180°/100m allowed observed jumps 3°→54°→115° to be published
-      # and inserted, corrupting the map. Keep the absolute accepted-pose step
-      # bounded; use the odom residual gate below for longer motion gaps.
-      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MAPPING_MAX_POSE_YAW_STEP_DEG:-20.0}
-      MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG: ${MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG:-12.0}
-      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-8.0}
-      # 2.0m default (vs 0.75m live): replayed odom can have a Z offset if the
-      # sensor mount was recalibrated since recording. ICP with force4DOF=1
-      # self-corrects Z after the first accepted scan; subsequent jumps <0.1m.
-      MAPPING_MAX_Z_JUMP_M: ${MAPPING_MAX_Z_JUMP_M:-2.0}
-      MAPPING_MAX_REGISTRATION_TIME_MS: ${MAPPING_MAX_REGISTRATION_TIME_MS:-3000.0}
-      # Increased from 10s: in replay the idle timer now fires on every arriving
-      # scan (not just accepted ones), but slow replay rates or bag gaps can still
-      # exceed a short window. 60s prevents spurious shutdown during analysis.
-      MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-60.0}
-      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.10}
-      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-1.0}
-      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.15}
-      MAPPING_DESKEW: ${MAPPING_DESKEW:-true}
-      # IMU gyro deskew: avoids odom-error → swirl coupling.
-      # deskew_source=imu uses MTi-100 angular velocity for per-point correction
-      # instead of TF-odom (which bakes wheel-slip / heading-error into every inserted
-      # scan, producing the swirl / double-tree artefact). TF is still used for ICP
-      # prior; only per-point deskew moves to IMU.
-      MAPPING_DESKEW_SOURCE: ${MAPPING_DESKEW_SOURCE:-imu}
+      # ── Relaxed gates matching mapper_hesai_universal approach ──
+      # Accept everything, never reject. ICP with bag TF + IMU prior is reliable.
+      MAPPING_MAX_TRANSLATION_CORRECTION: ${MAPPING_MAX_TRANSLATION_CORRECTION:-10.0}
+      MAPPING_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_ROTATION_CORRECTION_DEG:-180.0}
+      MAPPING_MAX_VELOCITY_MS: ${MAPPING_MAX_VELOCITY_MS:-30.0}
+      MAPPING_MAX_YAW_RATE_DEG_S: ${MAPPING_MAX_YAW_RATE_DEG_S:-360.0}
+      MAPPING_MAX_POSE_YAW_STEP_DEG: ${MAPPING_MAX_POSE_YAW_STEP_DEG:-180.0}
+      MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG: ${MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG:-90.0}
+      MAPPING_MAX_POSE_STEP_M: ${MAPPING_MAX_POSE_STEP_M:-50.0}
+      MAPPING_MAX_Z_JUMP_M: ${MAPPING_MAX_Z_JUMP_M:-10.0}
+      MAPPING_MAX_REGISTRATION_TIME_MS: ${MAPPING_MAX_REGISTRATION_TIME_MS:-10000.0}
+      MAPPING_MAX_IDLE_TIME: ${MAPPING_MAX_IDLE_TIME:-300.0}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.20}
+      MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-2.0}
+      MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.20}
+      MAPPING_DESKEW: ${MAPPING_DESKEW:-false}
+      MAPPING_DESKEW_SOURCE: ${MAPPING_DESKEW_SOURCE:-tf}
       MAPPING_DESKEW_IMU_TOPIC: ${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data}
-      # Keep ICP bounded by trimming the active/local matcher map, while preserving
-      # the full output map separately for revisit/export. /mapping/map publishes
-      # the local window by default so Foxglove does not receive all old points.
-      # Without this split the matcher
-      # grows past ~500k pts, map rebuilds take seconds, then the anti-jump gate
-      # rejects every delayed scan.
-      MAPPING_ENABLE_GLOBAL_OUTPUT_MAP: ${MAPPING_ENABLE_GLOBAL_OUTPUT_MAP:-true}
-      MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT: ${MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT:-0.12}
-      MAPPING_ENABLE_MAP_TRIMMING: ${MAPPING_ENABLE_MAP_TRIMMING:-true}
-      MAPPING_MAP_TRIM_RADIUS_M: ${MAPPING_MAP_TRIM_RADIUS_M:-40.0}
-      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-70000}
-      # Overlap gates, lowered for replay exploration. The live defaults
-      # (pose 0.25/0.45, insertion 0.30/0.50) deadlock when the robot reaches a
-      # spot where a large NEW area becomes visible: insertion is refused for
-      # the very scans that would map it, the map freezes, and a few meters
-      # later every scan is rejected — always at the same bag position.
-      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.40}
-      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.55}
-      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.35}
-      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.50}
-      # Correction-size insertion limit measures PRIOR error, not alignment
-      # quality. With wheel slip downhill the prior is 2-3 m off while ICP
-      # still aligns fine — 4.0 m keeps the map alive (live default: 1.5 m).
-      # NOTE: translation limit relaxed; rotation limit kept at original 12° —
-      # relaxing rotation to 20° caused gradual yaw accumulation toward 90°
-      # over 2-3 map updates. max_pose_yaw_step_deg (30°) is the backstop.
-      MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M: ${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-4.0}
-      MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-12.0}
-      MAPPING_ENABLE_MAP_RECOVERY: ${MAPPING_ENABLE_MAP_RECOVERY:-true}
-      MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS: ${MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS:-4}
-      MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS: ${MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS:-5}
-      MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M: ${MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M:-45.0}
-      MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS:-5000}
-      MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS:-80000}
-      MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS: ${MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS:-20}
-      MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M:-1.0}
-      MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG:-5.0}
-      MAPPING_ENABLE_MOTION_ADAPTIVE_GATE: ${MAPPING_ENABLE_MOTION_ADAPTIVE_GATE:-true}
-      MAPPING_ADAPTIVE_MAX_DT_S: ${MAPPING_ADAPTIVE_MAX_DT_S:-2.0}
-      MAPPING_ADAPTIVE_VELOCITY_GAIN: ${MAPPING_ADAPTIVE_VELOCITY_GAIN:-1.25}
-      MAPPING_ADAPTIVE_ACCELERATION_GAIN: ${MAPPING_ADAPTIVE_ACCELERATION_GAIN:-0.50}
-      MAPPING_ADAPTIVE_YAW_RATE_GAIN: ${MAPPING_ADAPTIVE_YAW_RATE_GAIN:-1.25}
-      MAPPING_AGGRESSIVE_SPEED_MS: ${MAPPING_AGGRESSIVE_SPEED_MS:-2.0}
-      MAPPING_AGGRESSIVE_YAW_RATE_DEG_S: ${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-35.0}
-      MAPPING_PIVOT_LINEAR_SPEED_MS: ${MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75}
-      MAPPING_PIVOT_YAW_RATE_DEG_S: ${MAPPING_PIVOT_YAW_RATE_DEG_S:-35.0}
-      MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-1.25}
-      MAPPING_ENABLE_ODOM_BRIDGE: ${MAPPING_ENABLE_ODOM_BRIDGE:-true}
-      MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS: ${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0}
-      MAPPING_ODOM_BRIDGE_MIN_SPEED_MS: ${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5}
+      # ── Simplified map management: single map, no trimming ──
+      MAPPING_ENABLE_GLOBAL_OUTPUT_MAP: ${MAPPING_ENABLE_GLOBAL_OUTPUT_MAP:-false}
+      MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT: ${MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT:-0.20}
+      MAPPING_ENABLE_MAP_TRIMMING: ${MAPPING_ENABLE_MAP_TRIMMING:-false}
+      MAPPING_MAP_TRIM_RADIUS_M: ${MAPPING_MAP_TRIM_RADIUS_M:-200.0}
+      MAPPING_MAX_MAP_POINTS_BEFORE_TRIM: ${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-500000}
+      # ── Minimal overlap checks (accept everything) ──
+      MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO:-0.0}
+      MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO:-0.0}
+      MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO: ${MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO:-0.0}
+      MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO: ${MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO:-0.0}
+      # ── Correction limits also relaxed ──
+      MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M: ${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-50.0}
+      MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG: ${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-180.0}
+      # ── Recovery disabled (map never rejects, never needs recovery) ──
+      MAPPING_ENABLE_MAP_RECOVERY: ${MAPPING_ENABLE_MAP_RECOVERY:-false}
+      MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS: ${MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS:-999}
+      MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS: ${MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS:-999}
+      MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M: ${MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M:-200.0}
+      MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS:-100}
+      MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS: ${MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS:-500000}
+      MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS: ${MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS:-9999}
+      MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M:-50.0}
+      MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG: ${MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG:-180.0}
+      # ── Adaptive gate disabled ──
+      MAPPING_ENABLE_MOTION_ADAPTIVE_GATE: ${MAPPING_ENABLE_MOTION_ADAPTIVE_GATE:-false}
+      MAPPING_ADAPTIVE_MAX_DT_S: ${MAPPING_ADAPTIVE_MAX_DT_S:-10.0}
+      MAPPING_ADAPTIVE_VELOCITY_GAIN: ${MAPPING_ADAPTIVE_VELOCITY_GAIN:-10.0}
+      MAPPING_ADAPTIVE_ACCELERATION_GAIN: ${MAPPING_ADAPTIVE_ACCELERATION_GAIN:-10.0}
+      MAPPING_ADAPTIVE_YAW_RATE_GAIN: ${MAPPING_ADAPTIVE_YAW_RATE_GAIN:-10.0}
+      MAPPING_AGGRESSIVE_SPEED_MS: ${MAPPING_AGGRESSIVE_SPEED_MS:-30.0}
+      MAPPING_AGGRESSIVE_YAW_RATE_DEG_S: ${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-360.0}
+      MAPPING_PIVOT_LINEAR_SPEED_MS: ${MAPPING_PIVOT_LINEAR_SPEED_MS:-10.0}
+      MAPPING_PIVOT_YAW_RATE_DEG_S: ${MAPPING_PIVOT_YAW_RATE_DEG_S:-360.0}
+      MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M: ${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-50.0}
+      MAPPING_ENABLE_ODOM_BRIDGE: ${MAPPING_ENABLE_ODOM_BRIDGE:-false}
+      MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS: ${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-999}
+      MAPPING_ODOM_BRIDGE_MIN_SPEED_MS: ${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-30.0}
       MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT: ${MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT:-true}
-      MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M: ${MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M:-2.0}
+      MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M: ${MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M:-5.0}
       MAPPING_INPUT_QOS_RELIABLE: ${MAPPING_INPUT_QOS_RELIABLE:-true}
       MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE: ${MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE:-true}
       MAPPING_MAP_PUBLISH_RADIUS_M: ${MAPPING_MAP_PUBLISH_RADIUS_M:-0.0}
-      MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER: ${MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER:-true}
+      MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER: ${MAPPING_ENABLE_DYNAMIC_TRAILER_SELF_FILTER:-false}
       MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC: ${MAPPING_DYNAMIC_TRAILER_ARTICULATION_TOPIC:-/mtt_articulation_angle}
       MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S: ${MAPPING_DYNAMIC_TRAILER_STALE_TIMEOUT_S:-0.5}
       MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD: ${MAPPING_DYNAMIC_TRAILER_YAW_OFFSET_RAD:-3.141592653589793}
@@ -902,7 +897,9 @@ services:
       MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M: ${MATHIS_MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03}
       MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG: ${MATHIS_MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5}
       MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT: ${MATHIS_MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03}
-      MAPPING_DESKEW: ${MATHIS_MAPPING_DESKEW:-true}
+      # norlab_icp_mapper_ros is on upstream ros2 (no deskew_source=imu mode) —
+      # keep deskew off, matching norlab_ws. See dependencies/robot.repos.
+      MAPPING_DESKEW: ${MATHIS_MAPPING_DESKEW:-false}
       MAPPING_DESKEW_SOURCE: ${MATHIS_MAPPING_DESKEW_SOURCE:-imu}
       MAPPING_DESKEW_IMU_TOPIC: ${MATHIS_MAPPING_DESKEW_IMU_TOPIC:-/mti100/data}
       MAPPING_ENABLE_GLOBAL_OUTPUT_MAP: ${MATHIS_MAPPING_ENABLE_GLOBAL_OUTPUT_MAP:-false}

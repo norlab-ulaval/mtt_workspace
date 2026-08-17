@@ -1,0 +1,100 @@
+# Isaac Visual SLAM VIO (stereo + ZED IMU fusion) profile for MTT ZED2i.
+#
+# tracking_mode:2 (RGBD, see isaac_vslam_rgbd.yaml) and tracking_mode:1 (VIO,
+# this file) are mutually exclusive in isaac_ros_visual_slam release-4.5: the
+# camera<->IMU extrinsic calibration and gravity alignment are only computed
+# when tracking_mode == VIO (see visual_slam_impl.cpp, the
+# `if (tracking_mode_ == TrackingMode::VIO)` block around the
+# cuvslam::ImuCalibration setup). RGBD mode never registers an IMU channel
+# with cuVSLAM's odometry rig, so IMU messages are ignored even if subscribed.
+# This is the ZED IMU fusion variant requested explicitly (not mti100 -- the
+# camera-imu extrinsic below is the ZED's own factory calibration).
+#
+# Requires sensors.publish_imu_tf: true in _zed2i_isaac.yaml (already set) so
+# the ZED node publishes the real SDK-calibrated zed_left_camera_frame ->
+# zed_imu_link static TF (camInfo.sensors_configuration.camera_imu_transform)
+# -- this workspace does not hardcode a guessed mechanical offset for it.
+---
+/**:
+  ros__parameters:
+    use_sim_time: false
+    num_cameras: 2
+    min_num_images: 2
+    tracking_mode: 1
+    rectified_images: true
+    enable_localization_n_mapping: true
+    enable_ground_constraint_in_odometry: true
+    enable_ground_constraint_in_slam: true
+    map_frame: "isaac_map"
+    odom_frame: "isaac_odom"
+    # zed_camera_link is fine to NAME here (isaac_vslam needs a real,
+    # resolvable static offset to camera_optical_frames to compute its
+    # internal extrinsic -- zed_camera_link has that via the intact URDF
+    # chain) as long as publish_odom_to_base_tf below is false.
+    #
+    # A frame can have exactly ONE parent-broadcaster. Two designs were
+    # tried and empirically failed on the robot 2026-07-26 for that reason:
+    #   1. publish_odom_to_base_tf: true with base_frame: zed_camera_link --
+    #      conflicts directly with the URDF's static hesai_lidar ->
+    #      zed_camera_link ("Tf has two or more unconnected trees").
+    #   2. Renaming base_frame to a fresh "isaac_base_link" and statically
+    #      bridging hesai_lidar -> isaac_base_link, with
+    #      publish_odom_to_base_tf still true -- looks unclaimed, but
+    #      isaac_vslam ALSO broadcasts isaac_odom -> isaac_base_link onto
+    #      that exact frame, recreating the identical two-parent conflict
+    #      one level down (confirmed via `ros2 run tf2_tools view_frames`:
+    #      isaac_base_link only ever showed isaac_odom as parent, the
+    #      dynamic broadcast silently won over the static one).
+    # There is no base_frame name that dodges this as long as
+    # publish_odom_to_base_tf is true -- isaac_vslam will claim whatever
+    # frame it's given. So it stays false, and scripts/isaac_vslam_frame_bridge.py
+    # reads the odom->base_frame pose from the /isaac/vslam/odometry TOPIC
+    # instead (not TF), combining it via plain matrix algebra with two
+    # independent TF lookups to publish the conflict-free equivalent
+    # hesai_lidar -> isaac_map (see that script's docstring for the math).
+    base_frame: "zed_camera_link"
+    camera_optical_frames:
+      - "zed_left_camera_frame_optical"
+      - "zed_right_camera_frame_optical"
+    imu_frame: "zed_imu_link"
+    # Kept true: isaac_map -> isaac_odom has no conflict (isaac_map is
+    # isaac_vslam's tree root, nothing else ever claims it as a child), and
+    # scripts/isaac_vslam_frame_bridge.py reads it live via TF.
+    publish_map_to_odom_tf: true
+    # false, NOT true -- see base_frame comment above.
+    publish_odom_to_base_tf: false
+    invert_map_to_odom_tf: false
+    invert_odom_to_base_tf: false
+    enable_slam_visualization: true
+    enable_observations_view: true
+    enable_landmarks_view: true
+    path_max_size: 20000
+    verbosity: 1
+    image_buffer_size: 120
+    imu_buffer_size: 400
+    image_qos: "SENSOR_DATA"
+    imu_qos: "SENSOR_DATA"
+    # NVIDIA's own RealSense VIO reference uses 19ms, but on this ZED2i
+    # hardware at 60fps the observed steady-state inter-frame delta is ~33ms
+    # (occasional stereo pair sync misses, not real drops -- odometry still
+    # publishes at ~60Hz, vo_state stays Success, confirmed on robot
+    # 2026-07-26). 35ms quiets the cosmetic warning spam without masking a
+    # genuinely bad frame (which would show a much larger delta).
+    image_jitter_threshold_ms: 35.00
+    imu_jitter_threshold_ms: 15.0
+    calibration_frequency: 200.0
+    # ZED2i onboard IMU noise density, empirically estimated from a 3s
+    # stationary window in artifacts/gt_v2_icerink/measurements/zed_imu.csv
+    # (100Hz, sigma / sqrt(rate)) -- NOT a factory Allan-variance calibration.
+    # Same order of magnitude as NVIDIA's RealSense D435i reference values
+    # (accel 0.0019, gyro 0.000244), which is a reasonable cross-check but not
+    # a substitute for a real characterization run.
+    gyro_noise_density: 0.00016
+    accel_noise_density: 0.0026
+    # NOT empirically derived -- Allan-variance random walk needs a much
+    # longer stationary log (minutes, via a tool like imu_utils/Kalibr) than
+    # the 3s window used above. Placeholders scaled from the RealSense
+    # reference ratio. Recalibrate before trusting VIO drift over long runs.
+    gyro_random_walk: 0.0000194
+    accel_random_walk: 0.003
+    save_map_folder_path: "/data/isaac_ros/vslam_map"

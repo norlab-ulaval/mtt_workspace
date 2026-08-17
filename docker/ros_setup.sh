@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
-set -e
+
+# Silence cosmetic warning for unmapped host group GIDs
+if ! getent group "$(id -g)" >/dev/null 2>&1; then
+  sudo groupadd -g "$(id -g)" hostgroup 2>/dev/null || true
+fi
 
 source "/opt/ros/${ROS_DISTRO}/setup.bash"
 

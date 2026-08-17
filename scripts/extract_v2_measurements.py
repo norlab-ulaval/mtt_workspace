@@ -167,7 +167,10 @@ def read_tf_static(reader_topic_types: dict[str, str], bag_dir: Path) -> list[St
     edges: dict[tuple[str, str], StaticEdge] = {}
     while reader.has_next():
         topic, data, _ts = reader.read_next()
-        msg = deserialize_message(data, msg_type)
+        try:
+            msg = deserialize_message(data, msg_type)
+        except Exception:
+            continue
         for tr in msg.transforms:
             parent = tr.header.frame_id
             child = tr.child_frame_id
@@ -325,6 +328,7 @@ def main() -> int:
     hardware_fresh_count = 0
     pitch_fresh_count = 0
     artic_count = 0
+    corrupt_msg_count: dict[str, int] = {t: 0 for t in wanted}
 
     def get_writer(name: str, header: list[str]):
         if name not in writers:
@@ -341,7 +345,20 @@ def main() -> int:
         n_msgs += 1
         bag_t = ts_ns / 1e9
         out_name, kind = TOPICS_SIMPLE[topic]
-        msg = deserialize_message(data, msg_types[topic])
+        # A single truncated/corrupted CDR message anywhere in a multi-GB bag
+        # (observed: "rmw_serialize: invalid data size") must not abort
+        # extraction of every other topic's data -- skip just this message
+        # and keep going; the per-topic count is reported at the end so a
+        # session with real, widespread corruption is still visible, not
+        # silently masked.
+        try:
+            msg = deserialize_message(data, msg_types[topic])
+        except Exception as exc:
+            corrupt_msg_count[topic] += 1
+            if corrupt_msg_count[topic] <= 3:
+                print(f"WARNING: corrupt message skipped on {topic} "
+                      f"(bag_t={bag_t:.3f}): {exc}", file=sys.stderr)
+            continue
 
         hdr_t = None
         if hasattr(msg, "header"):
@@ -432,6 +449,10 @@ def main() -> int:
     for f in files.values():
         f.close()
     print(f"Bulk pass: {n_msgs} messages across {len(wanted)} topics")
+    total_corrupt = sum(corrupt_msg_count.values())
+    if total_corrupt:
+        print(f"WARNING: {total_corrupt} corrupt message(s) skipped total: "
+              f"{ {t: c for t, c in corrupt_msg_count.items() if c} }", file=sys.stderr)
 
     # ── topic timing audit ──
     with (out / "audit" / "topic_timing.csv").open("w", newline="") as f:

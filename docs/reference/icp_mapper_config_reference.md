@@ -195,7 +195,7 @@ Ajoute la direction d'observation depuis le capteur comme descripteur.
 ```
 
 **Rôle**: Nécessaire pour `ShadowDataPointsFilter` et `IncidenceAngleDataPointsFilter`.
-⚠️ Problème connu : sur un nuage fusionné (multi-capteurs), la direction d'observation est fausse car chaque point vient d'une origine différente mais le descripteur n'en connaît qu'une.
+Problème connu : sur un nuage fusionné (multi-capteurs), la direction d'observation est fausse car chaque point vient d'une origine différente mais le descripteur n'en connaît qu'une.
 
 ---
 
@@ -561,7 +561,7 @@ Arrêt par **exception** (convergence error) si la correction dépasse les borne
 - 0.80 rad = 45.8° — filet de sécurité
 - Absent dans la config offline (laisser ICP converger librement)
 
-⚠️ `maxRotationNorm` utilise `Eigen::Quaternion::angularDistance()` — pour une rotation pure en yaw, c'est équivalent à la norme du vecteur de Rodrigues.
+Attention : `maxRotationNorm` utilise `Eigen::Quaternion::angularDistance()` — pour une rotation pure en yaw, c'est équivalent à la norme du vecteur de Rodrigues.
 
 ---
 

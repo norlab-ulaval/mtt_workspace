@@ -1,0 +1,1375 @@
+{
+ "configById": {
+  "Tab!root": {
+   "activeTabIdx": 0,
+   "tabs": [
+    {
+     "title": "🎮 Drive",
+     "layout": {
+      "direction": "row",
+      "first": "3D!drive",
+      "second": {
+       "direction": "column",
+       "first": {
+        "direction": "row",
+        "first": "Indicator!mode",
+        "second": "Indicator!estop",
+        "splitPercentage": 50
+       },
+       "second": {
+        "direction": "column",
+        "first": {
+         "direction": "row",
+         "first": "CallService!manual",
+         "second": {
+          "direction": "row",
+          "first": "CallService!auto",
+          "second": "CallService!stop",
+          "splitPercentage": 50
+         },
+         "splitPercentage": 33
+        },
+        "second": {
+         "direction": "column",
+         "first": {
+          "direction": "row",
+          "first": "Gauge!speed",
+          "second": "Plot!speed",
+          "splitPercentage": 32
+         },
+         "second": "Image!zed",
+         "splitPercentage": 45
+        },
+        "splitPercentage": 14
+       },
+       "splitPercentage": 10
+      },
+      "splitPercentage": 58
+     }
+    },
+    {
+     "title": "🛤️ Teach & Repeat",
+     "layout": {
+      "direction": "row",
+      "first": "3D!tr",
+      "second": {
+       "direction": "column",
+       "first": {
+        "direction": "row",
+        "first": "Indicator!ready",
+        "second": "StateTransitions!wiln",
+        "splitPercentage": 30
+       },
+       "second": {
+        "direction": "column",
+        "first": {
+         "direction": "row",
+         "first": "CallService!teach_start",
+         "second": {
+          "direction": "row",
+          "first": "CallService!teach_stop",
+          "second": "CallService!mark_ready",
+          "splitPercentage": 50
+         },
+         "splitPercentage": 33
+        },
+        "second": {
+         "direction": "column",
+         "first": {
+          "direction": "row",
+          "first": "CallService!play_line",
+          "second": {
+           "direction": "row",
+           "first": "CallService!play_loop",
+           "second": {
+            "direction": "row",
+            "first": "CallService!cancel",
+            "second": "CallService!wiln_clear",
+            "splitPercentage": 50
+           },
+           "splitPercentage": 50
+          },
+          "splitPercentage": 33
+         },
+         "second": {
+          "direction": "column",
+          "first": {
+           "direction": "row",
+           "first": "Publish!save",
+           "second": "Publish!load",
+           "splitPercentage": 50
+          },
+          "second": {
+           "direction": "row",
+           "first": "RawMessages!supervisor",
+           "second": "RawMessages!replaystate",
+           "splitPercentage": 50
+          },
+          "splitPercentage": 28
+         },
+         "splitPercentage": 22
+        },
+        "splitPercentage": 22
+       },
+       "splitPercentage": 18
+      },
+      "splitPercentage": 55
+     }
+    },
+    {
+     "title": "🚜 Trailer",
+     "layout": {
+      "direction": "row",
+      "first": "3D!trailer",
+      "second": {
+       "direction": "column",
+       "first": {
+        "direction": "row",
+        "first": "Gauge!artic",
+        "second": "RawMessages!trailerpose",
+        "splitPercentage": 40
+       },
+       "second": {
+        "direction": "column",
+        "first": "Plot!artic",
+        "second": "Plot!articpitch",
+        "splitPercentage": 55
+       },
+       "splitPercentage": 32
+      },
+      "splitPercentage": 55
+     }
+    },
+    {
+     "title": "❤️ Health",
+     "layout": {
+      "direction": "column",
+      "first": {
+       "direction": "row",
+       "first": {
+        "direction": "row",
+        "first": "Indicator!estop2",
+        "second": "Indicator!deadman",
+        "splitPercentage": 50
+       },
+       "second": {
+        "direction": "row",
+        "first": "Gauge!speed2",
+        "second": "Plot!temp",
+        "splitPercentage": 30
+       },
+       "splitPercentage": 35
+      },
+      "second": {
+       "direction": "row",
+       "first": {
+        "direction": "column",
+        "first": "RawMessages!health",
+        "second": {
+         "direction": "row",
+         "first": "RawMessages!status",
+         "second": "RawMessages!battery",
+         "splitPercentage": 50
+        },
+        "splitPercentage": 50
+       },
+       "second": {
+        "direction": "column",
+        "first": "Plot!imu",
+        "second": {
+         "direction": "row",
+         "first": "Plot!innovation",
+         "second": "RosOut!log",
+         "splitPercentage": 45
+        },
+        "splitPercentage": 45
+       },
+       "splitPercentage": 40
+      },
+      "splitPercentage": 28
+     }
+    },
+    {
+     "title": "🛰️ GPS Teach & Repeat",
+     "layout": {
+      "direction": "row",
+      "first": {
+       "direction": "column",
+       "first": "3D!gps",
+       "second": "map!gps",
+       "splitPercentage": 68
+      },
+      "second": {
+       "direction": "column",
+       "first": {
+        "direction": "column",
+        "first": {
+         "direction": "row",
+         "first": "Indicator!gps_matched",
+         "second": {
+          "direction": "row",
+          "first": "Indicator!gps_quality",
+          "second": "Gauge!gps_accuracy",
+          "splitPercentage": 55
+         },
+         "splitPercentage": 36
+        },
+        "second": "StateTransitions!gps",
+        "splitPercentage": 38
+       },
+       "second": {
+        "direction": "column",
+        "first": {
+         "direction": "column",
+         "first": {
+          "direction": "row",
+          "first": "CallService!gps_start_recording",
+          "second": {
+           "direction": "row",
+           "first": "CallService!gps_stop_recording",
+           "second": "CallService!gps_clear",
+           "splitPercentage": 50
+          },
+          "splitPercentage": 33
+         },
+         "second": {
+          "direction": "column",
+          "first": {
+           "direction": "row",
+           "first": "CallService!gps_replay",
+           "second": {
+            "direction": "row",
+            "first": "CallService!gps_stop",
+            "second": "CallService!gps_speed_limit",
+            "splitPercentage": 50
+           },
+           "splitPercentage": 33
+          },
+          "second": {
+           "direction": "row",
+           "first": "CallService!gps_list",
+           "second": {
+            "direction": "row",
+            "first": "CallService!gps_load",
+            "second": "CallService!gps_reload_path",
+            "splitPercentage": 50
+           },
+           "splitPercentage": 50
+          },
+          "splitPercentage": 50
+         },
+         "splitPercentage": 32
+        },
+        "second": {
+         "direction": "column",
+         "first": {
+          "direction": "row",
+          "first": "Gauge!gps_commanded_speed",
+          "second": {
+           "direction": "row",
+           "first": "Gauge!gps_remaining_distance",
+           "second": "Gauge!gps_slowdown",
+           "splitPercentage": 50
+          },
+          "splitPercentage": 34
+         },
+         "second": {
+          "direction": "row",
+          "first": "RawMessages!gps_recording_state",
+          "second": {
+           "direction": "row",
+           "first": "RawMessages!gps_active_route",
+           "second": "RawMessages!gps_follower_state",
+           "splitPercentage": 50
+          },
+          "splitPercentage": 50
+         },
+         "splitPercentage": 42
+        },
+        "splitPercentage": 57
+       },
+       "splitPercentage": 30
+      },
+      "splitPercentage": 58
+     }
+    },
+    {
+     "title": "📈 GPS Control",
+     "layout": {
+      "direction": "row",
+      "first": "Plot!gps_frenet_error",
+      "second": {
+       "direction": "column",
+       "first": "Plot!gps_control",
+       "second": "Plot!gps_progress",
+       "splitPercentage": 55
+      },
+      "splitPercentage": 52
+     }
+    },
+    {
+     "title": "⚙️ Tuning",
+     "layout": {
+      "direction": "row",
+      "first": "Parameters!tuning",
+      "second": "Publish!custom",
+      "splitPercentage": 65
+     }
+    }
+   ]
+  },
+  "3D!drive": {
+   "followMode": "follow-pose",
+   "followTf": "base_link",
+   "cameraState": {
+    "distance": 25,
+    "perspective": true,
+    "phi": 55,
+    "thetaOffset": 90,
+    "targetOffset": [
+     0,
+     0,
+     0
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "fovy": 45,
+    "near": 0.5,
+    "far": 5000
+   },
+   "scene": {
+    "enableStats": false
+   },
+   "transforms": {},
+   "topics": {
+    "/robot_description": {
+     "visible": true,
+     "displayMode": "auto",
+     "showOutlines": true,
+     "showAxis": false,
+     "axisScale": 1
+    },
+    "/hesai_lidar/points": {
+     "visible": true,
+     "colorField": "intensity",
+     "colorMode": "colormap",
+     "colorMap": "turbo",
+     "pointSize": 2
+    },
+    "/debug/hesai_points_voxel": {
+     "visible": false,
+     "colorField": "intensity",
+     "colorMode": "colormap",
+     "colorMap": "turbo",
+     "pointSize": 3
+    },
+    "/rsairy_ns/points": {
+     "visible": false
+    },
+    "/mapping/map": {
+     "visible": true,
+     "colorField": "z",
+     "colorMode": "colormap",
+     "colorMap": "rainbow",
+     "pointSize": 1
+    },
+    "/mapping/trajectory_path": {
+     "visible": true,
+     "lineWidth": 0.2,
+     "color": "#94a3b8"
+    },
+    "/mtt_odometry": {
+     "visible": true,
+     "type": "arrow"
+    },
+    "/mapping/icp_odom": {
+     "visible": true
+    },
+    "/mapping/icp_path": {
+     "visible": true,
+     "color": "#94a3b8"
+    },
+    "/wiln/global_plan": {
+     "visible": true,
+     "lineWidth": 0.3,
+     "color": "#4e98e2"
+    },
+    "/trailer/body_markers": {
+     "visible": true
+    },
+    "/gps_front/fix": {
+     "visible": false
+    }
+   },
+   "layers": {
+    "grid": {
+     "layerId": "foxglove.Grid",
+     "visible": true,
+     "size": 100,
+     "divisions": 100,
+     "label": "Grid"
+    }
+   }
+  },
+  "Indicator!mode": {
+   "path": "/mtt_control/selected_mode.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "MODE ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "MANUAL",
+     "color": "#16a34a",
+     "label": "MANUAL"
+    },
+    {
+     "operator": "=",
+     "rawValue": "AUTO",
+     "color": "#2563eb",
+     "label": "AUTO"
+    },
+    {
+     "operator": "=",
+     "rawValue": "STOP",
+     "color": "#f59e0b",
+     "label": "STOP"
+    },
+    {
+     "operator": "=",
+     "rawValue": "ESTOP",
+     "color": "#dc2626",
+     "label": "E-STOP"
+    }
+   ]
+  },
+  "Indicator!estop": {
+   "path": "/mtt_control/teleop_estop.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "E-STOP ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "true",
+     "color": "#dc2626",
+     "label": "E-STOP ACTIVE"
+    },
+    {
+     "operator": "=",
+     "rawValue": "false",
+     "color": "#16a34a",
+     "label": "E-STOP OK"
+    }
+   ]
+  },
+  "CallService!manual": {
+   "serviceName": "/mtt_control/request_manual",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🕹️ MANUAL MODE",
+   "buttonTooltip": "Switch to manual mode (joystick)",
+   "buttonColor": "#16a34a"
+  },
+  "CallService!auto": {
+   "serviceName": "/mtt_control/request_auto",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🤖 AUTO MODE",
+   "buttonTooltip": "Switch to autonomous mode",
+   "buttonColor": "#2563eb"
+  },
+  "CallService!stop": {
+   "serviceName": "/mtt_control/request_stop",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🛑 STOP",
+   "buttonTooltip": "Stop the robot (STOP mode)",
+   "buttonColor": "#dc2626"
+  },
+  "Gauge!speed": {
+   "path": "/mtt_tachometer.speed_kmh",
+   "minValue": 0,
+   "maxValue": 12,
+   "colorMode": "colormap",
+   "colorMap": "red-yellow-green",
+   "reverse": true
+  },
+  "Plot!speed": {
+   "paths": [
+    {
+     "value": "/cmd_vel.twist.linear.x",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "cmd vx"
+    },
+    {
+     "value": "/mtt_odometry.twist.twist.linear.x",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "odom vx"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 30
+  },
+  "Image!zed": {
+   "imageMode": {
+    "imageTopic": "/zed/zed_node/rgb/color/rect/image/compressed"
+   }
+  },
+  "3D!tr": {
+   "followMode": "follow-none",
+   "followTf": "map",
+   "cameraState": {
+    "distance": 60,
+    "perspective": false,
+    "phi": 0.1,
+    "thetaOffset": 90,
+    "targetOffset": [
+     0,
+     0,
+     0
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "fovy": 45,
+    "near": 0.5,
+    "far": 5000
+   },
+   "topics": {
+    "/robot_description": {
+     "visible": true,
+     "displayMode": "auto",
+     "showOutlines": true,
+     "showAxis": false,
+     "axisScale": 1
+    },
+    "/mapping/map": {
+     "visible": true,
+     "colorField": "z",
+     "colorMode": "colormap",
+     "colorMap": "rainbow",
+     "pointSize": 1
+    },
+    "/mapping/trajectory_path": {
+     "visible": true,
+     "lineWidth": 0.2,
+     "color": "#94a3b8"
+    },
+    "/hesai_lidar/points": {
+     "visible": false
+    },
+    "/debug/hesai_points_voxel": {
+     "visible": false
+    },
+    "/mapping/icp_odom": {
+     "visible": true
+    },
+    "/mapping/icp_path": {
+     "visible": true,
+     "color": "#94a3b8"
+    },
+    "/mtt_odometry": {
+     "visible": false
+    },
+    "/wiln/global_plan": {
+     "visible": true,
+     "lineWidth": 0.4,
+     "color": "#4e98e2"
+    },
+    "/wiln/control/local_plan": {
+     "visible": true,
+     "lineWidth": 0.3,
+     "color": "#facc15"
+    },
+    "/gps_front/fix": {
+     "visible": false
+    }
+   },
+   "layers": {
+    "grid": {
+     "layerId": "foxglove.Grid",
+     "visible": true,
+     "size": 200,
+     "divisions": 200,
+     "label": "Grid"
+    }
+   }
+  },
+  "Indicator!ready": {
+   "path": "/mtt_repeat/ready.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "READY ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "true",
+     "color": "#16a34a",
+     "label": "ROUTE READY"
+    },
+    {
+     "operator": "=",
+     "rawValue": "false",
+     "color": "#374151",
+     "label": "NOT READY"
+    }
+   ]
+  },
+  "StateTransitions!wiln": {
+   "paths": [
+    {
+     "value": "/wiln/teach/state.state",
+     "timestampMethod": "receiveTime",
+     "label": "teach"
+    },
+    {
+     "value": "/wiln/replay/state.state",
+     "timestampMethod": "receiveTime",
+     "label": "replay"
+    },
+    {
+     "value": "/wiln/follower/state.state",
+     "timestampMethod": "receiveTime",
+     "label": "follower"
+    },
+    {
+     "value": "/mtt_repeat/state.data",
+     "timestampMethod": "receiveTime",
+     "label": "supervisor"
+    }
+   ],
+   "isSynced": true
+  },
+  "CallService!teach_start": {
+   "serviceName": "/mtt_repeat/teach_start",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "⏺️ START TEACH",
+   "buttonTooltip": "Start recording a route (supervisor-checked, same as `dc run wiln_teach_start`)",
+   "buttonColor": "#16a34a"
+  },
+  "CallService!teach_stop": {
+   "serviceName": "/mtt_repeat/teach_stop",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "⏹️ STOP TEACH",
+   "buttonTooltip": "Stop recording — route stays armed in memory",
+   "buttonColor": "#f59e0b"
+  },
+  "CallService!mark_ready": {
+   "serviceName": "/mtt_repeat/mark_ready",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "✅ MARK READY",
+   "buttonTooltip": "Arm the loaded route for replay (run after LOAD ROUTE)",
+   "buttonColor": "#0ea5e9"
+  },
+  "CallService!play_line": {
+   "serviceName": "/mtt_repeat/play_line",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "▶️ REPLAY ROUTE",
+   "buttonTooltip": "Replay the armed route once (AUTO mode + deadman held required to move)",
+   "buttonColor": "#2563eb"
+  },
+  "CallService!play_loop": {
+   "serviceName": "/mtt_repeat/play_loop",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🔁 REPLAY LOOP",
+   "buttonTooltip": "Replay the armed route in a loop",
+   "buttonColor": "#7c3aed"
+  },
+  "CallService!cancel": {
+   "serviceName": "/mtt_repeat/cancel",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "✖️ CANCEL REPLAY",
+   "buttonTooltip": "Cancel the replay in progress (same as `dc run wiln_replay_stop`)",
+   "buttonColor": "#dc2626"
+  },
+  "CallService!wiln_clear": {
+   "serviceName": "/mtt_repeat/clear_trajectory",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🧹 CLEAR ROUTE",
+   "buttonTooltip": "Clear the active WILN trajectory only when Teach/Replay is inactive; saved routes are preserved",
+   "buttonColor": "#dc2626"
+  },
+  "Publish!save": {
+   "topicName": "/wiln/command",
+   "datatype": "std_msgs/msg/String",
+   "buttonText": "💾 SAVE ROUTE",
+   "buttonTooltip": "Save route + map to data/wiln_routes/demo_route/route.ltr (edit panel value to change the path)",
+   "buttonColor": "#7c3aed",
+   "advancedView": false,
+   "value": "{\"data\": \"save:data/wiln_routes/demo_route/route.ltr\"}"
+  },
+  "Publish!load": {
+   "topicName": "/wiln/command",
+   "datatype": "std_msgs/msg/String",
+   "buttonText": "📂 LOAD ROUTE",
+   "buttonTooltip": "Load route + map from data/wiln_routes/demo_route/route.ltr — then press MARK READY",
+   "buttonColor": "#7c3aed",
+   "advancedView": false,
+   "value": "{\"data\": \"load:data/wiln_routes/demo_route/route.ltr\"}"
+  },
+  "RawMessages!supervisor": {
+   "topicPath": "/mtt_repeat/state"
+  },
+  "RawMessages!replaystate": {
+   "topicPath": "/wiln/replay/state"
+  },
+  "3D!trailer": {
+   "followMode": "follow-pose",
+   "followTf": "base_link",
+   "cameraState": {
+    "distance": 12,
+    "perspective": true,
+    "phi": 50,
+    "thetaOffset": 180,
+    "targetOffset": [
+     -2,
+     0,
+     0
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "fovy": 45,
+    "near": 0.2,
+    "far": 1000
+   },
+   "topics": {
+    "/robot_description": {
+     "visible": true,
+     "displayMode": "auto",
+     "showOutlines": true,
+     "showAxis": false,
+     "axisScale": 1
+    },
+    "/rsairy_ns/points": {
+     "visible": true,
+     "colorField": "intensity",
+     "colorMode": "colormap",
+     "colorMap": "turbo",
+     "pointSize": 3
+    },
+    "/hesai_lidar/points": {
+     "visible": false
+    },
+    "/trailer/body_markers": {
+     "visible": true
+    },
+    "/trailer/pose": {
+     "visible": true
+    }
+   },
+   "layers": {
+    "grid": {
+     "layerId": "foxglove.Grid",
+     "visible": true,
+     "size": 30,
+     "divisions": 30,
+     "label": "Grid"
+    }
+   }
+  },
+  "Gauge!artic": {
+   "path": "/hardware/articulation_angle.data",
+   "minValue": -0.733,
+   "maxValue": 0.733,
+   "colorMode": "colormap",
+   "colorMap": "red-yellow-green",
+   "reverse": false
+  },
+  "RawMessages!trailerpose": {
+   "topicPath": "/trailer/pose"
+  },
+  "Plot!artic": {
+   "paths": [
+    {
+     "value": "/hardware/articulation_angle.data",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "encoder"
+    },
+    {
+     "value": "/trailer/articulation_angle.data",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "LiDAR (detector)"
+    },
+    {
+     "value": "/mtt_articulation_angle.data",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "driver"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  },
+  "Plot!articpitch": {
+   "paths": [
+    {
+     "value": "/hardware/articulation_pitch_rad.data",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "articulation pitch"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  },
+  "Indicator!estop2": {
+   "path": "/mtt_control/teleop_estop.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "E-STOP ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "true",
+     "color": "#dc2626",
+     "label": "E-STOP ACTIVE"
+    },
+    {
+     "operator": "=",
+     "rawValue": "false",
+     "color": "#16a34a",
+     "label": "E-STOP OK"
+    }
+   ]
+  },
+  "Indicator!deadman": {
+   "path": "/mtt_control/teleop_deadman.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "DEADMAN ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "true",
+     "color": "#16a34a",
+     "label": "DEADMAN HELD"
+    },
+    {
+     "operator": "=",
+     "rawValue": "false",
+     "color": "#374151",
+     "label": "DEADMAN RELEASED"
+    }
+   ]
+  },
+  "Gauge!speed2": {
+   "path": "/mtt_tachometer.speed_kmh",
+   "minValue": 0,
+   "maxValue": 12,
+   "colorMode": "colormap",
+   "colorMap": "red-yellow-green",
+   "reverse": true
+  },
+  "Plot!temp": {
+   "paths": [
+    {
+     "value": "/mtt_health.ambient_temp_c",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "ambient temp (°C)"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 300
+  },
+  "RawMessages!health": {
+   "topicPath": "/mtt_health"
+  },
+  "RawMessages!status": {
+   "topicPath": "/mtt_status"
+  },
+  "RawMessages!battery": {
+   "topicPath": "/mtt_battery/status"
+  },
+  "Plot!imu": {
+   "paths": [
+    {
+     "value": "/mti100/data.angular_velocity.z",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "yaw rate"
+    },
+    {
+     "value": "/mti100/data.linear_acceleration.x",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "accel x"
+    },
+    {
+     "value": "/mti100/data.linear_acceleration.y",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "accel y"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 30
+  },
+  "RosOut!log": {
+   "searchTerms": [],
+   "minLogLevel": 2
+  },
+  "map!gps": {
+   "layer": "satellite",
+   "zoomLevel": 18,
+   "maxNativeZoom": 18,
+   "followTopic": "/gps_front/fix",
+   "topicColors": {
+    "/gps_front/fix": "#4e98e2"
+   },
+   "topicConfig": {
+    "/gps_front/fix": {
+     "color": "#4e98e2",
+     "pointDisplayMode": "dot",
+     "historyMode": "all"
+    }
+   },
+   "foxglovePanelTitle": "GPS front antenna (satellite)"
+  },
+  "3D!gps": {
+   "followMode": "follow-none",
+   "followTf": "map",
+   "cameraState": {
+    "distance": 60,
+    "perspective": false,
+    "phi": 0.1,
+    "thetaOffset": 90,
+    "targetOffset": [
+     0,
+     0,
+     0
+    ],
+    "target": [
+     0,
+     0,
+     0
+    ],
+    "fovy": 45,
+    "near": 0.5,
+    "far": 5000
+   },
+   "topics": {
+    "/robot_description": {
+     "visible": true,
+     "displayMode": "auto",
+     "showOutlines": true,
+     "showAxis": false,
+     "axisScale": 1
+    },
+    "/mtt/gps_path_server/full_path": {
+     "visible": true,
+     "lineWidth": 0.3,
+     "color": "#4e98e2"
+    },
+    "/mtt/gps_path_server/local_horizon": {
+     "visible": true,
+     "lineWidth": 0.6,
+     "color": "#facc15"
+    },
+    "/mtt/gps_recording/teach_path": {
+     "visible": true,
+     "lineWidth": 0.45,
+     "color": "#22c55e"
+    },
+    "/mtt/gps_path_follower/executed_path": {
+     "visible": true,
+     "lineWidth": 0.55,
+     "color": "#e879f9"
+    },
+    "/mapping/trajectory_path": {
+     "visible": true,
+     "lineWidth": 0.16,
+     "color": "#94a3b8"
+    },
+    "/mtt_obstacle/debug_cloud": {
+     "visible": true,
+     "colorMode": "flat",
+     "color": "#ef4444",
+     "pointSize": 5
+    },
+    "/trailer/body_markers": {
+     "visible": true
+    },
+    "/hesai_lidar/points": {
+     "visible": false,
+     "colorField": "intensity",
+     "colorMode": "colormap",
+     "colorMap": "turbo",
+     "pointSize": 2
+    },
+    "/mapping/map": {
+     "visible": false
+    },
+    "/localization/odom": {
+     "visible": true,
+     "type": "arrow"
+    }
+   },
+   "layers": {
+    "grid": {
+     "layerId": "foxglove.Grid",
+     "visible": true,
+     "size": 200,
+     "divisions": 200,
+     "label": "Grid"
+    }
+   }
+  },
+  "Indicator!gps_matched": {
+   "path": "/mtt/gps_path_server/diagnostics.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "GPS PATH ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "matched",
+     "color": "#16a34a",
+     "label": "GPS PATH: MATCHED"
+    },
+    {
+     "operator": "=",
+     "rawValue": "lost",
+     "color": "#dc2626",
+     "label": "GPS PATH: LOST"
+    },
+    {
+     "operator": "=",
+     "rawValue": "no path loaded",
+     "color": "#6b7280",
+     "label": "NO GPS PATH LOADED"
+    }
+   ]
+  },
+  "Indicator!gps_quality": {
+   "path": "/mtt/gps_recording/fix_quality.data",
+   "style": "background",
+   "fallbackColor": "#6b7280",
+   "fallbackLabel": "GPS FIX ?",
+   "rules": [
+    {
+     "operator": "=",
+     "rawValue": "RTK_FIX",
+     "color": "#16a34a",
+     "label": "RTK FIX (~1-3cm)"
+    },
+    {
+     "operator": "=",
+     "rawValue": "RTK_FLOAT",
+     "color": "#eab308",
+     "label": "RTK FLOAT (~10-15cm)"
+    },
+    {
+     "operator": "=",
+     "rawValue": "DGPS",
+     "color": "#f59e0b",
+     "label": "DGPS (~50-75cm)"
+    },
+    {
+     "operator": "=",
+     "rawValue": "SPP",
+     "color": "#dc2626",
+     "label": "SPP (single point, few m)"
+    },
+    {
+     "operator": "=",
+     "rawValue": "NO_FIX",
+     "color": "#6b7280",
+     "label": "NO FIX"
+    }
+   ]
+  },
+  "Gauge!gps_accuracy": {
+   "path": "/mtt/gps_recording/horizontal_accuracy_m.data",
+   "minValue": 0,
+   "maxValue": 1.0,
+   "colorMode": "colormap",
+   "colorMap": "red-yellow-green",
+   "reverse": true
+  },
+  "StateTransitions!gps": {
+   "paths": [
+    {
+     "value": "/mtt/gps_recording/state.data",
+     "timestampMethod": "receiveTime",
+     "label": "teach"
+    },
+    {
+     "value": "/mtt/gps_path_server/diagnostics.data",
+     "timestampMethod": "receiveTime",
+     "label": "matching"
+    },
+    {
+     "value": "/mtt/gps_path_server/route_loaded.data",
+     "timestampMethod": "receiveTime",
+     "label": "route loaded"
+    },
+    {
+     "value": "/mtt/gps_path_follower/state.data",
+     "timestampMethod": "receiveTime",
+     "label": "follower"
+    }
+   ],
+   "isSynced": true
+  },
+  "Gauge!gps_commanded_speed": {
+   "path": "/mtt/gps_path_follower/diagnostics.data[4]",
+   "minValue": -2.0,
+   "maxValue": 2.0,
+   "colorMode": "colormap",
+   "colorMap": "turbo",
+   "reverse": false
+  },
+  "Gauge!gps_remaining_distance": {
+   "path": "/mtt/gps_path_follower/diagnostics.data[5]",
+   "minValue": 0,
+   "maxValue": 100,
+   "colorMode": "colormap",
+   "colorMap": "turbo",
+   "reverse": false
+  },
+  "Gauge!gps_slowdown": {
+   "path": "/mtt/gps_path_follower/diagnostics.data[6]",
+   "minValue": 0,
+   "maxValue": 1,
+   "colorMode": "colormap",
+   "colorMap": "red-yellow-green",
+   "reverse": false
+  },
+  "CallService!gps_start_recording": {
+   "serviceName": "/mtt_gps/teach_start",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "⏺️ START GPS RECORDING",
+   "buttonTooltip": "Start recording a GPS waypoint trajectory (requires min_fix_quality, gates on it)",
+   "buttonColor": "#16a34a"
+  },
+  "CallService!gps_stop_recording": {
+   "serviceName": "/mtt_gps/teach_stop",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "⏹️ STOP + SAVE",
+   "buttonTooltip": "Stop recording, smooth the trajectory, and save it to output_file",
+   "buttonColor": "#f59e0b"
+  },
+  "CallService!gps_reload_path": {
+   "serviceName": "/mtt_gps/status",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "ℹ️ GPS STATUS",
+   "buttonTooltip": "Show active GPS route, match validity, and autonomy readiness",
+   "buttonColor": "#7c3aed"
+  },
+  "CallService!gps_clear": {
+   "serviceName": "/mtt_gps/clear_trajectory",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "🧹 CLEAR ACTIVE",
+   "buttonTooltip": "Clear the active in-memory GPS Teach/route; saved route files are preserved",
+   "buttonColor": "#dc2626"
+  },
+  "CallService!gps_replay": {
+   "serviceName": "/mtt_gps/replay",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "▶️ GPS REPLAY",
+   "buttonTooltip": "Arm the loaded GPS route; motion still requires AUTO, deadman, fresh localization and obstacle gate",
+   "buttonColor": "#16a34a"
+  },
+  "CallService!gps_stop": {
+   "serviceName": "/mtt_gps/stop",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "⏹️ GPS STOP",
+   "buttonTooltip": "Stop and disarm GPS replay",
+   "buttonColor": "#dc2626"
+  },
+  "CallService!gps_list": {
+   "serviceName": "/mtt_gps/list",
+   "requestPayload": "{}",
+   "editingMode": false,
+   "buttonText": "📋 LIST ROUTES",
+   "buttonTooltip": "List saved GPS routes and the active route",
+   "buttonColor": "#2563eb"
+  },
+  "CallService!gps_load": {
+   "serviceName": "/mtt_gps/load",
+   "requestPayload": "{\"route_name\":\"gps_route_YYYY-MM-DD_HHMMSS_mmm\"}",
+   "editingMode": true,
+   "buttonText": "📂 LOAD ROUTE",
+   "buttonTooltip": "Edit route_name using LIST ROUTES, then load it without restarting any node",
+   "buttonColor": "#2563eb"
+  },
+  "CallService!gps_speed_limit": {
+   "serviceName": "/mtt_control/set_auto_speed_limit",
+   "requestPayload": "{\"max_speed_ms\":1.6}",
+   "editingMode": true,
+   "buttonText": "🏎️ AUTO SPEED",
+   "buttonTooltip": "Edit max_speed_ms and apply the signed central AUTO speed cap immediately",
+   "buttonColor": "#ea580c"
+  },
+  "RawMessages!gps_recording_state": {
+   "topicPath": "/mtt/gps_recording/state"
+  },
+  "RawMessages!gps_active_route": {
+   "topicPath": "/mtt/gps_path_server/active_route"
+  },
+  "RawMessages!gps_follower_state": {
+   "topicPath": "/mtt/gps_path_follower/state"
+  },
+  "RawMessages!gps_path_diagnostics": {
+   "topicPath": "/mtt/gps_path_server/diagnostics"
+  },
+  "Plot!gps_frenet_error": {
+   "paths": [
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[0]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "lateral error (m)"
+    },
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[1]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "course error (rad)"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  },
+  "Plot!gps_control": {
+   "paths": [
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[3]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "articulation command (rad)"
+    },
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[2]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "desired curvature (1/m)"
+    },
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[4]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "commanded speed (m/s)"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  },
+  "Plot!gps_progress": {
+   "paths": [
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[5]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "remaining distance (m)"
+    },
+    {
+     "value": "/mtt/gps_path_follower/diagnostics.data[6]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "obstacle slowdown (0..1)"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  },
+  "Parameters!tuning": {
+   "title": "ROS parameters (live edit)"
+  },
+  "Publish!custom": {
+   "topicName": "/wiln/command",
+   "datatype": "std_msgs/msg/String",
+   "buttonText": "SEND WILN COMMAND",
+   "buttonTooltip": "Raw WILN command (bypasses supervisor): start_recording, stop_recording, smooth_trajectory, clear_trajectory, play, cancel, save:<path>, load:<path>",
+   "buttonColor": "#7c3aed",
+   "advancedView": true,
+   "value": "{\"data\": \"clear_trajectory\"}"
+  },
+  "Plot!innovation": {
+   "paths": [
+    {
+     "value": "/localization/factor_graph/innovation_diagnostics.data[2]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "GPS z-score"
+    },
+    {
+     "value": "/localization/factor_graph/innovation_diagnostics.data[5]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "articulation z-score"
+    },
+    {
+     "value": "/localization/factor_graph/innovation_diagnostics.data[9]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "LiDAR odom z-score"
+    },
+    {
+     "value": "/localization/factor_graph/innovation_diagnostics.data[13]",
+     "enabled": true,
+     "timestampMethod": "receiveTime",
+     "label": "trailer pose z-score"
+    }
+   ],
+   "showLegend": true,
+   "legendDisplay": "floating",
+   "xAxisVal": "timestamp",
+   "followingViewWidth": 60
+  }
+ },
+ "globalVariables": {},
+ "userNodes": {
+  "icp_breadcrumbs": {
+   "name": "/icp_breadcrumbs",
+   "sourceCode": "import { Input, Message } from \"./types\";\n\ntype PoseArray = Message<\"geometry_msgs/PoseArray\">;\n\nexport const inputs = [\"/mapping/icp_odom\"];\nexport const output = \"/mapping/icp_path\";\n\nlet lastPoses: any[] = [];\nconst MAX_POSES = 50; // breadcrumb trail length\n\nexport default function script(msg: Input<\"/mapping/icp_odom\">): PoseArray {\n  lastPoses.push(msg.message.pose.pose);\n  if (lastPoses.length > MAX_POSES) {\n    lastPoses.shift();\n  }\n\n  return {\n    header: msg.message.header,\n    poses: lastPoses,\n  };\n}\n"
+  }
+ },
+ "playbackConfig": {
+  "speed": 1
+ },
+ "layout": "Tab!root"
+}

@@ -2,9 +2,13 @@
   mtt_repeat_supervisor:
     ros__parameters:
       health_topic: /mtt_health
-      # Accepted ICP only; bridge predictions on /mapping/icp_odom do not reset
-      # the localization watchdog.
-      icp_odom_topic: /mapping/icp_measurement
+      # norlab_icp_mapper_ros switched to upstream ros2 2026-07-28 (see
+      # dependencies/robot.repos): no odom-bridge feature, no
+      # /mapping/icp_measurement topic — it never published, which is why
+      # this watchdog saw "ICP odom stale or absent" and refused replay.
+      # Every /mapping/icp_odom message from upstream is a genuine ICP
+      # correction, so read it directly.
+      icp_odom_topic: /mapping/icp_odom
       teleop_topic: cmd_vel/manual
       deadman_topic: mtt_control/teleop_deadman
       controller_cmd_vel_topic: controller/cmd_vel

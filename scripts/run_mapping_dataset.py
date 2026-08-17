@@ -551,7 +551,9 @@ def main() -> int:
             print(f"  {result['status']} {result.get('error') or result.get('playback_error') or ''}", flush=True)
         print("", flush=True)
 
-    report_path = WORKSPACE_ROOT / "data" / f"mapping_dataset_icp_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
+    report_dir = WORKSPACE_ROOT / "data" / "reports" / "mapping_icp"
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report_path = report_dir / f"mapping_dataset_icp_report_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.yaml"
     report_path.write_text(yaml.safe_dump(results, sort_keys=False), encoding="utf-8")
     print(f"Report: {report_path}", flush=True)
     return 1 if failures else 0

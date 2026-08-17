@@ -285,7 +285,7 @@ def main() -> int:
     parser.add_argument("--dataset-csv", type=Path, default=None, help="Optional model_dataset.csv for ICP/model overlay")
     parser.add_argument("--output-dir", type=Path, default=None)
     parser.add_argument("--wheelbase-m", type=float, default=2.40)
-    parser.add_argument("--psi-max-rad", type=float, default=1.0471975512)
+    parser.add_argument("--psi-max-rad", type=float, default=0.733)  # ±42° operational safety limit (physical stop is 45°)
     parser.add_argument("--default-speed-ms", type=float, default=0.40)
     parser.add_argument("--max-speed-ms", type=float, default=0.50)
     parser.add_argument("--min-speed-ms", type=float, default=0.25)

@@ -8,6 +8,9 @@ For the current Doodle field setup, web UI addresses, measured throughput, and
 next optimization work, also read
 [Doodle Field Network Handoff](./doodle_field_handoff.md).
 
+For ROS 2 transport, endpoint precedence, QoS checks and Foxglove routing, read
+[Zenoh on the MTT](./zenoh.md).
+
 The goal is simple: robot control and ROS data should stay predictable, sensor
 links should not steal default routes, and temporary Internet sharing should be
 easy to enable and easy to undo.
