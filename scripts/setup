@@ -62,10 +62,16 @@ if [[ "${with_isaac}" == true ]]; then
 fi
 
 echo "[setup] run workspace checks"
-if ! ./scripts/verify --release; then
+if [[ "${build}" == true ]]; then
+  check_command=(./scripts/verify --release)
+else
+  check_command=(./scripts/status --summary)
+fi
+
+if ! "${check_command[@]}"; then
   cat >&2 <<'EOF'
-[setup] setup finished, but the workspace doctor found warnings or failures.
-Read the findings above before using the live robot.
+[setup] setup finished, but the workspace checks found a problem.
+Read the result above before using the live robot.
 EOF
   exit 1
 fi
