@@ -957,6 +957,17 @@ services:
             data: '$${BAG_DIR}/map.vtk'" 2>/dev/null && echo "  Map        -> $${BAG_DIR}/map.vtk" || true
           ros2 service call /mapping/save_trajectory norlab_icp_mapper_ros/srv/SaveTrajectory "trajectory_file_name:
             data: '$${BAG_DIR}/trajectory.vtk'" 2>/dev/null && echo "  Trajectory -> $${BAG_DIR}/trajectory.vtk" || true
+
+          # ── Snapshot ROS parameters at end-of-session (diff with ros_params.yaml to see mid-bag changes) ──
+          PARAM_FILE_END="$${BAG_DIR}/ros_params_end.yaml"
+          echo "  Snapshotting end-of-session ROS parameters..."
+          for NODE in /mtt_can_node /mtt_operator_input_node /mtt_manual_cmd_filter_node /mtt_cmd_arbiter_node; do
+            echo "# --- $${NODE} ---" >> "$${PARAM_FILE_END}" 2>/dev/null
+            ros2 param dump "$${NODE}" 2>/dev/null >> "$${PARAM_FILE_END}" || \
+              echo "# $${NODE}: not available" >> "$${PARAM_FILE_END}"
+          done
+          echo "  ROS params (end) -> $${BAG_DIR}/ros_params_end.yaml"
+
           echo "  Session dir: $${BAG_DIR}"
         }
         trap cleanup_recording EXIT INT TERM
@@ -1019,6 +1030,30 @@ services:
         wait "$${BAG_PID}"
         RECORD_EXIT=$$?
         exit "$${RECORD_EXIT}"
+
+  # ── Parameter watcher ──
+  # Watches /parameter_events for changes to control-critical parameters
+  # (max_linear_speed, linear_rise_rate, max_auto_speed_ms, max_linear_speed_ms)
+  # and publishes timestamped JSON events to /session/events so that mid-bag
+  # parameter changes are traceable in offline analysis.
+  # Start/stop together with the record service (same --profile record).
+  param_watcher:
+    <<: [*dc_base]
+    environment:
+      <<: [*dc_base_env]
+    profiles: ["record"]
+    stop_signal: SIGINT
+    stop_grace_period: 10s
+    restart: on-failure
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[param_watcher] Starting — will publish to /session/events on control param changes"
+        exec python3 ${WORKSPACE}/demos/data_collection/scripts/param_watcher.py
 
   # ── Ice-rink experiment conductor ──
   # Plays the command-profile matrix in demos/data_collection/config/
