@@ -553,7 +553,8 @@ services:
           -p icp_speed_variance:=$${ICE_SLIP_ICP_SPEED_VARIANCE:-0.04} \
           -p imu_odom_speed_variance:=$${ICE_SLIP_IMU_ODOM_SPEED_VARIANCE:-0.25} \
           -p tacho_speed_variance:=$${ICE_SLIP_TACHO_SPEED_VARIANCE:-1.00} \
-          -p auto_com_switch_enabled:=false
+          -p auto_com_switch_enabled:=false \
+          -p com_forward_sign:=$${COM_FORWARD_SIGN:-1.0}
 
   # ── Arm the Mathis transient COM-shift experiment ──
   # This service does not publish velocity or motor commands. It only publishes
@@ -629,7 +630,8 @@ services:
           -p com_direction_topic:=mtt_control/com_direction_sign \
           -p speed_threshold_ms:=$${COM_SPEED_SWITCH_THRESHOLD_MS:-2.0} \
           -p speed_hysteresis_ms:=$${COM_SPEED_SWITCH_HYSTERESIS_MS:-0.2} \
-          -p switch_cooldown_s:=$${COM_SPEED_SWITCH_COOLDOWN_S:-1.0}
+          -p switch_cooldown_s:=$${COM_SPEED_SWITCH_COOLDOWN_S:-1.0} \
+          -p com_forward_sign:=$${COM_FORWARD_SIGN:-1.0}
 
   # ── Perception (trailer detector + cloud merger) ──
   # Launches trailer_detector_node + trailer_pose_node.
@@ -896,7 +898,7 @@ services:
           echo "  $$NODE ready"
         done
         PARAM_FILE="$${BAG_DIR}/ros_params.yaml"
-        for NODE in /mtt_can_node /mtt_odometry_node /mtt_operator_input_node /mtt_manual_cmd_filter_node /mtt_mode_manager_node /mtt_cmd_arbiter_node; do
+        for NODE in /mtt_can_node /mtt_odometry_node /mtt_operator_input_node /mtt_manual_cmd_filter_node /mtt_mode_manager_node /mtt_cmd_arbiter_node /com_position_node /motor_driver_node; do
           echo "# --- $${NODE} ---" >> "$${PARAM_FILE}" 2>/dev/null
           ros2 param dump "$${NODE}" 2>/dev/null >> "$${PARAM_FILE}" || \
             echo "# $${NODE}: not available" >> "$${PARAM_FILE}"
@@ -1042,6 +1044,18 @@ services:
             data: '$${BAG_DIR}/map.vtk'" 2>/dev/null && echo "  Map        -> $${BAG_DIR}/map.vtk" || true
           ros2 service call /mapping/save_trajectory norlab_icp_mapper_ros/srv/SaveTrajectory "trajectory_file_name:
             data: '$${BAG_DIR}/trajectory.vtk'" 2>/dev/null && echo "  Trajectory -> $${BAG_DIR}/trajectory.vtk" || true
+
+          # ── Snapshot ROS parameters at end-of-session ──
+          # Diff with ros_params.yaml to reveal mid-bag changes (speed, slew, amplitude).
+          PARAM_FILE_END="$${BAG_DIR}/ros_params_end.yaml"
+          echo "  Snapshotting end-of-session ROS parameters..."
+          for NODE in /mtt_can_node /mtt_operator_input_node /mtt_manual_cmd_filter_node /mtt_cmd_arbiter_node /com_position_node /motor_driver_node; do
+            echo "# --- $${NODE} ---" >> "$${PARAM_FILE_END}" 2>/dev/null
+            ros2 param dump "$${NODE}" 2>/dev/null >> "$${PARAM_FILE_END}" || \
+              echo "# $${NODE}: not available" >> "$${PARAM_FILE_END}"
+          done
+          echo "  ROS params (end) -> $${BAG_DIR}/ros_params_end.yaml"
+
           echo "  Session dir: $${BAG_DIR}"
         }
         trap cleanup_recording EXIT INT TERM
@@ -1102,6 +1116,31 @@ services:
         wait "$${BAG_PID}"
         RECORD_EXIT=$$?
         exit "$${RECORD_EXIT}"
+
+  # ── Parameter watcher ──
+  # Watches /parameter_events for changes to control-critical AND COM motor parameters
+  # and publishes timestamped JSON events to /session/events.
+  # Tracked: max_linear_speed, linear_rise_rate, max_auto_speed_ms, max_linear_speed_ms
+  #          (mtt_can_node), com_position_node: run_slew, amplitude_counts,
+  #          setup_slew, rearm_slew, direction_sign, max_linear_speed.
+  # Start/stop together with the record service (same profiles).
+  param_watcher:
+    <<: [*dc_base]
+    environment:
+      <<: [*dc_base_env]
+    profiles: ["record", "ice"]
+    stop_signal: SIGINT
+    stop_grace_period: 10s
+    restart: on-failure
+    depends_on:
+      robot_driver:
+        condition: service_started
+    command:
+      - bash
+      - -lc
+      - |
+        echo "[param_watcher] Starting — will publish to /session/events on control + COM motor param changes"
+        exec python3 ${WORKSPACE}/demos/data_collection/scripts/param_watcher.py
 
   # ── Foxglove live visualisation ──
   # No profile → starts automatically with dc up (same as zenoh and robot).
