@@ -287,9 +287,15 @@ def odom_command(odom_source: str) -> list[str] | None:
 
 
 def mapping_command(odom_source: str, enable_global_output_map: bool) -> list[str]:
+    # NOTE (2026-08-21): enable_global_output_map and most of the MAPPING_*
+    # env vars this used to forward (gates, map recovery, adaptive gate, odom
+    # bridge, trimming, dynamic trailer self-filter, deskew_source/imu_topic)
+    # configured the "mohamed" fork's mapper_node.cpp. Upstream norlab_icp_mapper_ros
+    # (in use since 2026-07-28) doesn't declare those parameters, so they were
+    # silently inert -- removed here. enable_global_output_map is kept as a
+    # parameter (CLI flag still exists) but no longer has any effect.
     mapping_config = env("MAPPING_CONFIG", str(default_mapping_config(odom_source)))
     map_publish_rate = env("MAPPING_DATASET_MAP_PUBLISH_RATE", env("MAPPING_MAP_PUBLISH_RATE", "0"))
-    map_publish_radius = env("MAPPING_DATASET_MAP_PUBLISH_RADIUS_M", env("MAPPING_MAP_PUBLISH_RADIUS_M", "40.0"))
     return [
         "ros2",
         "launch",
@@ -299,64 +305,10 @@ def mapping_command(odom_source: str, enable_global_output_map: bool) -> list[st
         f"mapping_points_topic:={env('MAPPING_POINTS_TOPIC', '/hesai_lidar/points')}",
         f"mapping_config:={mapping_config}",
         f"mapping_deskew:={env('MAPPING_DESKEW', 'true')}",
-        f"mapping_deskew_source:={env('MAPPING_DESKEW_SOURCE', 'imu')}",
-        f"mapping_deskew_imu_topic:={env('MAPPING_DESKEW_IMU_TOPIC', '/mti100/data')}",
         f"mapping_compression_voxel_size:={env('MAPPING_COMPRESSION_VOXEL_SIZE', '0.50')}",
         f"mapping_map_publish_rate:={map_publish_rate}",
         f"mapping_map_tf_publish_rate:={env('MAPPING_MAP_TF_PUBLISH_RATE', '50.0')}",
-        f"mapping_min_input_points:={env('MAPPING_MIN_INPUT_POINTS', '200')}",
-        f"mapping_max_translation_correction:={env('MAPPING_MAX_TRANSLATION_CORRECTION', '2.50')}",
-        f"mapping_max_rotation_correction_deg:={env('MAPPING_MAX_ROTATION_CORRECTION_DEG', '35.0')}",
-        f"mapping_max_velocity_ms:={env('MAPPING_MAX_VELOCITY_MS', '8.0')}",
-        f"mapping_max_yaw_rate_deg_s:={env('MAPPING_MAX_YAW_RATE_DEG_S', '80.0')}",
-        f"mapping_max_pose_yaw_step_deg:={env('MAPPING_MAX_POSE_YAW_STEP_DEG', '20.0')}",
-        f"mapping_max_pose_yaw_odom_residual_deg:={env('MAPPING_MAX_POSE_YAW_ODOM_RESIDUAL_DEG', '12.0')}",
-        f"mapping_max_pose_step_m:={env('MAPPING_MAX_POSE_STEP_M', '8.0')}",
-        f"mapping_max_z_jump_m:={env('MAPPING_MAX_Z_JUMP_M', '2.0')}",
-        f"mapping_max_registration_time_ms:={env('MAPPING_MAX_REGISTRATION_TIME_MS', '3000.0')}",
         f"mapping_max_idle_time:={env('MAPPING_MAX_IDLE_TIME', '600.0')}",
-        f"deterministic_map_update_distance_m:={env('MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M', '0.10')}",
-        f"deterministic_map_update_yaw_deg:={env('MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG', '1.0')}",
-        f"deterministic_map_min_dist_new_point:={env('MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT', '0.15')}",
-        f"mapping_enable_global_output_map:={str(enable_global_output_map).lower()}",
-        f"mapping_global_output_map_min_dist_new_point:={env('MAPPING_GLOBAL_OUTPUT_MAP_MIN_DIST_NEW_POINT', '0.12')}",
-        f"mapping_enable_map_trimming:={env('MAPPING_ENABLE_MAP_TRIMMING', 'true')}",
-        f"mapping_map_trim_radius_m:={env('MAPPING_MAP_TRIM_RADIUS_M', '20.0')}",
-        f"mapping_max_map_points_before_trim:={env('MAPPING_MAX_MAP_POINTS_BEFORE_TRIM', '45000')}",
-        f"mapping_map_trim_interval_scans:={env('MAPPING_MAP_TRIM_INTERVAL_SCANS', '2')}",
-        f"mapping_min_pose_overlap_near_ratio:={env('MAPPING_MIN_POSE_OVERLAP_NEAR_RATIO', '0.40')}",
-        f"mapping_min_pose_overlap_loose_ratio:={env('MAPPING_MIN_POSE_OVERLAP_LOOSE_RATIO', '0.55')}",
-        f"mapping_min_map_overlap_near_ratio:={env('MAPPING_MIN_MAP_OVERLAP_NEAR_RATIO', '0.35')}",
-        f"mapping_min_map_overlap_loose_ratio:={env('MAPPING_MIN_MAP_OVERLAP_LOOSE_RATIO', '0.50')}",
-        f"mapping_max_map_update_translation_correction_m:={env('MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M', '4.0')}",
-        f"mapping_max_map_update_rotation_correction_deg:={env('MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG', '12.0')}",
-        f"mapping_enable_map_recovery:={env('MAPPING_ENABLE_MAP_RECOVERY', 'true')}",
-        f"mapping_recovery_reload_after_rejections:={env('MAPPING_RECOVERY_RELOAD_AFTER_REJECTIONS', '4')}",
-        f"mapping_recovery_attempt_interval_scans:={env('MAPPING_RECOVERY_ATTEMPT_INTERVAL_SCANS', '5')}",
-        f"mapping_recovery_local_map_radius_m:={env('MAPPING_RECOVERY_LOCAL_MAP_RADIUS_M', '24.0')}",
-        f"mapping_recovery_local_map_min_points:={env('MAPPING_RECOVERY_LOCAL_MAP_MIN_POINTS', '5000')}",
-        f"mapping_recovery_local_map_max_points:={env('MAPPING_RECOVERY_LOCAL_MAP_MAX_POINTS', '60000')}",
-        f"mapping_snapshot_save_interval_scans:={env('MAPPING_SNAPSHOT_SAVE_INTERVAL_SCANS', '20')}",
-        f"mapping_snapshot_max_translation_correction_m:={env('MAPPING_SNAPSHOT_MAX_TRANSLATION_CORRECTION_M', '1.0')}",
-        f"mapping_snapshot_max_rotation_correction_deg:={env('MAPPING_SNAPSHOT_MAX_ROTATION_CORRECTION_DEG', '5.0')}",
-        f"mapping_enable_motion_adaptive_gate:={env('MAPPING_ENABLE_MOTION_ADAPTIVE_GATE', 'true')}",
-        f"mapping_adaptive_max_dt_s:={env('MAPPING_ADAPTIVE_MAX_DT_S', '2.0')}",
-        f"mapping_adaptive_velocity_gain:={env('MAPPING_ADAPTIVE_VELOCITY_GAIN', '1.25')}",
-        f"mapping_adaptive_acceleration_gain:={env('MAPPING_ADAPTIVE_ACCELERATION_GAIN', '0.50')}",
-        f"mapping_adaptive_yaw_rate_gain:={env('MAPPING_ADAPTIVE_YAW_RATE_GAIN', '1.25')}",
-        f"mapping_aggressive_speed_ms:={env('MAPPING_AGGRESSIVE_SPEED_MS', '2.0')}",
-        f"mapping_aggressive_yaw_rate_deg_s:={env('MAPPING_AGGRESSIVE_YAW_RATE_DEG_S', '35.0')}",
-        f"mapping_pivot_linear_speed_ms:={env('MAPPING_PIVOT_LINEAR_SPEED_MS', '0.75')}",
-        f"mapping_pivot_yaw_rate_deg_s:={env('MAPPING_PIVOT_YAW_RATE_DEG_S', '35.0')}",
-        f"mapping_pivot_max_translation_correction_m:={env('MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M', '1.25')}",
-        f"mapping_enable_odom_bridge:={env('MAPPING_ENABLE_ODOM_BRIDGE', 'true')}",
-        f"mapping_odom_bridge_after_rejections:={env('MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS', '0')}",
-        f"mapping_odom_bridge_min_speed_ms:={env('MAPPING_ODOM_BRIDGE_MIN_SPEED_MS', '1.5')}",
-        f"mapping_enable_planar_pose_constraint:={env('MAPPING_ENABLE_PLANAR_POSE_CONSTRAINT', 'true')}",
-        f"mapping_planar_pose_max_z_drift_m:={env('MAPPING_PLANAR_POSE_MAX_Z_DRIFT_M', '2.0')}",
-        f"mapping_input_qos_reliable:={env('MAPPING_INPUT_QOS_RELIABLE', 'true')}",
-        f"mapping_anchor_map_at_initial_robot_pose:={env('MAPPING_ANCHOR_MAP_AT_INITIAL_ROBOT_POSE', 'true')}",
-        f"mapping_map_publish_radius_m:={map_publish_radius}",
         f"mapping_odom_frame:={env('MAPPING_ODOM_FRAME', 'odom')}",
         f"mapping_robot_frame:={env('MAPPING_ROBOT_FRAME', 'base_footprint')}",
     ]

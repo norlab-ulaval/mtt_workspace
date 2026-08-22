@@ -981,7 +981,7 @@ def run_pipeline(
                     "-p", "use_sim_time:=true",
                     "-p", "broadcast_tf:=true",
                     "-p", "cmd_vel_topic:=cmd_vel",
-                    "-p", "hardware_articulation_topic:=/mtt_articulation_angle",
+                    "-p", "hardware_articulation_topic:=/hardware/articulation_angle",
                     "-p", "articulation_state_topic:=/unused/articulation_state",
                     "-p", "articulation_state_output_topic:=mtt/articulation_state/runtime",
                     "-p", "use_articulation_state_lidar:=false",
@@ -1046,23 +1046,8 @@ def run_pipeline(
             f"mapping_odom_frame:={args.mapping_odom_frame}",
             f"mapping_robot_frame:={mapping_robot_frame}",
             f"mapping_is_online:={mapping_is_online}",
-            "mapping_input_qos_reliable:=true",
-            f"mapping_enable_global_output_map:={str(args.enable_global_output_map).lower()}",
-            "mapping_global_output_map_min_dist_new_point:=0.05",
-            "mapping_enable_map_trimming:=true",
-            "mapping_map_trim_interval_scans:=10",
-            f"mapping_map_trim_radius_m:={os.environ.get('OFFLINE_ICP_LOCAL_MAP_RADIUS_M', '60.0')}",
-            "mapping_max_map_points_before_trim:=250000",
             f"mapping_max_idle_time:={max(300.0, duration_s / max(replay_rate, 1e-6) + args.play_timeout_margin_seconds)}",
         ]
-        if use_rebuilt_wheel_odom_prior:
-            mapping_command.extend([
-                "deterministic_map_update_distance_m:=0.10",
-                "deterministic_map_update_yaw_deg:=1.0",
-                "deterministic_map_min_dist_new_point:=0.05",
-                "mapping_max_registration_time_ms:=8000.0",
-                "mapping_tf_lookup_timeout_ms:=1",
-            ])
         if mapping_initial_robot_pose:
             mapping_command.append(f"mapping_initial_robot_pose:={mapping_initial_robot_pose}")
 

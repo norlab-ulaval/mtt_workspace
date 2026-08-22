@@ -502,7 +502,7 @@ services:
         echo "=== mapping: Norlab ICP mapper ==="
         echo "  points: $${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "  config: $${MAPPING_CONFIG:-default}"
-        echo "  deskew=$${MAPPING_DESKEW} source=$${MAPPING_DESKEW_SOURCE:-imu} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
+        echo "  deskew=$${MAPPING_DESKEW} voxel=$${MAPPING_COMPRESSION_VOXEL_SIZE}"
         POINTS_TOPIC="$${MAPPING_POINTS_TOPIC:-/hesai_lidar/points}"
         echo "Waiting for LiDAR ($${POINTS_TOPIC})..."
         for i in $$(seq 1 60); do
@@ -526,41 +526,11 @@ services:
         exec ros2 launch norlab_robot mapping.launch.py \
           use_sim_time:=false \
           mapping_deskew:=$${MAPPING_DESKEW} \
-          mapping_deskew_source:=$${MAPPING_DESKEW_SOURCE:-imu} \
-          mapping_deskew_imu_topic:=$${MAPPING_DESKEW_IMU_TOPIC:-/mti100/data} \
           mapping_compression_voxel_size:=$${MAPPING_COMPRESSION_VOXEL_SIZE} \
           mapping_map_publish_rate:=$${MAPPING_MAP_PUBLISH_RATE} \
           mapping_map_tf_publish_rate:=$${MAPPING_MAP_TF_PUBLISH_RATE} \
-          mapping_min_input_points:=$${MAPPING_MIN_INPUT_POINTS} \
-          mapping_max_translation_correction:=$${MAPPING_MAX_TRANSLATION_CORRECTION} \
-          mapping_max_rotation_correction_deg:=$${MAPPING_MAX_ROTATION_CORRECTION_DEG} \
-          mapping_max_velocity_ms:=$${MAPPING_MAX_VELOCITY_MS} \
-          mapping_max_yaw_rate_deg_s:=$${MAPPING_MAX_YAW_RATE_DEG_S} \
-          mapping_max_pose_yaw_step_deg:=$${MAPPING_MAX_POSE_YAW_STEP_DEG:-30.0} \
-          mapping_max_pose_step_m:=$${MAPPING_MAX_POSE_STEP_M} \
-          mapping_max_z_jump_m:=$${MAPPING_MAX_Z_JUMP_M} \
-          mapping_max_registration_time_ms:=$${MAPPING_MAX_REGISTRATION_TIME_MS} \
-          deterministic_map_update_distance_m:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_DISTANCE_M:-0.03} \
-          deterministic_map_update_yaw_deg:=$${MAPPING_DETERMINISTIC_MAP_UPDATE_YAW_DEG:-0.5} \
-          deterministic_map_min_dist_new_point:=$${MAPPING_DETERMINISTIC_MAP_MIN_DIST_NEW_POINT:-0.03} \
-          mapping_enable_map_trimming:=$${MAPPING_ENABLE_MAP_TRIMMING:-false} \
-          mapping_map_trim_radius_m:=$${MAPPING_MAP_TRIM_RADIUS_M:-40.0} \
-          mapping_max_map_points_before_trim:=$${MAPPING_MAX_MAP_POINTS_BEFORE_TRIM:-120000} \
-          mapping_map_publish_radius_m:=$${MAPPING_MAP_PUBLISH_RADIUS_M:-40.0} \
-          mapping_max_map_update_translation_correction_m:=$${MAPPING_MAX_MAP_UPDATE_TRANSLATION_CORRECTION_M:-1.50} \
-          mapping_max_map_update_rotation_correction_deg:=$${MAPPING_MAX_MAP_UPDATE_ROTATION_CORRECTION_DEG:-8.0} \
-          mapping_aggressive_speed_ms:=$${MAPPING_AGGRESSIVE_SPEED_MS:-2.0} \
-          mapping_aggressive_yaw_rate_deg_s:=$${MAPPING_AGGRESSIVE_YAW_RATE_DEG_S:-15.0} \
-          mapping_pivot_linear_speed_ms:=$${MAPPING_PIVOT_LINEAR_SPEED_MS:-0.75} \
-          mapping_pivot_yaw_rate_deg_s:=$${MAPPING_PIVOT_YAW_RATE_DEG_S:-15.0} \
-          mapping_pivot_max_translation_correction_m:=$${MAPPING_PIVOT_MAX_TRANSLATION_CORRECTION_M:-0.60} \
-          mapping_enable_odom_bridge:=$${MAPPING_ENABLE_ODOM_BRIDGE:-true} \
-          mapping_odom_bridge_after_rejections:=$${MAPPING_ODOM_BRIDGE_AFTER_REJECTIONS:-0} \
-          mapping_odom_bridge_min_speed_ms:=$${MAPPING_ODOM_BRIDGE_MIN_SPEED_MS:-1.5} \
-          mapping_allow_odom_bridge_map_insertion:=$${MAPPING_ALLOW_ODOM_BRIDGE_MAP_INSERTION:-false} \
           mapping_points_topic:=$${MAPPING_POINTS_TOPIC} \
           mapping_config:=$${MAPPING_CONFIG:-$${WORKSPACE}/src/external/norlab_robot/config/mapping/_config_hesai_imu_norlabws.yaml} \
-          mapping_input_qos_reliable:=$${MAPPING_INPUT_QOS_RELIABLE:-false} \
           mapping_odom_frame:=$${MAPPING_ODOM_FRAME:-odom} \
           mapping_robot_frame:=$${MAPPING_ROBOT_FRAME:-base_footprint}
 
