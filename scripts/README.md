@@ -17,8 +17,11 @@ These do not start the robot.
 | `create_env` | generate local user, image, robot and network variables |
 | `compile` | build images if needed, then run `colcon build` in Docker |
 | `status` | report parent and nested repository state; use `--doctor --summary` |
-| `verify` | offline syntax, Compose and structure checks; `--release` also requires clean repos |
-| `pull` | fast-forward the parent and nested repositories |
+| `verify` | source completeness, syntax, docs, tooling tests, Compose and structure; `--release` requires clean repos |
+| `test_offline` | fresh build and behavioral tests in a container without network or host devices |
+| `check_workspace.py` | static source/import/helper/link checks; does not import project code |
+| `handover_snapshot.py` | local source archive, checksums and Git patches; excludes bags and credentials |
+| `pull` | fast-forward parent and restore exact recursive submodule pins; refuses local changes |
 | `install_host.sh` | optional native Ubuntu setup; Docker is preferred |
 | `workspace_source_paths` | source roots used by the build |
 
@@ -73,6 +76,9 @@ Command-capable or host-changing:
 - `setup_udev_reach_rs.sh`
 - `set_icp_prior.py` on a live graph
 - `mtt_rear_obstacle_monitor.py` when connected to the command chain
+- `mtt_experiment_conductor.py`: live motion commands; research purpose does not make it offline
+- `mtt_experiment_monitor.py`, `mtt_confirmatory_monitor.py`: live experiment monitoring
+- `isaac_vslam_frame_bridge.py`: publishes TF on a live graph
 
 Do not use a command-capable script as an installation test.
 
@@ -102,7 +108,7 @@ not required to operate the MTT:
 - `evaluate_*`, `compare_*`, `fit_*`, `tune_*`;
 - `plot_*`, `render_*`, `visualize_*`;
 - `mtt_motion_model/*`;
-- `analyze_ice_session.py`, `mtt_experiment_*`;
+- `analyze_ice_session.py` (the experiment conductor itself is command-capable);
 - one-off KISS-ICP, covariance, MSA and motion-model scripts.
 
 Research outputs belong under `artifacts/`, `results/`, `data/` or
@@ -120,6 +126,9 @@ artifacts/<run>/            generated result worth keeping locally
 
 Existing research scripts stay in place to avoid breaking old commands. New
 ones should use `scripts/research/`.
+
+Use the [research guide](research/README.md) for supported entrypoints,
+dependencies, provenance and the distinction between historical model families.
 
 ## Before adding a script
 

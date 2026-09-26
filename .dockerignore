@@ -45,3 +45,33 @@ tmp/
 # Exclude local caches and outputs
 **/.ccache/**
 **/__pycache__/**
+
+# Handover: never bake local experiments, archives or nested Python envs into images.
+artifacts/
+graphify-out/
+.scratch_test/
+.synth_replay/
+.deskew_selftest/
+articulation_offline_results/
+deliverables_mapping/
+identified/
+norlab_ws/
+.agents/
+.codex/
+.claude/
+CLAUDE.md
+AGENTS.md
+chat_*.txt
+check_*.py
+inspect_*.py
+test_*_ws.py
+test_ws_*.py
+test_foxglove_ws.py
+**/.venv*/**
+**/.ruff_cache/**
+*.zip
+*.tar
+*.tar.gz
+*.npz
+*.log
+*.bak.*

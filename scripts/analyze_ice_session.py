@@ -59,7 +59,7 @@ from mcap_ros2.decoder import DecoderFactory
 # --------------------------------------------------------------------------
 # Measured geometry (corrected 2026-07-27 per
 # artifacts/msa_canonical_mtt_calibration_test_garage_2026-06-02_09-01-53/README.md;
-# the old CLAUDE.md/paper value L1=0.9 was ~65.8mm too large, per that audit).
+# the previous nominal value L1=0.9 was ~65.8mm too large, per that audit).
 L1_M = 0.834227   # tractor contact-center-to-hitch distance, measured
 L2_M = 1.5135     # hitch-to-trailer-axle-pair-center distance, measured
 L_M = L1_M + L2_M

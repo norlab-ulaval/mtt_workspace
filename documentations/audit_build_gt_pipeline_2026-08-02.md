@@ -90,7 +90,7 @@ protégée par `assert_not_frozen()`, ne pas y toucher). Aucune autre session
 n'a d'ICP offline approuvé disponible pour un premier run réel. À débloquer :
 qualifier un `GT_icp/icp_odom_*.csv` sur une session non gelée, puis lancer
 Stage 1 seul dans `docker compose run --rm bash` (le solver C++ et
-`rosbag2_py` ne tournent pas hors Docker, par `CLAUDE.md`).
+`rosbag2_py` nécessitent l'environnement ROS et les dépendances du conteneur).
 
 **Statut honnête : code complet, syntaxiquement et logiquement audité,
 gates de validation prouvées sur données réelles — mais chaîne complète

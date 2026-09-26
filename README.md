@@ -2,6 +2,10 @@
 
 ROS 2 Jazzy workspace for the MTT-154 robot.
 
+For the internship handover, start with the [handover guide](docs/reference/handover.md)
+and the [current audit](docs/reference/robotics_safety_audit_2026-09-26.md).
+For datasets and model evaluation, use the [research guide](scripts/research/README.md).
+
 Use Docker unless you have a specific reason not to. The Docker path installs
 the system dependencies, imports every repository, builds the workspace and
 keeps the host clean.
@@ -27,6 +31,7 @@ Requirements:
 - Linux x86_64;
 - Git access to the private `norlab-ulaval` repositories;
 - Docker Engine with the Compose plugin;
+- Python 3 with PyYAML for workspace verification (`python3-yaml` on Ubuntu);
 - at least 50 GB free disk space for images and build files.
 
 Clone and build:
@@ -58,6 +63,11 @@ Offline verification after any edit:
 ```bash
 ./scripts/verify
 ```
+
+This checks source completeness, syntax, documentation, Compose and tooling
+regressions. It allows local edits; `./scripts/verify --release` additionally
+requires clean repositories. Run `./scripts/test_offline` for an isolated fresh
+build and behavioral tests of the principal MTT control/driver/perception packages.
 
 Open a development shell:
 
@@ -178,6 +188,11 @@ Only `mtt_cmd_arbiter_node` should publish the final `cmd_vel`. The driver has
 command and telemetry timeouts, but those are not a replacement for the
 physical emergency stop.
 
+In the committed driver configuration, `linear.x` is m/s and `angular.z` is
+**normalized steering in [-1, 1]** (`cmd_angular_mode: normalized_steer`).
+Yaw rate in rad/s applies only when `cmd_angular_mode: yaw_rate` is selected
+consistently along the command chain. See the [calibration and geometry reference](docs/reference/calibration.md).
+
 ## Network and Zenoh
 
 Normal lab defaults:
@@ -217,7 +232,8 @@ reasons. The separation, risk level and naming rule are documented in
 ./scripts/compile                  # Docker image check and ROS build
 ./scripts/status --doctor --summary
 ./scripts/verify                    # syntax, Compose and structure checks
-./scripts/pull                     # fast-forward parent and nested repositories
+./scripts/pull                     # fast-forward parent, restore exact submodule pins
+./scripts/test_offline             # isolated build and behavioral tests; existing Docker image
 ./scripts/autosync_ws --dry-run    # preview a robot sync
 ```
 
@@ -261,3 +277,13 @@ git submodule status --recursive
 Every modified nested repository must be committed and pushed before the parent
 submodule pointer is committed. A clean parent with dirty nested repositories is
 not a reproducible release.
+
+Keep a local source snapshot before repository access ends:
+
+```bash
+python3 scripts/handover_snapshot.py --output artifacts/handover/source-snapshot
+```
+
+The destination must be new. This captures source files, local research helpers,
+checksums and per-repository patches. Bags, images, Git history and credentials
+need their own storage plan; see the handover guide.

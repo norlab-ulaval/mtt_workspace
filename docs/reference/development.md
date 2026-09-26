@@ -17,7 +17,7 @@ Use the Docker shell for development:
 docker compose run --rm bash
 ```
 
-The host only needs Git and Docker. ROS and vendor dependencies stay in the
+The host needs Git, Docker, Python 3 and PyYAML for verification. ROS and vendor dependencies stay in the
 image.
 
 ## Decide where the change belongs
@@ -71,17 +71,16 @@ After editing shell:
 bash -n scripts/<script>
 ```
 
-Run tests with the live network isolated:
+Build and run the maintained behavioral tests in a container without network
+or host devices:
 
 ```bash
-docker compose run --rm \
-  -e ROS_LOCALHOST_ONLY=1 \
-  -e ROS_DOMAIN_ID=232 \
-  compile bash -lc \
-  'source /opt/ros/jazzy/setup.bash && source install/setup.bash && colcon test --packages-select <package>'
+./scripts/test_offline
 ```
 
-Do not run a live launch file as a unit test.
+This uses an existing image and fresh build directories under
+`artifacts/offline-tests`. See the [handover guide](handover.md) for coverage
+and limits. Do not run a live launch file as a unit test.
 
 ## Add a ROS package
 
@@ -99,7 +98,7 @@ Then:
 1. add explicit dependencies to `package.xml` and `CMakeLists.txt`;
 2. add tests that run without hardware;
 3. add launch/config only when the package owns those defaults;
-4. build with `../../scripts/compile` from the workspace root;
+4. build with `./scripts/compile` from the workspace root;
 5. commit and push `mtt_core`;
 6. commit the new `src/mtt_core` pointer in the parent workspace.
 

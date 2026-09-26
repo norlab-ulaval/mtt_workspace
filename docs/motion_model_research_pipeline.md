@@ -1,5 +1,10 @@
 # MTT Motion Model Research Pipeline
 
+This document describes a historical pipeline and model ladder. For current
+entrypoints and reproducibility requirements, start with the
+[research guide](../scripts/research/README.md). M0–M5 labels and geometry differ
+between scripts; record the actual implementation and parameters with results.
+
 ## Ground Truth Contract
 
 Use `offline_icp_canonical` as the reference only when `canonical_quality.status: PASS`.
@@ -52,7 +57,9 @@ v_eff[k+1] = v_eff[k] + alpha_v * (v_target - v_eff[k])
 phi_eff[k+1] = phi_eff[k] + alpha_phi * (phi_cmd - phi_eff[k])
 ```
 
-and midpoint Euler integration. This is a correct baseline for a planar articulated vehicle if `L`, sign conventions, and `phi` represent the effective articulation at the hitch.
+and midpoint Euler integration. This is the historical tangent approximation.
+Other scripts use a two-body articulated relation with separate front/rear
+lengths; do not treat their equations or articulation signs as interchangeable.
 
 Main limitations:
 
@@ -141,4 +148,3 @@ python3 scripts/audit_postprocess_dataset.py data
 python3 scripts/fit_motion_model_from_bags.py data
 python3 scripts/visualize_canonical_dataset.py data
 ```
-
