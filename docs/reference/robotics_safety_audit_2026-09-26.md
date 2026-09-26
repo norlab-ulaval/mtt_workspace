@@ -67,16 +67,17 @@ first-pass findings, without erasing pre-existing work.
 
 The six-package build (`mtt_msgs`, `mtt_interfaces`, `mtt_control`, `mtt_driver`,
 `mtt_perception`, `mtt_gps_driver`) used a new build/install tree in
-`artifacts/offline-tests/run.65pJYW` and the existing image recorded in
-`image-id.txt`. After fixes, changed packages were rebuilt in that tree.
+`artifacts/offline-tests/run.jxQ0Dx` and the existing image recorded in
+`image-id.txt`. This final run built all six packages from scratch and exited
+zero. Earlier diagnostic runs, including `run.65pJYW`, remain in the local archive.
 Containers had `--network none`, no host devices and read-only source mounts.
 
 - 82 distinct registered behavioral cases pass across control, driver,
   perception and GPS. Colcon reports 93 because it also counts the 11 CTest
   wrappers; do not describe this as 93 independent cases.
 - 11 pure Python avoidance tests pass. Final command exit codes are all zero
-  in `exit-codes.txt`; see `tests-verified.log`, `test-results-verified.log` and
-  `avoidance-verified.log`. Earlier failing logs remain available as evidence.
+  in `exit-codes.txt`; see `tests.log`, `test-results.log` and
+  `avoidance.log`. Earlier failing logs remain available as evidence.
 - The initial arbiter implementation failed 14 of the first 28 regression cases;
   the final executable passes all 32, including subsequently added negative-time
   and future-command reactivation cases.
@@ -84,7 +85,8 @@ Containers had `--network none`, no host devices and read-only source mounts.
   51 joints, one root, finite origins and no duplicate parents/cycles.
 - A temporary copy containing only publishable parent sources, without local
   ignored modules or initialized submodules, passes source checks, tool tests
-  and all Compose parses. GitHub Actions itself has not run in this session.
+  and all Compose parses. GitHub Actions also passed on the published
+  [workspace PR](https://github.com/norlab-ulaval/mtt_workspace/pull/2).
 
 The final runner records individual command exit codes in `exit-codes.txt`.
 A minimal reproduction showed that the image's login-shell logout hook returned
@@ -127,7 +129,7 @@ keep normalized command values separate from angular units. Help/import and
 bag-selection tests pass; full exports still require recorded bags and the ROS
 image. These checks do not certify every research pipeline or scientific result.
 
-## 2. Risk table
+## 2. Findings at entry and their disposition
 
 | ID | Severity | Confidence | Area | Finding | Runtime effect | Evidence | Next action |
 |---|---:|---|---|---|---|---|---|
@@ -136,7 +138,7 @@ image. These checks do not certify every research pipeline or scientific result.
 | H03 | S2 | confirmed | verification | Ordinary `verify` fails on a dirty worktree although `--release` claims to add that requirement | Developers cannot distinguish a failed check from normal edits | `scripts/verify` calls `status --doctor`; status final exit policy | Separate structure checks from release cleanliness, test both |
 | H04 | S2 | confirmed | Git | `pull` follows child branches and assumes `mtt_core` has a branch | Fresh submodule clones have detached HEADs; updates can leave parent pins | `scripts/pull` | Update submodules to parent pins; refuse dirty trees before pulling |
 | H05 | S2 | confirmed | research | Tracked code imports ignored modules | A clean clone loses reference conversion and optional geofence support | `build_gt_reference_csv.py:20`, conductor/monitor imports of `zone_map`; `.gitignore` | Include reusable dependency sources and test clone completeness |
-| H06 | S2 | confirmed | handover | Required changes and confirmatory tools are local only | Parent SHA does not capture the tested files | entry Git status; dirty calibration and recorder config | Review and publish child changes before parent release; archive data separately |
+| H06 | S2 | published for review | handover | Required changes and confirmatory tools were local only | Parent SHA does not capture the tested files | entry Git status; dirty calibration and recorder config | Child changes published; parent PR records pins and handover; archive data separately |
 | H07 | S2 | confirmed | Docker | Docker context omits exclusions for artifacts, ZIPs and nested virtual environments | `COPY . .` can bake local datasets, scratch code and a 493 MB ZIP into the image | `.dockerignore`, `docker/Dockerfile`; root `mapping_results_27aout.zip` | Exclude generated/local material explicitly |
 | H08 | S2 | confirmed | dependencies | Several build inputs are moving branches/downloads and broad pip constraints | Same source commit can produce a different image later | Dockerfiles: SOEM/libnabo/libpointmatcher clones, apt/pip, vendor downloads | Record image digest and dependency versions; pin only tested versions |
 | H09 | S2 | confirmed | semantics | Generic angular rad/s description conflicts with current driver mode | Generic Twist publishers can request the wrong steering value | `demos/common/config/mtt_driver.yaml`: `normalized_steer`; driver `command_angular_to_normalized_steer` | Document normalized steering versus yaw-rate mode explicitly |
