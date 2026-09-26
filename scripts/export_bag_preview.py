@@ -267,65 +267,6 @@ def start_ffmpeg(
     return subprocess.Popen(command, stdin=subprocess.PIPE)
 
 
-def export_single_session(
-    session_path: Path,
-    output_path: Path | None = None,
-    requested_topic: str | None = None,
-    force: bool = False,
-    crf: int = 24,
-    preset: str = "veryfast",
-    max_w: int = 1280,
-    max_h: int = 720,
-) -> dict:
-    if rosbag2_py is None:
-        raise RuntimeError("rosbag2_py is missing. Ensure ROS 2 environment is sourced.")
-
-    session_dir, bag_dir = resolve_bag_dir(session_path)
-    session_name = session_dir.name
-
-    if output_path is None:
-        output_path = session_dir / "dataset" / "preview.mp4"
-    else:
-        output_path = output_path.resolve()
-
-    # Check idempotency
-    if not force:
-        v_info = verify_video(output_path)
-        if v_info is not None:
-            actual_fps = v_info["nb_frames"] / max(0.1, v_info["duration"]) if v_info["nb_frames"] > 0 else 0
-            return {
-                "session": session_name,
-                "topic": requested_topic or DEFAULT_TOPIC,
-                "frames": v_info["nb_frames"],
-                "fps": f"{actual_fps:.2f}",
-                "duration": f"{v_info['duration']:.2f} s",
-                "resolution": v_info["resolution"],
-                "size": v_info["size_str"],
-                "statut": "ok (existant)",
-            }
-
-    info, topic, expected_count, duration_s, bag_start_ns = select_topic(
-        bag_dir, requested_topic
-    )
-
-    if not topic or expected_count <= 0:
-        return {
-            "session": session_name,
-            "topic": requested_topic or "-",
-            "frames": 0,
-            "fps": "-",
-            "duration": f"{duration_s:.2f} s" if duration_s > 0 else "-",
-            "resolution": "-",
-            "size": "-",
-            "statut": "no RGB stream",
-        }
-
-    storage_id = str(info.get("storage_identifier", "mcap"))
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_tmp = output_path.with_name(f".{output_path.name}.tmp.mp4")
-    if output_tmp.exists():
-        output_tmp.unlink()
-
 def open_reader(
     bag_dir: Path, storage_id: str, topic: str, info: dict, session_name: str
 ) -> tuple[rosbag2_py.SequentialReader, Path | None]:

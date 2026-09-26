@@ -19,12 +19,12 @@ SOURCE_ROOTS = {'scripts', 'demos', 'docs', 'docker', 'tests', 'research', '.git
 CONFLICT = re.compile(r'^(?:<{7,} |>{7,} |={7,}$)', re.MULTILINE)
 
 
-def literal_path_parts(node):
+def literal_path_parts(node) -> list[str]:
     """Constant suffix of a Path division expression; never evaluate code."""
     if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div)
             and isinstance(node.right, ast.Constant) and isinstance(node.right.value, str)):
-        return (*literal_path_parts(node.left), node.right.value)
-    return ()
+        return [*literal_path_parts(node.left), node.right.value]
+    return []
 
 
 def source_files(root):

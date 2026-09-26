@@ -603,6 +603,7 @@ def main(args=None) -> None:
         node = MttConfirmatoryMonitor()
         rclpy.spin(node)
     except KeyboardInterrupt:
+        # Normal operator shutdown; the finally block closes the node and ROS.
         pass
     finally:
         if node is not None:
