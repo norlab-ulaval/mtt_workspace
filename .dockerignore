@@ -61,6 +61,8 @@ norlab_ws/
 .claude/
 CLAUDE.md
 AGENTS.md
+docs/ai/
+docs/superpowers/
 chat_*.txt
 check_*.py
 inspect_*.py
