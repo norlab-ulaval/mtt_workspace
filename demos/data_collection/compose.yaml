@@ -1050,7 +1050,8 @@ services:
       - ${WORKSPACE}/scripts/mtt_experiment_conductor.py
       - --ros-args
       - -p
-      - start_segment_id:=${START_SEGMENT_ID:-}
+      # An empty ROS parameter override is invalid; NONE means start at the beginning.
+      - start_segment_id:=${START_SEGMENT_ID:-NONE}
       - -p
       - profile_path:=${WORKSPACE}/demos/data_collection/config/${EXPERIMENT_PROFILE:-ice_experiment_profiles.yaml}
       - -p
@@ -1153,6 +1154,34 @@ services:
       # Same default/override as experiment_conductor -- one var activates the live
       # distance/safe-direction display here AND the geofence gate there together.
       - zone_map_path:=${EXPERIMENT_ZONE_MAP_PATH:-/home/mohamed/Project/mtt_ws/zone_map.npz}
+
+  # Companion to experiment_conductor for the Paper-1 Session-A confirmatory
+  # acquisition ONLY -- separate from experiment_monitor above, which stays
+  # dedicated to the ice-rink M0-M5 (v, phi) grid protocol. Reads the SAME
+  # ${EXPERIMENT_PROFILE} profile as experiment_conductor so both nodes always
+  # agree on which gate thresholds/attempt sequence are active this session.
+  # Advisory only -- see scripts/mtt_confirmatory_monitor.py's module docstring.
+  confirmatory_monitor:
+    <<: [*dc_base]
+    # Opt in with --profile confirmatory and EXPERIMENT_PROFILE=session_a_confirmatory.yaml.
+    profiles: ["confirmatory"]
+    depends_on:
+      robot_driver:
+        condition: service_started
+      sensors:
+        condition: service_started
+    command:
+      - python3
+      - -u
+      - ${WORKSPACE}/scripts/mtt_confirmatory_monitor.py
+      - --ros-args
+      - -p
+      - confirmatory_profile_path:=${WORKSPACE}/demos/data_collection/config/${EXPERIMENT_PROFILE:-ice_experiment_profiles.yaml}
+      - -p
+      # "session_a_confirmatory" (sealed, counted) or "non_counted_pilot" (Day-2
+      # hardware pilot, LAST_WEEK_QUEBEC_EXECUTION_PLAN.md) -- purely a label on
+      # every event/snapshot so a pilot run can never be mistaken for the sealed 60.
+      - role:=${EXPERIMENT_ROLE:-session_a_confirmatory}
 
   # ── Foxglove live visualisation ──
   # No profile → starts automatically with dc up (same as zenoh and robot).

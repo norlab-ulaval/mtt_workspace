@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "purpose": "hash-verified copy of the Session-A conductor profile from the research repo into the workspace tree -- the two repos are not bind-mounted together, so this is the explicit cross-repo handoff artifact required by the acquisition plan's repo split.",
+  "source_repository": "/home/mohamed/Documents/Project_MTT/Research/mtt_motion_research",
+  "source_path": "artifacts/lie_contact/confirmatory_execution/session_a_conductor_profile.yaml",
+  "protocol_version": "v1.1",
+  "source_sha256": "9295f5f43b131b2f200d930764132fa2cf2b41fc03a7e26e3eaad370adb6e2fc",
+  "source_generator_manifest": "artifacts/lie_contact/confirmatory_execution/session_a_conductor_profile.yaml.manifest.json",
+  "waveform_params": "configs/experiments/session_a_waveform_params_v1_1.yaml",
+  "destination_path": "demos/data_collection/config/session_a_confirmatory.yaml",
+  "destination_sha256": "9295f5f43b131b2f200d930764132fa2cf2b41fc03a7e26e3eaad370adb6e2fc",
+  "copy_verified": true,
+  "generated_with": "--waveform-params session_a_waveform_params_v1_1.yaml --no-checkpoints (protocol amendment v1.1, frozen 2026-08-27: completes the 6 dynamic cells, 60/60 attempts; continuous run, no manual_checkpoint stops, operator-requested override, monitored via deadman only)",
+  "note": "Re-run scripts/build_session_a_conductor_profile.py in the research repo and repeat this copy+verify step after ANY ledger or waveform-params change. Never hand-edit either file. This profile now emits the full 60/60 attempts."
+}
