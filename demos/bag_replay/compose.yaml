@@ -27,7 +27,8 @@ x-replay-base: &replay_base
     REPLAY_USE_RECORDED_MAPPING: ${REPLAY_USE_RECORDED_MAPPING:-false}
     # Sensor cage calibration version:
     #   v1 — cage BEFORE displacement (hesai rpy=π/2, X=LEFT frame). Use for all bags up to 2026-06-24.
-    #   v2 — cage AFTER displacement  (hesai rpy=π,   X=BACKWARD frame). Use for bags from 2026-06-25+.
+    #   v2 — cage after displacement; corrected yaw stays π/2. Verify the
+    #        session mounting state; see docs/reference/calibration.md.
     # Each version carries its own sensor mount values (rsairy, ZED, IMU) in the matching frame.
     #   CALIBRATION=v2 BAG_PATH=/path/to/new_bag docker compose up
     CALIBRATION: ${CALIBRATION:-v1}
