@@ -104,13 +104,13 @@ WATCH = {
 KNOWN_CAUSES = {
     "/zed/zed_node/rgb/color/rect/image/compressed":
         "QoS mismatch: ZED SDK forces BEST_EFFORT, recorder expects RELIABLE.\n"
-        "     FIX: qos_override.yaml + --qos-profile-overrides-path in compose.yaml ✅ DONE",
+        "     FIX: qos_override.yaml + --qos-profile-overrides-path in compose.yaml OK DONE",
     "/zed/zed_node/depth/depth_registered/compressedDepth":
         "QoS mismatch: ZED depth stream.\n"
-        "     FIX: included in qos_override.yaml ✅ DONE",
+        "     FIX: included in qos_override.yaml OK DONE",
     "/zed/zed_node/imu/data":
         "QoS mismatch: ZED IMU stream.\n"
-        "     FIX: included in qos_override.yaml ✅ DONE",
+        "     FIX: included in qos_override.yaml OK DONE",
     "/gps_left/fix":
         "GPS Driver attempts TCP port 5001 -> Reach RS listens on 9001/9696.\n"
         "     FIX: check host/port in gps_tcp.yaml",
@@ -227,10 +227,10 @@ def group_status(entries, counts, dur_s):
 
 
 STATUS_ICON = {
-    "ok":      f"{GREEN}✓ OK     {RESET}",
+    "ok":      f"{GREEN}OK        {RESET}",
     "low_hz":  f"{ORANGE}~ LOW HZ {RESET}",
     "partial": f"{YELLOW}~ PARTIAL{RESET}",
-    "dead":    f"{RED}✗ DEAD   {RESET}",
+    "dead":    f"{RED}FAIL DEAD   {RESET}",
     "missing": f"{DIM}— NOT REC{RESET}",
 }
 
@@ -253,7 +253,7 @@ def analyze_session(session_dir: Path, verbose: bool = False) -> tuple:
 
     if not meta_path.exists():
         print(f"\n  {BOLD}{name}{RESET}")
-        print(f"    {YELLOW}⚠  No bag/ or metadata.yaml found!{RESET}")
+        print(f"    {YELLOW}WARN  No bag/ or metadata.yaml found!{RESET}")
         return set(), name, "missing", {}, 0
 
     counts, dur_s, total = parse_metadata(meta_path)
@@ -314,10 +314,10 @@ def print_summary_table(session_results: list):
     print(f"  {'-'*48} {'-'*6} {'-'*5}" + " ".join(["------"] * len(groups)))
 
     icons = {
-        "ok":      f"{GREEN}  ✓   {RESET}",
+        "ok":      f"{GREEN}  OK   {RESET}",
         "low_hz":  f"{ORANGE}  ~   {RESET}",
         "partial": f"{YELLOW}  ~   {RESET}",
-        "dead":    f"{RED}  ✗   {RESET}",
+        "dead":    f"{RED}  FAIL   {RESET}",
         "missing": f"{DIM}  —   {RESET}"
     }
 

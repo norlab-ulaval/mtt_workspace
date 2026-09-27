@@ -16,9 +16,9 @@
 set -uo pipefail
 
 # ── Colors ────────────────────────────────────────────────────────────────────
-OK="\033[92m✓\033[0m"
-FAIL="\033[91m✗\033[0m"
-WARN="\033[93m⚠\033[0m"
+OK="\033[92mOK\033[0m"
+FAIL="\033[91mFAIL\033[0m"
+WARN="\033[93mWARN\033[0m"
 BOLD="\033[1m"
 RESET="\033[0m"
 
@@ -130,7 +130,7 @@ if command -v chronyc &>/dev/null && chronyc tracking &>/dev/null 2>&1; then
     rms_display="${rms_val:-?} ${rms_unit:-}"
     int_ms=$(printf "%.0f" "${rms_ms:-999}" 2>/dev/null || echo 999)
     if [ "$int_ms" -le "$GPS_SYNC_WARN_MS" ]; then
-        check "Clock offset quality" "ok" "RMS ${rms_display} (< ${GPS_SYNC_WARN_MS} ms ✓)"
+        check "Clock offset quality" "ok" "RMS ${rms_display} (< ${GPS_SYNC_WARN_MS} ms OK)"
     elif [ "$int_ms" -le "$GPS_SYNC_FAIL_MS" ]; then
         check "Clock offset quality" "warn" "RMS ${rms_display} — marginal for IMU/GPS sync (threshold: ${GPS_SYNC_WARN_MS} ms)"
     else
@@ -383,16 +383,16 @@ echo ""
 
 # ─── Summary ──────────────────────────────────────────────────────────────────
 echo -e "${BOLD}══════════════════════════════════════════════════${RESET}"
-echo -e "  ${BOLD}Results:${RESET}  ✓ $pass  ⚠ $warn  ✗ $fail"
+echo -e "  ${BOLD}Results:${RESET}  OK $pass  WARN $warn  FAIL $fail"
 echo ""
 if [ "$fail" -gt 0 ]; then
-    echo -e "  \033[91m${BOLD}❌  GO/NO-GO: NO-GO — fix the errors above first.${RESET}"
+    echo -e "  \033[91m${BOLD}ERROR  GO/NO-GO: NO-GO — fix the errors above first.${RESET}"
     exit 1
 elif [ "$warn" -gt 0 ]; then
-    echo -e "  \033[93m${BOLD}⚠   GO/NO-GO: CONDITIONAL GO — check warnings.${RESET}"
+    echo -e "  \033[93m${BOLD}WARN   GO/NO-GO: CONDITIONAL GO — check warnings.${RESET}"
     exit 2
 else
-    echo -e "  \033[92m${BOLD}✅  GO/NO-GO: GO — everything OK.${RESET}"
+    echo -e "  \033[92m${BOLD}OK  GO/NO-GO: GO — everything OK.${RESET}"
     echo ""
     echo "  Next: cd demos/data_collection && dcr up"
     exit 0

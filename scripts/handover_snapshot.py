@@ -3,7 +3,7 @@
 
 Includes checked-out tracked files from recursive submodules, non-ignored
 maintained source, ignored research helpers under scripts/research, and root
-Python helpers. Excludes ignored documentation/assistant notes as well as
+Python helpers. Excludes ignored documentation/working notes as well as
 datasets, caches, virtual environments, .env and Git object stores.
 This is a source snapshot, not a backup of bags, Docker images or Git history.
 """
@@ -67,7 +67,7 @@ def collect(root):
         if path.parts[0] in LOCAL_ROOTS and not path.name.startswith('.env'):
             paths.add(path)
     # Recover local research implementations too, but do not package ignored
-    # planning notes or local assistant instructions as release documentation.
+    # planning notes or local working notes as release documentation.
     for name in ('scripts', 'research'):
         for directory, subdirs, filenames in os.walk(root / name, followlinks=False):
             subdirs[:] = [d for d in subdirs if not d.startswith('.') and d not in

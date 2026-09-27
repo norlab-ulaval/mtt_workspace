@@ -1,23 +1,13 @@
 #!/usr/bin/env python3
-"""Post-session qualification for a Paper-1 Session-A confirmatory recording.
+"""Check required recording topics against an explicit acquisition contract.
 
-Wraps the existing, already-vetted audit tools instead of reimplementing them:
-  - audit_bag_topics.py  -- topic presence / message counts
-  - audit_bag_timing.py  -- per-topic rate/gap statistics (needs rosbag2_py; run
-    this script inside the workspace Docker container, not the research .venv)
-  - post_session_report.py -- human-readable Markdown report
+Uses bag metadata for presence/counts and audit_bag_timing for timing metrics.
+Writes a JSON report and returns nonzero when a required topic or timing check
+fails. Optional channels do not determine the result. Run inside the ROS image
+when deserialization is required.
 
-What this script adds on top of those: it evaluates PASS/FAIL against the
-`required: true` subset of a topic contract YAML (configs/experiments/
-topic_contract_mtt154.yaml in the research repo), not against the full ~228-topic
-recording list -- most recorded topics are monitor_only and must never block
-qualification (the historical frozen-site reference session itself was graded
-B_operational despite several optional channels being unavailable).
-
-This is qualification, not the authoritative model-blind quality assignment --
-that still happens post-hoc in the research repo against the full canonical
-multi-topic dataset. This script exists to catch missing/dead sensors and gross
-timing problems on the SAME DAY, in the field, before the bag is trusted.
+This field check does not replace offline scientific qualification against the
+canonical dataset in the research repository.
 """
 
 from __future__ import annotations

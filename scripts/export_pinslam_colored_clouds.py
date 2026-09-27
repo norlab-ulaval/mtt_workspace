@@ -19,7 +19,7 @@ so the geometry stays visually distinguishable instead of going flat gray.
 
 Usage
 -----
-  # venv created by this task: scripts/.venv_pinslam
+  # Environment: NumPy, OpenCV, Open3D and rosbags.
   scripts/.venv_pinslam/bin/python scripts/export_pinslam_colored_clouds.py \\
       data/BAG_ICE_RINK_.../bag/bag_0.mcap \\
       --end-time-offset 482

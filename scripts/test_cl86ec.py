@@ -95,7 +95,7 @@ ec, sw, pos = run_cycles(s, master, 0, 20)
 print(f"\n--- Initial state ---")
 print(f"  EC=0x{ec:04X}  SW=0x{sw:04X}  state='{state_name(sw)}'  pos={pos}")
 if ec != 0:
-    print(f"  ⚠  ERROR CODE 0x{ec:04X} active at startup!")
+    print(f"  WARN  ERROR CODE 0x{ec:04X} active at startup!")
     print(f"     0x0231 = Short circuit / phase current fault → check motor wiring")
     print(f"     0x6010 = EtherCAT watchdog → communication issue")
     print(f"     0x3120 = Under voltage")
@@ -109,9 +109,9 @@ ec, sw, pos = run_cycles(s, master, 0, 10)
 print(f"  EC=0x{ec:04X}  SW=0x{sw:04X}  state='{state_name(sw)}'")
 
 if ec != 0:
-    print(f"  ✗ Fault 0x{ec:04X} NOT cleared by software reset → hardware condition persists")
+    print(f"  FAIL Fault 0x{ec:04X} NOT cleared by software reset → hardware condition persists")
 else:
-    print(f"  ✓ No error code after reset")
+    print(f"  OK No error code after reset")
 
 # ── CiA 402 enable (aggressive — send CW_ENABLED regardless of intermediate states) ──
 print(f"\n--- Enable sequence ---")
@@ -129,7 +129,7 @@ for i in range(5000):
         print(f"  t={i}ms: SW=0x{sw:04X} '{state_name(sw)}'  EC=0x{ec:04X}")
     time.sleep(0.001)
 else:
-    print(f"  ✗ Did not reach 'Ready to switch on' in 5s. SW=0x{sw:04X} EC=0x{ec:04X}")
+    print(f"  FAIL Did not reach 'Ready to switch on' in 5s. SW=0x{sw:04X} EC=0x{ec:04X}")
 
 # Switch on
 run_cycles(s, master, CW_SWITCHED, 100, seed)
@@ -139,7 +139,7 @@ ec, sw, pos = run_cycles(s, master, CW_ENABLED, 50, seed)
 print(f"  After CW_ENABLED: SW=0x{sw:04X} '{state_name(sw)}'  EC=0x{ec:04X}")
 
 enabled = bool(sw & 0x0004)  # SW_OPERATION_ENABLED
-print(f"  ENABLED: {'✓ YES' if enabled else '✗ NO'}")
+print(f"  ENABLED: {'OK YES' if enabled else 'FAIL NO'}")
 
 # ── Move test ──
 if enabled:
@@ -152,11 +152,11 @@ if enabled:
         time.sleep(0.001)
     print(f"  Final pos={p}  (expected ~{target})")
     if abs(p - target) < 100:
-        print("  ✓ Motor moved correctly!")
+        print("  OK Motor moved correctly!")
     else:
-        print(f"  ✗ Motor did not reach target (error={p - target} counts)")
+        print(f"  FAIL Motor did not reach target (error={p - target} counts)")
 else:
-    print("\n⚠  Drive not enabled — cannot test movement.")
+    print("\nWARN  Drive not enabled — cannot test movement.")
     print("   Fix EC=0x0231 first:")
     print("   1. Power OFF the CL86EC drive")
     print("   2. Check motor wiring: A+/A- and B+/B- (multimeter: ~few ohms each coil)")

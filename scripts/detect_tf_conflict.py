@@ -136,11 +136,11 @@ class TfConflictDetector(Node):
         print(f"  Transforms received : {self._count}")
         print(f"  Yaw jump alerts     : {self._alerts}")
         if self._alerts == 0:
-            print("  Result: ✓ No yaw jumps detected. Single healthy publisher likely.")
+            print("  Result: OK No yaw jumps detected. Single healthy publisher likely.")
             print("          (Also verify with: ros2 topic info /tf --verbose)")
         else:
             print(
-                f"  Result: ✗ {self._alerts} yaw jump(s) ≥ {math.degrees(self.yaw_alert_rad):.1f}° "
+                f"  Result: FAIL {self._alerts} yaw jump(s) ≥ {math.degrees(self.yaw_alert_rad):.1f}° "
                 "detected."
             )
             print("          → Multiple publishers on this TF edge confirmed.")

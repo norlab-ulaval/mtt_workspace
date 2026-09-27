@@ -63,7 +63,7 @@ the checks above. Finally run `./scripts/verify --release` on the frozen tree.
 upgrades are separate reviewed changes. Do not run a broad add over the local
 archive or nested `norlab_ws`; select source paths explicitly.
 
-Local logs, editor state and assistant workspace configuration are excluded
+Local logs, editor state and machine-specific workspace configuration are excluded
 from the source set. Code comments should refer to maintained technical
 documentation and recorded measurements. Preserve scientific provenance and
 existing Git history when preparing a professional release.
@@ -78,7 +78,7 @@ This refuses an existing destination and writes `sources.tar.gz`, its SHA-256,
 a file/repository manifest and a patch per initialized repository. It includes
 current tracked source plus non-ignored maintained files and local research
 helpers in `scripts`/`research` (also root Python helpers), preserving current
-edits. Ignored documentation and local assistant notes are not included.
+edits. Ignored documentation and local working notes are not included.
 It does not contain Git objects/history, `.env`, bags, Docker images or
 generated results. Missing submodules are recorded in the manifest. Preserve
 the original clone too if Git history will be needed after access ends.

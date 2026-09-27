@@ -46,7 +46,7 @@ tmp/
 **/.ccache/**
 **/__pycache__/**
 
-# Handover: never bake local experiments, archives or nested Python envs into images.
+# Local experiments, archives and Python environments.
 artifacts/
 graphify-out/
 .scratch_test/
@@ -56,14 +56,19 @@ articulation_offline_results/
 deliverables_mapping/
 identified/
 norlab_ws/
-.agents/
-.codex/
-.claude/
-CLAUDE.md
-AGENTS.md
-docs/ai/
-docs/superpowers/
-chat_*.txt
+# Local metadata and root working documents; retain build manifests and guides.
+.*
+!.gitmodules
+/*.md
+!README.md
+!CONTRIBUTING.md
+/*.txt
+!requirements*.txt
+# Only maintained documentation is part of the runtime image.
+docs/*
+!docs/*.md
+!docs/reference/
+!docs/reference/**
 check_*.py
 inspect_*.py
 test_*_ws.py

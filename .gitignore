@@ -76,12 +76,6 @@ __pycache__/
 .env.*
 
 # Local workspace noise
-/.agents/
-/.codex/
-/.claude/
-/CLAUDE.md
-/AGENTS.md
-/chat_*.txt
 /.nvimlog
 .pytest_cache/
 .mypy_cache/
@@ -148,8 +142,6 @@ frames_*.pdf
 /articulation_offline_results/
 /deliverables_mapping/
 /identified/
-/docs/superpowers/
-/docs/ai/
 /documentations/DATASET_SCHEMA.md
 /documentations/dataset_catalog.csv
 /documentations/*_report_*.md
