@@ -126,12 +126,12 @@ echo ""
 
 # ── Connectivity check ────────────────────────────────────────────────────────
 if ! ssh -o ConnectTimeout=5 -o BatchMode=yes "${SSH_TARGET}" true 2>/dev/null; then
-  echo -e "${RED}✗  Cannot reach ${SSH_TARGET} via SSH.${RESET}"
+  echo -e "${RED}FAIL  Cannot reach ${SSH_TARGET} via SSH.${RESET}"
   echo "   Check: ssh ${SSH_TARGET}  (key auth must be set up)"
   echo "   Or override: ROBOT_SSH_TARGET=user@192.168.2.2 bash scripts/sync_bags.sh"
   exit 1
 fi
-echo -e "  ${GREEN}✓  SSH connection to ${SSH_TARGET} OK${RESET}"
+echo -e "  ${GREEN}OK  SSH connection to ${SSH_TARGET} OK${RESET}"
 echo ""
 
 # ── List mode ─────────────────────────────────────────────────────────────────
@@ -198,7 +198,7 @@ elapsed=$(( end_time - start_time ))
 
 echo ""
 if [ $exit_code -eq 0 ]; then
-  echo -e "${GREEN}${BOLD}✅  Sync complete  (${elapsed}s)${RESET}"
+  echo -e "${GREEN}${BOLD}OK  Sync complete  (${elapsed}s)${RESET}"
   echo ""
   echo -e "  Local data dir: ${LOCAL_DATA_DIR}/"
   echo -e "  Sessions synced:"
@@ -213,7 +213,7 @@ if [ $exit_code -eq 0 ]; then
 elif [ $exit_code -eq 23 ] || [ $exit_code -eq 24 ]; then
   # exit 24 = some files vanished during transfer (normal for active recording)
   # exit 23 = partial transfer due to error (e.g. symlinks on exFAT)
-  echo -e "${YELLOW}${BOLD}⚠   Sync complete with warnings (some files changed or symlinks ignored).${RESET}"
+  echo -e "${YELLOW}${BOLD}WARN   Sync complete with warnings (some files changed or symlinks ignored).${RESET}"
   echo "   This is normal if the robot is still recording or if saving to an exFAT drive."
   echo ""
   echo -e "  Local data dir: ${LOCAL_DATA_DIR}/"
@@ -227,6 +227,6 @@ elif [ $exit_code -eq 23 ] || [ $exit_code -eq 24 ]; then
       done
   echo ""
 else
-  echo -e "${RED}${BOLD}✗   rsync failed (exit code ${exit_code}).${RESET}"
+  echo -e "${RED}${BOLD}FAIL   rsync failed (exit code ${exit_code}).${RESET}"
   exit $exit_code
 fi

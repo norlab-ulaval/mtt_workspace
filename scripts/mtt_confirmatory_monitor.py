@@ -1,55 +1,19 @@
 #!/usr/bin/env python3
-"""Live advisory monitor for the Paper-1 Session-A confirmatory acquisition
-(companion to mtt_experiment_conductor.py, sibling to mtt_experiment_monitor.py).
+"""Advisory progress monitor for the Session-A confirmatory acquisition.
 
-Why a separate node instead of extending mtt_experiment_monitor.py: that node is
-purpose-built for the ice-rink M0-M5 (v, phi) occupancy grid -- kept exactly as-is
-for that protocol (it is field-tested and safety-relevant; this task does not touch
-it beyond one additive field on the conductor's /mtt_experiment/segment payload).
-Session A needs a different live view entirely: progress against the frozen
-20-cell x 3-repetition confirmatory matrix, keyed by the ledger's own `attempt_uid`
-(e.g. "P01-R1"), not a kappa grid.
+Tracks the frozen 20-cell, three-repetition matrix using conductor attempt IDs
+such as P01-R1. Tachometer samples provide an operational estimate of motion
+duration and distance. This estimate does not replace offline qualification
+against the canonical multi-topic dataset.
 
-WHAT THIS NODE MUST NEVER DO
------------------------------
-Per FIRST_PAPER_CONFIRMATORY_EXPERIMENT.md's reveal sequence, no reference
-lateral/yaw/pose outcome, translation/yaw RPE, CSRE, S_Q0, or model
-(Classical-M0/Ours-Q) comparison may be displayed before the named external
-reviewer's one-time reveal. This node satisfies that by construction: it only
-ever subscribes to LIVE topics (tachometer, hardware articulation, IMU, VSLAM
-odometry, ICP odometry, the conductor's own segment state) -- the offline
-qualified reference does not exist live, it is produced post-hoc by
-demos/bag_replay/scripts/offline_icp.py + build_session_dataset.py in the
-research repo. assert_dashboard_payload_is_clean() is a defense-in-depth
-self-check on top of that structural guarantee, so a future edit that
-accidentally imports or hardcodes a forbidden field fails loudly instead of
-silently leaking.
+The dashboard exposes live telemetry and acquisition progress only. Reference
+trajectories, model predictions and outcome comparisons remain excluded until
+the review stage defined by the research protocol.
 
-WHAT "ADVISORY" MEANS HERE
-----------------------------
-The per-attempt binary gate (10s uninterrupted, >=5m traveled, forward,
-|v_b|>=0.5 m/s except <=0.1s total, timestamp gaps <=0.02s, one continuity
-block) is evaluated LIVE using the tachometer channel only, as a fast proxy for
-the eventual qualified v_b. This is NEVER the authoritative model-blind
-qualification -- that runs post-hoc offline against the full canonical
-multi-topic dataset (Gate B, research repo). The live verdict exists purely so
-an operator gets an immediate "this cell needs a repeat" signal for the
-model-blind operational reasons the protocol already allows (missing topic,
-insufficient distance/duration, wrong cell, hardware fault) -- never to decide
-whether a cell "looks scientifically good."
-
-SINGLE-BAG POST-PROCESSING
-----------------------------
-This node does not require one bag per attempt. It publishes
-/mtt_experiment/confirmatory_status as BOTH a ~1Hz full-state tick AND a
-discrete "event" message on every meaningful transition (attempt armed,
-attempt advisory-pass/advisory-incomplete, pause/checkpoint entered/exited,
-checkpoint ACK received) -- both message kinds carry the same identifying
-fields (role, attempt_uid, plan_id, repetition, event_seq). A single
-continuous recording session spanning many attempts and checkpoints (e.g. one
-whole Day-3 block) can be sliced into clean per-attempt time ranges after the
-fact by filtering this one topic for `"message_kind": "event"`, without
-needing per-attempt bag files.
+Publishes one-hertz snapshots and transition events on
+/mtt_experiment/confirmatory_status. Role, attempt ID, plan, repetition and event
+sequence identify each attempt within a continuous recording. The monitor does
+not command motion or modify the attempt ledger.
 """
 
 from __future__ import annotations
@@ -77,11 +41,7 @@ except ImportError:  # pragma: no cover -- exercised only outside a built worksp
     MttTachometerData = None
 
 
-# Mirrors the philosophy (not the exact list) of
-# scripts/seal_first_paper_confirmatory.py's FORBIDDEN_OUTCOME_TOKENS in the
-# research repo. Deliberately duplicated rather than imported: this node has no
-# import path to that file (separate repo, no rclpy in the research .venv) and
-# must fail closed even if that file is mid-edit or unavailable.
+# Keep research outcome fields out of the live acquisition dashboard.
 FORBIDDEN_DASHBOARD_TOKENS = (
     "vy_ref", "omega_ref", "yaw_ref", "pose_ref", "reference_vy", "reference_omega",
     "gt_track", "gt_yaw", "trajectory_error", "rpe", "csre", "s_q0", "winner",
@@ -90,11 +50,7 @@ FORBIDDEN_DASHBOARD_TOKENS = (
 
 
 def assert_dashboard_payload_is_clean(payload: dict) -> None:
-    """Defense-in-depth self-check: this node structurally never touches the
-    offline qualified reference or the frozen model predictions (neither exists
-    live), so this should always pass trivially. It exists to make that
-    invariant testable and to fail loudly the moment anyone adds a forbidden
-    field, rather than relying on nobody ever importing the wrong thing."""
+    """Reject fields reserved for offline reference and model comparisons."""
     flat = json.dumps(payload).lower()
     for token in FORBIDDEN_DASHBOARD_TOKENS:
         if token in flat:
@@ -115,10 +71,7 @@ _ATTEMPT_UID_RE = re.compile(r"^P(\d{2})-R(\d)$")
 
 
 def parse_attempt_uid(uid: str) -> Optional[tuple]:
-    """Returns (plan_id, repetition) for a counted Session-A attempt uid like
-    'P01-R1', or None for anything else (pauses, checkpoints, auto-reverse
-    synthetic segments, extended/other profiles) -- those are not gate-tracked
-    or matrix-tracked, but are still displayed and event-flagged."""
+    """Return (plan_id, repetition) for a counted Session-A attempt, else None."""
     match = _ATTEMPT_UID_RE.match(uid)
     if not match:
         return None
@@ -157,30 +110,15 @@ class ConfirmatoryGates:
 
 @dataclass
 class LiveGateTracker:
-    """Advisory, live approximation of the per-attempt binary gate. NEVER
-    authoritative -- see the module docstring's "WHAT ADVISORY MEANS HERE".
-    Pure logic, deliberately ROS-free so it is unit-testable in isolation.
+    """Track a continuous block of valid tachometer samples.
 
-    Tracks one contiguous "continuity block" of tachometer samples: a block
-    resets whenever the tachometer message-to-message gap exceeds
-    maximum_timestamp_gap_s, whenever cumulative below-speed time exceeds
-    maximum_below_speed_duration_s, or whenever a (small, implementation-only,
-    not a frozen protocol value) reverse-direction tolerance is exceeded. The
-    block advisory-passes the instant it has accumulated both
-    required_continuous_motion_s of elapsed time and required_minimum_distance_m
-    of forward travel.
+    A block resets after prolonged silence, excessive time below the speed limit,
+    or reverse motion beyond the implementation tolerance. A pass requires both
+    the minimum duration and forward distance.
 
-    NOTE on gates.maximum_timestamp_gap_s (0.02s in the frozen ledger): that
-    value is calibrated for gaps in the fused ~100Hz canonical grid built
-    offline from multiple topics -- it is NOT reused here to detect a "gap" in
-    raw tachometer message arrivals, because the tachometer's own native rate
-    is itself ~50Hz (nominal ~0.02s spacing): applying the same number as a
-    hard threshold against its own nominal period would spuriously reset the
-    block on ordinary publisher jitter, defeating the tracker's purpose. Tach
-    silence is instead detected with TACH_SILENCE_RESET_S, a separate,
-    deliberately generous, implementation-only constant (NOT a frozen protocol
-    parameter) -- this is exactly the kind of approximation that keeps this
-    tracker advisory rather than authoritative.
+    Raw tachometer messages arrive near 50 Hz. TACH_SILENCE_RESET_S allows ordinary
+    publisher jitter; the protocol's 0.02 s gap limit applies to the offline
+    canonical grid. The live verdict is therefore advisory.
     """
 
     TACH_SILENCE_RESET_S = 0.15  # ~7x the tachometer's nominal 0.02s period

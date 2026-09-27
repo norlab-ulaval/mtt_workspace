@@ -364,9 +364,9 @@ def run_filesystem_prechecks() -> bool:
     else:
         for gps_dev in gps_devices:
             if os.path.exists(gps_dev):
-                print(f"  {GREEN}✓{RESET}  {gps_dev}  exists (GPS serial device OK)")
+                print(f"  {GREEN}OK{RESET}  {gps_dev}  exists (GPS serial device OK)")
             else:
-                print(f"  {RED}✗{RESET}  {gps_dev}  MISSING")
+                print(f"  {RED}FAIL{RESET}  {gps_dev}  MISSING")
                 print(f"      {YELLOW}→ GPS driver will retry silently, 0 messages in bag.{RESET}")
                 print(f"      {YELLOW}  Fix: sudo bash scripts/setup_udev_reach_rs.sh --{GPS_ANTENNAS}  (on robot host){RESET}")
                 any_error = True
@@ -376,9 +376,9 @@ def run_filesystem_prechecks() -> bool:
     zed_cal_files = glob.glob(os.path.join(zed_settings_dir, "SN*.conf"))
     if zed_cal_files:
         for f in zed_cal_files:
-            print(f"  {GREEN}✓{RESET}  ZED calibration  {DIM}{os.path.basename(f)}{RESET}")
+            print(f"  {GREEN}OK{RESET}  ZED calibration  {DIM}{os.path.basename(f)}{RESET}")
     else:
-        print(f"  {YELLOW}⚠{RESET}  ZED calibration  MISSING  ({zed_settings_dir}/SN*.conf)")
+        print(f"  {YELLOW}WARN{RESET}  ZED calibration  MISSING  ({zed_settings_dir}/SN*.conf)")
         print(f"      {YELLOW}→ ZED SDK will attempt download (needs internet).{RESET}")
         print(f"      {YELLOW}  Without calibration: IMU starts briefly then SDK crashes → 0 images.{RESET}")
         print(f"      {YELLOW}  Fix: connect robot to internet once, or copy SN<serial>.conf manually.{RESET}")
@@ -387,7 +387,7 @@ def run_filesystem_prechecks() -> bool:
     # ZED resources — pos_tracking models (optional but good to know)
     zed_resources = "/usr/local/zed/resources"
     if os.path.isdir(zed_resources) and os.listdir(zed_resources):
-        print(f"  {GREEN}✓{RESET}  ZED resources    {DIM}{zed_resources}{RESET}  present")
+        print(f"  {GREEN}OK{RESET}  ZED resources    {DIM}{zed_resources}{RESET}  present")
     else:
         print(f"  {DIM}  ZED resources    {zed_resources}  empty/missing (pos_tracking disabled — OK){RESET}")
 
@@ -405,7 +405,7 @@ def run_network_prechecks() -> bool:
 
     # Hesai LiDAR
     ok = _ping(HESAI_IP)
-    s = f"{GREEN}✓{RESET}" if ok else f"{YELLOW}⚠{RESET}"
+    s = f"{GREEN}OK{RESET}" if ok else f"{YELLOW}WARN{RESET}"
     detail = "reachable" if ok else f"no response — Hesai at {HESAI_IP} may be off or wrong IP"
     print(f"  {s}  Hesai XT-32   {DIM}{HESAI_IP}{RESET}  {detail}")
     if not ok:
@@ -413,7 +413,7 @@ def run_network_prechecks() -> bool:
 
     # RoboSense / RS-Airy LiDAR
     ok = _ping(RS_IP)
-    s = f"{GREEN}✓{RESET}" if ok else f"{YELLOW}⚠{RESET}"
+    s = f"{GREEN}OK{RESET}" if ok else f"{YELLOW}WARN{RESET}"
     detail = "reachable" if ok else (
         f"no response — RS-Airy at {RS_IP} may be off, wrong IP, or on the wrong interface"
     )
@@ -433,14 +433,14 @@ def run_network_prechecks() -> bool:
         if ping_ok:
             tcp_ok, msg = _tcp_connect(gps_ip, gps_port)
             if tcp_ok:
-                print(f"  {GREEN}✓{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
+                print(f"  {GREEN}OK{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
             else:
-                print(f"  {RED}✗{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
+                print(f"  {RED}FAIL{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  {msg}")
                 print(f"      {YELLOW}→ Reach receiver reachable but port {gps_port} refused. "
                       f"Enable TCP output in ReachView3.{RESET}")
                 any_net_warn = True
         else:
-            print(f"  {RED}✗{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  "
+            print(f"  {RED}FAIL{RESET}  {gps_label:<13} {DIM}{gps_ip}:{gps_port}{RESET}  "
                   f"host unreachable — Reach receiver not on network?")
             any_net_warn = True
     else:
@@ -609,12 +609,12 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
               end="", flush=True)
 
         if not missing_required:
-            print(f"\r  {GREEN}✓{RESET} All primary sensors found ({elapsed:.0f}s)."
+            print(f"\r  {GREEN}OK{RESET} All primary sensors found ({elapsed:.0f}s)."
                   f"{' ' * 30}")
             break
 
         if elapsed >= wait_timeout:
-            print(f"\r  {YELLOW}⚠{RESET} Timeout after {wait_timeout:.0f}s. Missing: "
+            print(f"\r  {YELLOW}WARN{RESET} Timeout after {wait_timeout:.0f}s. Missing: "
                   f"{', '.join(t.split('/')[-1] for t in sorted(missing_required))}"
                   f"{' ' * 20}")
             break
@@ -713,7 +713,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
             status_str = "ACTIVE"
             color = GREEN
 
-        req_str = "✓" if spec.required else "opt"
+        req_str = "OK" if spec.required else "opt"
         exp_str = f"{spec.expected_hz:.0f} Hz"
         tdisplay = spec.topic if len(spec.topic) <= COL[0] else spec.topic[:COL[0]-2] + ".."
 
@@ -820,17 +820,17 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
                 has_warning = True
             else:
                 color, verdict = GREEN, "OK"
-            mark = "✓" if color == GREEN else "⚠"
+            mark = "OK" if color == GREEN else "WARN"
             print(f"  {color}{mark}  {name:<13} n={vc:<4} max|z|={mz:5.2f}  {verdict}{RESET}")
 
         if smoother_reset_count > 0:
-            print(f"  {RED}⚠  ISAM2 smoother reset {smoother_reset_count}x during window "
+            print(f"  {RED}WARN  ISAM2 smoother reset {smoother_reset_count}x during window "
                   f"(IndeterminantLinearSystemException) — recent corrections within the "
                   f"lag window were lost; the published pose itself did not jump, but "
                   f"don't trust it as fully converged right now.{RESET}")
             has_warning = True
         else:
-            print(f"  {GREEN}✓  ISAM2 smoother: stable, 0 resets{RESET}")
+            print(f"  {GREEN}OK  ISAM2 smoother: stable, 0 resets{RESET}")
 
         odom_active = counts.get("/localization/odom", 0) > 0
         odom_fast_active = counts.get("/localization/odom_fast", 0) > 0
@@ -839,7 +839,7 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
             and all(s["max_abs_zscore"] < ZSCORE_FAIL for s in diag_stats.values())
         )
         color = GREEN if graph_trustworthy else YELLOW
-        mark = "✓" if graph_trustworthy else "⚠"
+        mark = "OK" if graph_trustworthy else "WARN"
         verdict = "safe to use for control/localization" if graph_trustworthy else "review warnings above before trusting for control"
         print(f"  {color}{mark}  Overall: {verdict}{RESET}")
 
@@ -883,10 +883,10 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
         health_ok = counts.get("/mtt_health", 0) > 0
         repeat_ok = repeat_service_count == len(repeat_services) and "/wiln/command" in discovered and icp_ok and health_ok
         color = GREEN if repeat_ok else YELLOW
-        print(f"  {color}{'✓' if repeat_ok else '⚠'} services: {repeat_service_count}/{len(repeat_services)}{RESET}")
-        print(f"  {color}{'✓' if '/wiln/command' in discovered else '⚠'} WILN command topic: {'yes' if '/wiln/command' in discovered else 'no'}{RESET}")
-        print(f"  {color}{'✓' if wiln_topic_count else '⚠'} WILN topics: {wiln_topic_count}/{len(wiln_topics)}{RESET}")
-        print(f"  {color}{'✓' if repeat_ok else '⚠'} repeat topics: state={'yes' if '/mtt_repeat/state' in discovered else 'no'} ready={'yes' if '/mtt_repeat/ready' in discovered else 'no'}  icp={'yes' if icp_ok else 'no'}  mtt_health={'yes' if health_ok else 'no'}{RESET}")
+        print(f"  {color}{'OK' if repeat_ok else 'WARN'} services: {repeat_service_count}/{len(repeat_services)}{RESET}")
+        print(f"  {color}{'OK' if '/wiln/command' in discovered else 'WARN'} WILN command topic: {'yes' if '/wiln/command' in discovered else 'no'}{RESET}")
+        print(f"  {color}{'OK' if wiln_topic_count else 'WARN'} WILN topics: {wiln_topic_count}/{len(wiln_topics)}{RESET}")
+        print(f"  {color}{'OK' if repeat_ok else 'WARN'} repeat topics: state={'yes' if '/mtt_repeat/state' in discovered else 'no'} ready={'yes' if '/mtt_repeat/ready' in discovered else 'no'}  icp={'yes' if icp_ok else 'no'}  mtt_health={'yes' if health_ok else 'no'}{RESET}")
         if "/wiln/command" not in discovered:
             print(f"    {YELLOW}No /wiln/command: the wiln container likely crashed or did not start. Check: docker compose logs --tail=200 wiln{RESET}")
         if repeat_service_count != len(repeat_services):
@@ -911,9 +911,9 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
     zed_image_live = counts.get("/zed/zed_node/rgb/color/rect/image/compressed", 0) > 0
     zed_imu_live = counts.get("/zed/zed_node/imu/data", 0) > 0
 
-    print(f"  {GREEN if icp_live else RED}{'✓' if icp_live else '✗'}  ICP odom (/mapping/icp_odom):   "
+    print(f"  {GREEN if icp_live else RED}{'OK' if icp_live else 'FAIL'}  ICP odom (/mapping/icp_odom):   "
           f"{'live, ' + str(counts.get('/mapping/icp_odom', 0)) + ' msgs' if icp_live else 'NO MESSAGES'}{RESET}")
-    print(f"  {GREEN if vslam_live else YELLOW}{'✓' if vslam_live else '✗'}  VSLAM odom (/isaac/vslam/odometry): "
+    print(f"  {GREEN if vslam_live else YELLOW}{'OK' if vslam_live else 'FAIL'}  VSLAM odom (/isaac/vslam/odometry): "
           f"{'live, ' + str(counts.get('/isaac/vslam/odometry', 0)) + ' msgs' if vslam_live else 'NO MESSAGES'}{RESET}")
     if not vslam_live:
         if not zed_image_live and not zed_imu_live:
@@ -928,36 +928,36 @@ def run_ros_healthcheck(duration: float, wait_timeout: float) -> int:
                   f"'docker compose logs isaac_vslam' directly (tracking may be failing/lost).{RESET}")
 
     if icp_live and vslam_live:
-        print(f"  {GREEN}{BOLD}✓  Both live: experiment_monitor will use VSLAM (fast) with ICP as fallback, as designed.{RESET}")
+        print(f"  {GREEN}{BOLD}OK  Both live: experiment_monitor will use VSLAM (fast) with ICP as fallback, as designed.{RESET}")
     elif icp_live and not vslam_live:
-        print(f"  {YELLOW}{BOLD}⚠  ICP only: experiment_monitor will run correctly on the ICP fallback path "
+        print(f"  {YELLOW}{BOLD}WARN  ICP only: experiment_monitor will run correctly on the ICP fallback path "
               f"for the ENTIRE session (not just briefly) -- this is safe but slower/lower-rate than the "
               f"VSLAM-primary design intends. Fine to proceed if you've confirmed this is expected "
               f"(e.g. ZED genuinely not mounted this session).{RESET}")
         has_warning = True
     elif vslam_live and not icp_live:
-        print(f"  {YELLOW}{BOLD}⚠  VSLAM only: analyze_ice_session.py (offline fit) is ICP-primary and will have "
+        print(f"  {YELLOW}{BOLD}WARN  VSLAM only: analyze_ice_session.py (offline fit) is ICP-primary and will have "
               f"NOTHING to fit on until ICP comes up -- check the 'mapping' service.{RESET}")
         has_warning = True
     else:
-        print(f"  {RED}{BOLD}✗  NEITHER ICP NOR VSLAM is publishing -- the experiment has NO usable pose "
+        print(f"  {RED}{BOLD}FAIL  NEITHER ICP NOR VSLAM is publishing -- the experiment has NO usable pose "
               f"source. Do not start mtt_experiment_conductor.py yet; fix mapping and/or the ZED camera first.{RESET}")
         has_warning = True
 
     # ── Final verdict ──
     print()
     if has_error:
-        print(f"{RED}{BOLD}❌  HEALTH CHECK FAILED — required sensors missing or too slow.{RESET}")
+        print(f"{RED}{BOLD}ERROR  HEALTH CHECK FAILED — required sensors missing or too slow.{RESET}")
         print("   Fix sensor issues before starting recording.\n")
         return 1
     elif has_warning or not gps_quality_ok:
-        print(f"{YELLOW}{BOLD}⚠   HEALTH CHECK PASSED WITH WARNINGS.{RESET}")
+        print(f"{YELLOW}{BOLD}WARN   HEALTH CHECK PASSED WITH WARNINGS.{RESET}")
         if not gps_quality_ok:
             print("   GPS fix quality below RTK — recording will proceed but GPS accuracy is poor.")
         print("   Recording can start, but check warnings above.\n")
         return 2
     else:
-        print(f"{GREEN}{BOLD}✅  ALL SENSORS HEALTHY — ready to record.{RESET}\n")
+        print(f"{GREEN}{BOLD}OK  ALL SENSORS HEALTHY — ready to record.{RESET}\n")
         return 0
 
 

@@ -26,7 +26,7 @@ set -uo pipefail
 
 DEMO="${1:-data_collection}"
 
-OK="\033[92m✓\033[0m"; FAIL="\033[91m✗\033[0m"; WARN="\033[93m⚠\033[0m"
+OK="\033[92mOK\033[0m"; FAIL="\033[91mFAIL\033[0m"; WARN="\033[93mWARN\033[0m"
 BOLD="\033[1m"; RESET="\033[0m"
 fail=0; warn=0
 
@@ -92,12 +92,12 @@ fi
 
 echo ""
 if [ "$fail" -gt 0 ]; then
-  echo -e "  \033[91m${BOLD}❌  NO-GO — fix failures above before deadman+A.${RESET}"
+  echo -e "  \033[91m${BOLD}ERROR  NO-GO — fix failures above before deadman+A.${RESET}"
   exit 1
 elif [ "$warn" -gt 0 ]; then
-  echo -e "  \033[93m${BOLD}⚠   CONDITIONAL GO — check warnings.${RESET}"
+  echo -e "  \033[93m${BOLD}WARN   CONDITIONAL GO — check warnings.${RESET}"
   exit 0
 else
-  echo -e "  \033[92m${BOLD}✅  GO.${RESET}"
+  echo -e "  \033[92m${BOLD}OK  GO.${RESET}"
   exit 0
 fi

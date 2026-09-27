@@ -811,7 +811,7 @@ def refine_lidar_lidar_icp(
         print("[WARN] Check PLY overlays and verify sensor overlap region.")
         print("[WARN] ═══════════════════════════════════════════════════════════\n")
     else:
-        print("\n[ICP] ✓ All quality gates passed.\n")
+        print("\n[ICP] OK All quality gates passed.\n")
 
     # ── PLY overlays for visual inspection ──
     if save_dir:

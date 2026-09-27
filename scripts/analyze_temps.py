@@ -110,7 +110,7 @@ def analyze_session(session_dir: Path):
 
     if readings is None:
         print(f"  {DIM}{name}{RESET}")
-        print(f"    {YELLOW}⚠  Skipped: {info}{RESET}\n")
+        print(f"    {YELLOW}WARN  Skipped: {info}{RESET}\n")
         return None
 
     temps_a = [r[1] for r in readings]
@@ -147,9 +147,9 @@ def analyze_session(session_dir: Path):
     print(f"    temp_B max at t+{max_b_t:.0f}s  {mini_bar(max_b_val)}")
 
     if cross_100 is not None:
-        print(f"    {RED}{BOLD}🔥  temp_B ≥ 100°C at t+{cross_100:.0f}s  ← POINT DE RUPTURE{RESET}")
+        print(f"    {RED}{BOLD}CRITIQUE  temp_B ≥ 100°C at t+{cross_100:.0f}s  ← POINT DE RUPTURE{RESET}")
     elif cross_80 is not None:
-        print(f"    {YELLOW}⚠   temp_B ≥ 80°C  at t+{cross_80:.0f}s{RESET}")
+        print(f"    {YELLOW}WARN   temp_B ≥ 80°C  at t+{cross_80:.0f}s{RESET}")
     elif cross_50 is not None:
         print(f"    {YELLOW}    temp_B ≥ 50°C  at t+{cross_50:.0f}s{RESET}")
     else:
@@ -189,7 +189,7 @@ def try_plot(all_sessions: list):
 
         ax_b.axhline(THRESH_WARN, color="orange", linestyle="--", alpha=0.7, label="50°C warn")
         ax_b.axhline(THRESH_BAD,  color="red",    linestyle="--", alpha=0.7, label="80°C bad")
-        ax_b.axhline(THRESH_CRIT, color="darkred",linestyle="-",  alpha=0.9, label="100°C CRITICAL")
+        ax_b.axhline(THRESH_CRIT, color="darkred",linestyle="-",  alpha=0.9, label="100°C CRITIQUE")
         ax_b.legend(fontsize=7, loc="upper left")
 
         ax_b.set_xlabel("Temps dans la session (s)")
@@ -252,8 +252,8 @@ def main():
             continue
         tb = [r[2] for r in readings]
         max_b = max(tb)
-        flag = f"{RED}{BOLD}🔥 CRITIQUE{RESET}" if max_b >= THRESH_CRIT else \
-               (f"{YELLOW}⚠  chaud{RESET}" if max_b >= THRESH_BAD else
+        flag = f"{RED}{BOLD}CRITIQUE{RESET}" if max_b >= THRESH_CRIT else \
+               (f"{YELLOW}WARN  chaud{RESET}" if max_b >= THRESH_BAD else
                 f"{GREEN}OK{RESET}")
         print(f"  {name[-30:]:30s}  temp_B max={color_temp(max_b)}  {flag}")
         if max_b >= THRESH_CRIT:
@@ -261,7 +261,7 @@ def main():
 
     if any_crit:
         print(f"\n  {RED}{BOLD}→ L'encodeur a subi une temperature critique.{RESET}")
-        print(f"  {RED}  Vérifier les sessions marquées 🔥 pour le moment exact.{RESET}")
+        print(f"  {RED}  Vérifier les sessions marquées CRITIQUE pour le moment exact.{RESET}")
 
     print()
 

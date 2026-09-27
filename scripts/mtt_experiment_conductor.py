@@ -257,13 +257,10 @@ def build_phi_ramp(cfg: dict, speeds: dict) -> List[AtomicSegment]:
 
 
 def build_phi_schedule(cfg: dict, speeds: dict) -> List[AtomicSegment]:
-    """Piecewise-linear phi(t) from EXPLICIT (t, phi_deg) breakpoints, unlike
-    build_phi_ramp which derives leg durations from a constant rate_deg_s here.
-    Added for the Paper-1 Session-A confirmatory transition cells (protocol
-    amendment v1.1, 2026-08-27): their commanded timestamps are frozen exactly
-    (including flat lead-in/lead-out holds around the evaluated maneuver
-    window), not re-derivable from a single rate the way phi_ramp's waypoint
-    list is."""
+    """Interpolate phi(t) between explicit, increasing waypoint times.
+
+    Preserve the lead-in, maneuver and lead-out times specified by the profile.
+    """
     speed_ms = _resolve_speed(cfg.get("speed_ms", 0.0), speeds)
     waypoints = cfg["waypoints"]  # list of {"t": float, "phi_deg": float}, sorted by t
     schedule = [(float(w["t"]), deg2rad(float(w["phi_deg"]))) for w in waypoints]
@@ -302,11 +299,10 @@ def build_phi_schedule(cfg: dict, speeds: dict) -> List[AtomicSegment]:
 
 
 def build_phi_cosine(cfg: dict, speeds: dict) -> List[AtomicSegment]:
-    """phi(t) = amplitude*cos(2*pi*t/period) during the evaluated window, flat
-    0 during lead-in/lead-out. Added for the Paper-1 Session-A confirmatory
-    figure-eight cells (protocol amendment v1.1, 2026-08-27) -- build_figure8
-    produces discrete constant-phi lobes, not the smooth cosine this protocol
-    specifies."""
+    """Apply the profile's cosine waveform during its evaluated window.
+
+    Articulation is zero during the lead-in and lead-out holds.
+    """
     speed_ms = _resolve_speed(cfg.get("speed_ms", 0.0), speeds)
     amplitude_rad = deg2rad(float(cfg["amplitude_deg"]))
     period_s = float(cfg["period_s"])
@@ -580,19 +576,12 @@ def build_stop_and_go(cfg: dict, speeds: dict) -> List[AtomicSegment]:
 
 
 def build_explicit_attempts(cfg: dict, speeds: dict) -> List[AtomicSegment]:
-    """Passthrough builder for a pre-generated sequence of attempts whose uid is
-    fixed externally rather than synthesized from (kind, speed, phi, rep) like
-    every other builder in this module. Every other builder computes its own
-    uid because those profiles are hand-authored; this one exists because the
-    Paper-1 confirmatory profile is machine-generated from the frozen 60-cell
-    acquisition matrix (see build_session_a_conductor_profile.py in the
-    research repo) and its uid (e.g. 'P01-R1') IS the join key back to that
-    matrix and the sealed attempt ledger -- it must round-trip byte-for-byte,
-    never be re-derived here.
+    """Build attempts with the IDs supplied by the research ledger.
 
-    cfg['attempts']: list of {uid, duration_s, speed_ms, phi_deg[, label,
-    repeat]}. speed_ms may be a literal or a named alias from meta.speeds,
-    resolved the same way as every other builder (_resolve_speed)."""
+    Each entry specifies uid, duration_s, speed_ms and optional phi_deg/label/repeat.
+    Preserve uid exactly: it is the join key used by post-processing. Speed may be
+    numeric or a named alias from meta.speeds.
+    """
     segments = []
     for entry in cfg["attempts"]:
         speed_ms = _resolve_speed(entry["speed_ms"], speeds)
@@ -1223,10 +1212,7 @@ class MttExperimentConductor(Node):
             "duration_s": round(segment.duration_s, 3),
             "engaged": engaged,
             "meta": segment.meta,
-            # Added so downstream listeners (e.g. mtt_confirmatory_monitor.py) can
-            # detect and display pauses/checkpoints from the topic alone, without
-            # re-deriving pause semantics from `kind` string matching -- previously
-            # only reached the console log, never the bag.
+            # Record pause and checkpoint state for downstream consumers.
             "is_pause": segment.is_pause,
             "requires_ack": segment.requires_ack,
             "pause_message": segment.pause_message,

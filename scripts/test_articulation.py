@@ -325,7 +325,7 @@ def main():
                     elif args.profile == 'stress_test':
                         target_angle = stress_tester.update(actual_angle, dt, last_steer_norm_for_stress, stm.raw_adc)
                         if stress_tester.failure_detected:
-                            print(f"\n\n🚨 [PANNE DÉTECTÉE] Le contrôleur ne répond plus (Time: {now:.1f}s) !")
+                            print(f"\n\n [PANNE DÉTECTÉE] Le contrôleur ne répond plus (Time: {now:.1f}s) !")
                             print(f"Angle figé à {actual_angle:.1f}°, RawADC={stm.raw_adc}, Commande ignorée={last_steer_norm_for_stress:.2f}")
                             print("COUPURE DE SÉCURITÉ IMMÉDIATE. Arrêt du script.")
                             break

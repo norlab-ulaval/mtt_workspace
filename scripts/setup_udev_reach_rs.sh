@@ -84,7 +84,7 @@ while [ $# -gt 0 ]; do
             exit 0
             ;;
         *)
-            echo "❌  Unknown option: $1"
+            echo "ERROR  Unknown option: $1"
             usage
             exit 1
             ;;
@@ -213,7 +213,7 @@ write_dual_rover_rules() {
 print_header
 
 if [ "$EUID" -ne 0 ] && [ "$DRY_RUN" -eq 0 ]; then
-    echo "❌  This script should be run with sudo to install udev rules."
+    echo "ERROR  This script should be run with sudo to install udev rules."
     echo "    Retry with:"
     echo "      sudo bash scripts/setup_udev_reach_rs.sh${MODE:+ ${MODE/auto/}}"
     echo ""
@@ -227,7 +227,7 @@ mapfile -t DEVICES < <(detect_reach_devices)
 
 if [ -n "$MANUAL_DEVICE" ]; then
     if [ ! -e "$MANUAL_DEVICE" ]; then
-        echo "❌  Manual device not found: $MANUAL_DEVICE"
+        echo "ERROR  Manual device not found: $MANUAL_DEVICE"
         exit 1
     fi
     DEVICES=("$MANUAL_DEVICE")
@@ -236,7 +236,7 @@ fi
 
 if [ -n "$LEFT_DEVICE" ] || [ -n "$RIGHT_DEVICE" ]; then
     if [ ! -e "${LEFT_DEVICE:-}" ] || [ ! -e "${RIGHT_DEVICE:-}" ]; then
-        echo "❌  --left-device and --right-device must both exist."
+        echo "ERROR  --left-device and --right-device must both exist."
         exit 1
     fi
     DEVICES=("$LEFT_DEVICE" "$RIGHT_DEVICE")
@@ -253,7 +253,7 @@ if [ ${#DEVICES[@]} -eq 0 ] && { [ "$MODE" = "front" ] || [ "$MODE" = "single" ]
 fi
 
 if [ ${#DEVICES[@]} -eq 0 ]; then
-    echo "❌  No Reach RS devices detected. Make sure:"
+    echo "ERROR  No Reach RS devices detected. Make sure:"
     echo "    - Receiver(s) are connected via USB"
     echo "    - This script runs with sudo"
     echo "    - The Reach RS is powered on"
@@ -288,7 +288,7 @@ if [ "$MODE" = "front" ]; then
     PID=$(echo "$INFO" | grep -o 'product_id=[^ ]*' | cut -d= -f2)
 
     if [ -z "$SERIAL" ] || [ -z "$VENDOR" ] || [ -z "$PID" ]; then
-        echo "❌  Incomplete udev info for $DEV."
+        echo "ERROR  Incomplete udev info for $DEV."
         echo "    serial='${SERIAL:-}' vendor='${VENDOR:-}' pid='${PID:-}'"
         echo "    Run this for manual inspection:"
         echo "      udevadm info -a -p \$(udevadm info -q path -n $DEV)"
@@ -330,7 +330,7 @@ elif [ "$MODE" = "single" ] || { [ "$MODE" = "auto" ] && [ ${#DEVICES[@]} -eq 1 
     PID=$(echo "$INFO" | grep -o 'product_id=[^ ]*' | cut -d= -f2)
 
     if [ -z "$SERIAL" ] || [ -z "$VENDOR" ] || [ -z "$PID" ]; then
-        echo "❌  Incomplete udev info for $DEV."
+        echo "ERROR  Incomplete udev info for $DEV."
         echo "    serial='${SERIAL:-}' vendor='${VENDOR:-}' pid='${PID:-}'"
         echo "    Run this for manual inspection:"
         echo "      udevadm info -a -p \$(udevadm info -q path -n $DEV)"
@@ -399,13 +399,13 @@ elif [ "$MODE" = "dual" ] || { [ "$MODE" = "auto" ] && [ ${#DEVICES[@]} -ge 2 ];
         L_V="$VENDOR_B"; L_P="$PID_B"; L_S="$SERIAL_B"
         R_V="$VENDOR_A"; R_P="$PID_A"; R_S="$SERIAL_A"
     else
-        echo "❌  Invalid choice. Aborting."
+        echo "ERROR  Invalid choice. Aborting."
         exit 1
     fi
 
     echo ""
-    echo "  ✓  LEFT  → /dev/reach_left + /dev/reach_rover  (serial: $L_S)"
-    echo "  ✓  RIGHT → /dev/reach_right                    (serial: $R_S)"
+    echo "  OK  LEFT  → /dev/reach_left + /dev/reach_rover  (serial: $L_S)"
+    echo "  OK  RIGHT → /dev/reach_right                    (serial: $R_S)"
 
     echo ""
     echo "[3/4] Generating udev rules → $RULES_FILE"
@@ -430,7 +430,7 @@ fi
 
 echo ""
 echo "══════════════════════════════════════════"
-echo "  ✅  Done! Unplug and re-plug the USB cable(s)."
+echo "  OK  Done! Unplug and re-plug the USB cable(s)."
 echo "  Verify: ls -la /dev/reach_*"
 echo "══════════════════════════════════════════"
 echo ""

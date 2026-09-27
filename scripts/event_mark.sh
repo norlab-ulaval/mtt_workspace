@@ -32,11 +32,11 @@ if ! command -v ros2 &>/dev/null; then
   source "/opt/ros/${ROS_DISTRO}/setup.bash"
 fi
 
-echo "  📌 Marking event: ${ANNOTATION}"
+echo "   Marking event: ${ANNOTATION}"
 ros2 topic pub --once /session/events std_msgs/msg/String \
   "data: '${ANNOTATION}'" \
   --qos-reliability reliable \
   --qos-durability transient_local \
   > /dev/null 2>&1
 
-echo "  ✓ Annotation published to /session/events"
+echo "  OK Annotation published to /session/events"

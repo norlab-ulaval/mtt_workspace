@@ -326,11 +326,11 @@ def generate_report(session_dir: Path, bag_dir: Path) -> str:
     def coverage(name: str, topics_to_check: list[str]) -> str:
         present = [t for t in topics_to_check if topic_map.get(t, {}).get("count", 0) > 0]
         if len(present) == len(topics_to_check):
-            return f"✅ {name} — all {len(present)} topics"
+            return f"OK {name} — all {len(present)} topics"
         elif present:
-            return f"⚠️  {name} — {len(present)}/{len(topics_to_check)} topics"
+            return f"WARN  {name} — {len(present)}/{len(topics_to_check)} topics"
         else:
-            return f"❌ {name} — not recorded"
+            return f"ERROR {name} — not recorded"
 
     lines.append(coverage("CAN / Odometry",
         ["/mtt_odometry", "/mtt_tachometer", "/mtt_articulation_angle"]))
@@ -519,7 +519,7 @@ def extract_session_stats(session_dir: Path, bag_dir: Path) -> dict:
         "zed_hz": zed_hz,
         "oak_hz": oak_hz,
         "can_hz": can_hz,
-        "gps": "✓" if gps_fix > 0 else "✗",
+        "gps": "OK" if gps_fix > 0 else "FAIL",
         "status": status,
         "warnings": ", ".join(warnings)
     }
@@ -557,15 +557,15 @@ def print_comparative_table(stats_list: list[dict]):
         o_hz = color_hz(s['oak_hz'], 10.0, 5.0)
         c_hz = color_hz(s['can_hz'], 40.0, 20.0)
         
-        gps_color = Colors.OK if s['gps'] == '✓' else Colors.FAIL
+        gps_color = Colors.OK if s['gps'] == 'OK' else Colors.FAIL
         gps_str = f"{gps_color}{s['gps']}{Colors.RESET}  "
         
         if s['status'] == 'OK':
-            status_icon = f"{Colors.OK}  ✓   {Colors.RESET}"
+            status_icon = f"{Colors.OK}  OK   {Colors.RESET}"
         elif s['status'] == 'WARN':
-            status_icon = f"{Colors.WARN}  ⚠   {Colors.RESET}"
+            status_icon = f"{Colors.WARN}  WARN   {Colors.RESET}"
         else:
-            status_icon = f"{Colors.FAIL}  ✗   {Colors.RESET}"
+            status_icon = f"{Colors.FAIL}  FAIL   {Colors.RESET}"
 
         row = f" {status_icon}| {name:<48} | {dur:>8} | {s['size']:>7} | {l_hz} | {z_hz} | {o_hz} | {c_hz} | {gps_str}"
         print(row)
@@ -628,7 +628,7 @@ def main() -> int:
 
     print("\r" + " " * 80 + "\r", end="") # Clear progress line
     print_comparative_table(stats_list)
-    print(f"{Colors.OK}✓ Markdown reports (report.md) have been successfully written to each session directory.{Colors.RESET}")
+    print(f"{Colors.OK}OK Markdown reports (report.md) have been successfully written to each session directory.{Colors.RESET}")
     return 0
 
 if __name__ == "__main__":

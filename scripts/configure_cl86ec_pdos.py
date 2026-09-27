@@ -111,7 +111,7 @@ def verify(slave):
     print(f"  SM2 (RxPDO): {rx_cnt} assignment, {rx_entries} entries, {rx_bits}b = {rx_bits//8}B")
     print(f"  SM3 (TxPDO): {tx_cnt} assignment, {tx_entries} entries, {tx_bits}b = {tx_bits//8}B")
     ok = (rx_bits == 128 and tx_bits == 312)
-    print(f"  {'✓ OK (16B RxPDO, 39B TxPDO)' if ok else '✗ UNEXPECTED SIZE — check warnings above'}")
+    print(f"  {'OK (16B RxPDO, 39B TxPDO)' if ok else 'FAIL UNEXPECTED SIZE — check warnings above'}")
     return ok
 
 

@@ -99,7 +99,7 @@ def analyze_imu_bias_and_drift(records, topic_name, window_s=60.0):
     window_n = len(window_records)
     
     if window_n < 10:
-        print(f"  ⚠️  Less than 10 samples in first {window_s}s window")
+        print(f"  WARN  Less than 10 samples in first {window_s}s window")
         return None
     
     # Compute mean and std of gyro_z in window
@@ -115,7 +115,7 @@ def analyze_imu_bias_and_drift(records, topic_name, window_s=60.0):
     dt = window_records[-1][0] - window_records[0][0]
     drift_deg_s = math.degrees(dyaw) / max(dt, 1e-6)
     
-    print(f"\n  🟢 Stationary gyro bias (first {dt:.1f}s):")
+    print(f"\n   Stationary gyro bias (first {dt:.1f}s):")
     print(f"     angular_velocity.z mean: {mean_z:+.5f} rad/s")
     print(f"     angular_velocity.z std : {std_z:.5f} rad/s")
     print(f"     heading drift          : {math.degrees(dyaw):+.3f}°")
@@ -124,7 +124,7 @@ def analyze_imu_bias_and_drift(records, topic_name, window_s=60.0):
     # Full bag heading drift
     full_dyaw = wrap_pi(records[-1][2] - records[0][2])
     full_drift = math.degrees(full_dyaw) / duration
-    print(f"\n  🔵 Full bag heading drift ({duration:.0f}s):")
+    print(f"\n   Full bag heading drift ({duration:.0f}s):")
     print(f"     yaw {math.degrees(records[0][2]):+.2f}° → {math.degrees(records[-1][2]):+.2f}°")
     print(f"     total drift: {math.degrees(full_dyaw):+.1f}° ({full_drift:+.4f}°/s = {full_drift*60:+.2f}°/min)")
     
@@ -144,7 +144,7 @@ def analyze_imu_bias_and_drift(records, topic_name, window_s=60.0):
             max_div_at = records[i][0] - records[0][0]
     
     final_div = abs(wrap_pi(records[-1][2] - heading_int))
-    print(f"\n  📊 Gyro integration vs quaternion heading:")
+    print(f"\n   Gyro integration vs quaternion heading:")
     print(f"     max divergence : {math.degrees(max_div):.2f}° at t={max_div_at:.0f}s")
     print(f"     final div      : {math.degrees(final_div):.2f}°")
     
@@ -159,10 +159,10 @@ def analyze_imu_bias_and_drift(records, topic_name, window_s=60.0):
     # With sign=-1.0: yaw_rate = -z - bias
     # Stationary: z = mean_z, and we want yaw_rate = 0
     # So: -mean_z - bias = 0 → bias = -mean_z
-    # If mean_z = -0.0195 (negative), then bias = 0.0195 → -(-0.0195) - 0.0195 = 0 ✓ (matches our earlier finding)
+    # If mean_z = -0.0195 (negative), then bias = 0.0195 → -(-0.0195) - 0.0195 = 0
     
     bias_pr = -mean_z  # For sign=-1.0
-    print(f"\n  🎯 RECOMMENDED BIAS (for sign=-1.0):")
+    print(f"\n   RECOMMENDED BIAS (for sign=-1.0):")
     print(f"     imu_yaw_rate_bias_rad_s = {bias_pr:+.5f}")
     print(f"     (To apply: set REPLAY_ODOM_IMU_BIAS={bias_pr:+.5f})")
     print(f"     (To enable IMU: set REPLAY_ODOM_IMU_TOPIC=/mti100/data)")

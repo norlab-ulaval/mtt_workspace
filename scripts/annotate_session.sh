@@ -172,7 +172,7 @@ MTT Session Summary — $(date '+%Y-%m-%d %H:%M:%S')
 SUMEOF
 
 echo ""
-echo -e "${GREEN}${BOLD}✅  Annotation saved → ${ENV_FILE}${RESET}"
+echo -e "${GREEN}${BOLD}OK  Annotation saved → ${ENV_FILE}${RESET}"
 echo ""
 cat "$SUMMARY_FILE"
 echo ""

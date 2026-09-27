@@ -209,9 +209,9 @@ def ground_plane_check(zed_cloud: np.ndarray, R_zed: np.ndarray, t_zed: np.ndarr
     print(f"  ZED height above ground (URDF)    : {z_zed_in_base_urdf:.4f} m")
     print(f"  Δz                                : {z_zed_in_base_measured - z_zed_in_base_urdf:+.4f} m")
     if abs(z_zed_in_base_measured - z_zed_in_base_urdf) < 0.03:
-        print("  ✓ ZED z calibration looks good (< 3 cm error)")
+        print("  OK ZED z calibration looks good (< 3 cm error)")
     else:
-        print("  ⚠  ZED z error > 3 cm — verify hesai z calibration first")
+        print("  WARN  ZED z error > 3 cm — verify hesai z calibration first")
 
 
 def body_point_check(body_pt_base: np.ndarray,
@@ -247,11 +247,11 @@ def body_point_check(body_pt_base: np.ndarray,
     print(f"  Measured ZED depth at ({u},{v}): {pt_measured}")
     print(f"  3D residual (expected - measured): {residual}  |r|={dist:.4f} m")
     if dist < 0.03:
-        print("  ✓ ZED calibration consistent with hesai calibration (< 3 cm)")
+        print("  OK ZED calibration consistent with hesai calibration (< 3 cm)")
     elif dist < 0.07:
-        print("  ⚠  ZED residual 3–7 cm — acceptable for field use, run full re-calib if needed")
+        print("  WARN  ZED residual 3–7 cm — acceptable for field use, run full re-calib if needed")
     else:
-        print("  ✗  ZED residual > 7 cm — run calibrate_static_bag.py --mode camera_lidar")
+        print("  FAIL  ZED residual > 7 cm — run calibrate_static_bag.py --mode camera_lidar")
 
 
 def main():
