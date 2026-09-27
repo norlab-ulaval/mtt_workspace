@@ -5,7 +5,7 @@
 - Repository: `mtt_workspace`, with focused review of MTT-owned control/driver
   code and the checked-out dependency manifests.
 - Branch/commit at entry: `main`, `6470546`; `mtt_core` at `e0da59c`.
-- Date: 2026-09-26.
+- Date: 2026-09-26; source cleanup updated 2026-09-27.
 - First pass: read-only inspection, Graphify query, Git status/diffs/submodule
   status, Python AST analysis, relative Markdown links, `./scripts/verify`,
   Docker image inventory. No claim of exhaustive verification of vendor code.
@@ -18,8 +18,8 @@
 
 ## 1. Executive summary
 
-The completed offline checks cover 126 Python files, eight Compose files,
-40 workspace regression tests and the 34 recursive submodule pins. Git object
+The completed offline checks cover 124 Python files, eight Compose files,
+38 workspace regression tests and the 34 recursive submodule pins. Git object
 connectivity checks passed in all 35 repositories, including the parent. No
 unresolved merge conflicts or broken relative Markdown file links were found
 on the maintained source surface.
@@ -124,10 +124,9 @@ flags. The confirmatory monitor is opt-in and advisory; it does not command
 motion or establish scientific qualification. Missing timing samples and
 non-increasing timestamps now fail post-session qualification.
 
-Root CSV exporters require explicit bag paths, refuse output collisions and
-keep normalized command values separate from angular units. Help/import and
-bag-selection tests pass; full exports still require recorded bags and the ROS
-image. These checks do not certify every research pipeline or scientific result.
+The session-specific root CSV exporters were removed during the subsequent
+source cleanup. Maintained research entrypoints are listed in the research
+guide. These checks do not certify every pipeline or scientific result.
 
 ## 2. Findings at entry and their disposition
 

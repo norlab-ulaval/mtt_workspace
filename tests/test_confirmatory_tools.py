@@ -18,8 +18,6 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 sys.path.insert(0, str(ROOT))
 import qualify_confirmatory_session as qualification
-import extract_mathis_topics as extraction
-import extract_articulation_commands as articulation
 
 
 def load_logic(filename):
@@ -177,22 +175,8 @@ class QualificationTest(unittest.TestCase):
                 qualification.validate_required_topics(contract)
 
 
-class BagExportTest(unittest.TestCase):
+class QualificationCliTest(unittest.TestCase):
     def test_help_without_ros(self):
-        for path in ("extract_mathis_topics.py", "extract_articulation_commands.py", "scripts/qualify_confirmatory_session.py"):
-            result = subprocess.run([sys.executable, str(ROOT / path), "--help"], capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_ambiguous_bag_is_rejected(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for name in ("a", "b"):
-                (root / name).mkdir()
-                (root / name / "bag_0.mcap").touch()
-            with self.assertRaises(ValueError):
-                extraction.find_mcap_bag_directory(root)
-            self.assertEqual(extraction.find_mcap_bag_directory(root / "a" / "bag_0.mcap"), str(root / "a"))
-
-    def test_normalized_commands_are_not_converted_to_degrees(self):
-        self.assertEqual(articulation.command_degrees("/articulation_servo/steer_cmd", 0.5), "")
-        self.assertAlmostEqual(articulation.command_degrees("/articulation_servo/setpoint_rad", math.pi / 2), 90)
+        path = ROOT / "scripts/qualify_confirmatory_session.py"
+        result = subprocess.run([sys.executable, str(path), "--help"], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)

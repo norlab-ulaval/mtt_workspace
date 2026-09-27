@@ -30,15 +30,6 @@ Run `python3 scripts/<entrypoint>.py --help` for exact flags. Scripts that impor
 ROS at module level require the container even for help. Import/help checks do
 not establish correctness of scientific outputs.
 
-The two historical root entrypoints `extract_mathis_topics.py` and
-`extract_articulation_commands.py` export telemetry and command CSVs in the ROS
-environment. Both require `--bag-path`; use `--output-dir` to select a separate
-export directory. Existing CSVs are refused. `--no-include-bonus` limits the
-telemetry export to its three principal topics. Only the explicitly named
-`setpoint_rad` command is converted to degrees; other command values retain
-their original units. The telemetry `cmd_vel` export likewise leaves
-`angular_z` unchanged, including when it represents normalized steering.
-
 ## Reproducibility record
 
 For every result retained for publication, store:
