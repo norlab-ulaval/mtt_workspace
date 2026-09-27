@@ -7,6 +7,7 @@
 # Flags:
 #   --summary      compact health report + non-zero exit if dirty/warnings
 #   --doctor       structural health checks (manifests, conflicts, packages…)
+#   --allow-dirty  with --doctor: allow local edits; warnings/failures still fail
 #   --dirty-only   only print nested repos that are not clean
 #   --json         machine-readable summary (implies --summary)
 #   --no-submodules
@@ -44,6 +45,7 @@ mode_summary=false
 mode_doctor=false
 mode_dirty_only=false
 mode_json=false
+allow_dirty=false
 show_submodules=true
 
 print_usage() {
@@ -58,6 +60,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --doctor)
       mode_doctor=true
+      shift
+      ;;
+    --allow-dirty)
+      allow_dirty=true
       shift
       ;;
     --dirty-only)
@@ -84,6 +90,11 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
+
+if [[ "${allow_dirty}" == true && "${mode_doctor}" != true ]]; then
+  echo "--allow-dirty requires --doctor" >&2
+  exit 2
+fi
 
 # If the user only asked for summary/doctor/json, skip the full dump unless they
 # also want dirty-only detail (dirty-only still prints short status for dirty repos).
@@ -813,7 +824,9 @@ fi
 
 if [[ "${fail_count}" -gt 0 ]]; then
   exit_code=2
-elif [[ "${dirty_nested}" -gt 0 || "${parent_dirty}" -gt 0 || "${warn_count}" -gt 0 ]]; then
+elif [[ "${warn_count}" -gt 0 ]] ||
+     { [[ "${allow_dirty}" != true ]] &&
+       [[ "${dirty_nested}" -gt 0 || "${parent_dirty}" -gt 0 ]]; }; then
   # Only force non-zero when summary/doctor/dirty-only requested, so legacy
   # `./scripts/status` keeps exit 0 for scripting that only greps output.
   if [[ "${mode_summary}" == true || "${mode_doctor}" == true || "${mode_dirty_only}" == true ]]; then

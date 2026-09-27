@@ -136,8 +136,11 @@ def _resolve_speed(value, speeds: dict) -> float:
     if isinstance(value, str):
         if value not in speeds:
             raise KeyError(f"unknown named speed '{value}' (known: {sorted(speeds)})")
-        return float(speeds[value])
-    return float(value)
+        value = speeds[value]
+    result = float(value)
+    if not math.isfinite(result):
+        raise ValueError("speed must be finite")
+    return result
 
 
 def build_phi_steps(cfg: dict, speeds: dict) -> List[AtomicSegment]:
@@ -249,6 +252,93 @@ def build_phi_ramp(cfg: dict, speeds: dict) -> List[AtomicSegment]:
             speed_fn=_const(speed_ms),
             phi_fn=phi_fn,
             meta={"speed_ms": speed_ms, "phi_rate_deg_s": rate_deg_s},
+        )
+    ]
+
+
+def build_phi_schedule(cfg: dict, speeds: dict) -> List[AtomicSegment]:
+    """Piecewise-linear phi(t) from EXPLICIT (t, phi_deg) breakpoints, unlike
+    build_phi_ramp which derives leg durations from a constant rate_deg_s here.
+    Added for the Paper-1 Session-A confirmatory transition cells (protocol
+    amendment v1.1, 2026-08-27): their commanded timestamps are frozen exactly
+    (including flat lead-in/lead-out holds around the evaluated maneuver
+    window), not re-derivable from a single rate the way phi_ramp's waypoint
+    list is."""
+    speed_ms = _resolve_speed(cfg.get("speed_ms", 0.0), speeds)
+    waypoints = cfg["waypoints"]  # list of {"t": float, "phi_deg": float}, sorted by t
+    schedule = [(float(w["t"]), deg2rad(float(w["phi_deg"]))) for w in waypoints]
+    if (len(schedule) < 2 or schedule[0][0] != 0
+            or any(not math.isfinite(t) or not math.isfinite(phi) for t, phi in schedule)
+            or any(right[0] <= left[0] for left, right in zip(schedule, schedule[1:]))):
+        raise ValueError("phi_schedule needs finite waypoints starting at zero with increasing times")
+    total_duration = schedule[-1][0]
+
+    def phi_fn(elapsed: float) -> float:
+        if elapsed <= schedule[0][0]:
+            return schedule[0][1]
+        if elapsed >= total_duration:
+            return schedule[-1][1]
+        idx = bisect.bisect_right([s for s, _ in schedule], elapsed) - 1
+        idx = clamp(idx, 0, len(schedule) - 2)
+        t0, v0 = schedule[idx]
+        t1, v1 = schedule[idx + 1]
+        if t1 <= t0:
+            return v1
+        frac = (elapsed - t0) / (t1 - t0)
+        return v0 + frac * (v1 - v0)
+
+    return [
+        AtomicSegment(
+            uid=f"{cfg['id']}",
+            label=cfg.get("label", cfg["id"]),
+            kind="phi_schedule",
+            tier=cfg.get("tier", "core"),
+            duration_s=total_duration,
+            speed_fn=_const(speed_ms),
+            phi_fn=phi_fn,
+            meta={"speed_ms": speed_ms, "waypoints": waypoints},
+        )
+    ]
+
+
+def build_phi_cosine(cfg: dict, speeds: dict) -> List[AtomicSegment]:
+    """phi(t) = amplitude*cos(2*pi*t/period) during the evaluated window, flat
+    0 during lead-in/lead-out. Added for the Paper-1 Session-A confirmatory
+    figure-eight cells (protocol amendment v1.1, 2026-08-27) -- build_figure8
+    produces discrete constant-phi lobes, not the smooth cosine this protocol
+    specifies."""
+    speed_ms = _resolve_speed(cfg.get("speed_ms", 0.0), speeds)
+    amplitude_rad = deg2rad(float(cfg["amplitude_deg"]))
+    period_s = float(cfg["period_s"])
+    lead_in_s = float(cfg.get("lead_in_s", 0.0))
+    evaluated_duration_s = float(cfg["evaluated_duration_s"])
+    lead_out_s = float(cfg.get("lead_out_s", 0.0))
+    if (not all(math.isfinite(v) for v in (
+            amplitude_rad, period_s, lead_in_s, evaluated_duration_s, lead_out_s))
+            or period_s <= 0 or evaluated_duration_s <= 0 or min(lead_in_s, lead_out_s) < 0):
+        raise ValueError("phi_cosine needs finite values, positive period/window and nonnegative holds")
+    total_duration = lead_in_s + evaluated_duration_s + lead_out_s
+
+    def phi_fn(elapsed: float) -> float:
+        if elapsed < lead_in_s or elapsed >= lead_in_s + evaluated_duration_s:
+            return 0.0
+        local_t = elapsed - lead_in_s
+        return amplitude_rad * math.cos(2.0 * math.pi * local_t / period_s)
+
+    return [
+        AtomicSegment(
+            uid=f"{cfg['id']}",
+            label=cfg.get("label", cfg["id"]),
+            kind="phi_cosine",
+            tier=cfg.get("tier", "core"),
+            duration_s=total_duration,
+            speed_fn=_const(speed_ms),
+            phi_fn=phi_fn,
+            meta={
+                "speed_ms": speed_ms,
+                "amplitude_deg": cfg["amplitude_deg"],
+                "period_s": period_s,
+            },
         )
     ]
 
@@ -489,6 +579,46 @@ def build_stop_and_go(cfg: dict, speeds: dict) -> List[AtomicSegment]:
     ]
 
 
+def build_explicit_attempts(cfg: dict, speeds: dict) -> List[AtomicSegment]:
+    """Passthrough builder for a pre-generated sequence of attempts whose uid is
+    fixed externally rather than synthesized from (kind, speed, phi, rep) like
+    every other builder in this module. Every other builder computes its own
+    uid because those profiles are hand-authored; this one exists because the
+    Paper-1 confirmatory profile is machine-generated from the frozen 60-cell
+    acquisition matrix (see build_session_a_conductor_profile.py in the
+    research repo) and its uid (e.g. 'P01-R1') IS the join key back to that
+    matrix and the sealed attempt ledger -- it must round-trip byte-for-byte,
+    never be re-derived here.
+
+    cfg['attempts']: list of {uid, duration_s, speed_ms, phi_deg[, label,
+    repeat]}. speed_ms may be a literal or a named alias from meta.speeds,
+    resolved the same way as every other builder (_resolve_speed)."""
+    segments = []
+    for entry in cfg["attempts"]:
+        speed_ms = _resolve_speed(entry["speed_ms"], speeds)
+        phi_deg = float(entry.get("phi_deg", 0.0))
+        duration_s = float(entry["duration_s"])
+        if not math.isfinite(phi_deg) or not math.isfinite(duration_s) or duration_s <= 0:
+            raise ValueError("explicit attempt needs a finite angle and positive finite duration")
+        segments.append(
+            AtomicSegment(
+                uid=str(entry["uid"]),
+                label=entry.get("label", cfg.get("label", entry["uid"])),
+                kind="explicit_attempt",
+                tier=cfg.get("tier", "core"),
+                duration_s=duration_s,
+                speed_fn=_const(speed_ms),
+                phi_fn=_const(deg2rad(phi_deg)),
+                meta={
+                    "speed_ms": speed_ms,
+                    "phi_deg": phi_deg,
+                    "repeat": entry.get("repeat", 1),
+                },
+            )
+        )
+    return segments
+
+
 def build_pause(cfg: dict, speeds: dict) -> List[AtomicSegment]:
     return [
         AtomicSegment(
@@ -543,6 +673,9 @@ BUILDERS = {
     "stop_and_go_hold_phi": build_stop_and_go,
     "pause": build_pause,
     "manual_checkpoint": build_checkpoint,
+    "explicit_attempts": build_explicit_attempts,
+    "phi_schedule": build_phi_schedule,
+    "phi_cosine": build_phi_cosine,
 }
 
 
@@ -559,6 +692,9 @@ def load_profile(path: Path, include_extended: bool) -> List[AtomicSegment]:
         if builder is None:
             raise ValueError(f"unknown segment type '{cfg['type']}' in id={cfg.get('id')}")
         out.extend(builder(cfg, speeds))
+    uids = [segment.uid for segment in out]
+    if not uids or any(not uid for uid in uids) or len(set(uids)) != len(uids):
+        raise ValueError("profile must contain nonempty, unique segment IDs")
     return out
 
 
@@ -1087,6 +1223,13 @@ class MttExperimentConductor(Node):
             "duration_s": round(segment.duration_s, 3),
             "engaged": engaged,
             "meta": segment.meta,
+            # Added so downstream listeners (e.g. mtt_confirmatory_monitor.py) can
+            # detect and display pauses/checkpoints from the topic alone, without
+            # re-deriving pause semantics from `kind` string matching -- previously
+            # only reached the console log, never the bag.
+            "is_pause": segment.is_pause,
+            "requires_ack": segment.requires_ack,
+            "pause_message": segment.pause_message,
         }
         msg = String()
         msg.data = json.dumps(payload)

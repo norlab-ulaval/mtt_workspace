@@ -1,0 +1,38 @@
+name: Offline source checks
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  workspace-tools:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Install validation dependency
+        run: python3 -m pip install PyYAML==6.0.2
+      - name: Source completeness, syntax and documentation
+        run: python3 scripts/check_workspace.py
+      - name: Git and verification regressions
+        run: python3 -m unittest discover -s tests -p 'test_*.py'
+      - name: Shell syntax
+        shell: bash
+        run: |
+          while IFS= read -r file; do
+            first_line="$(head -n 1 "${file}")"
+            [[ "${first_line}" == *bash* || "${first_line}" == *"/sh"* ]] || continue
+            bash -n "${file}"
+          done < <(git ls-files scripts docker demos)
+      - name: Compose validation (all profiles; no services started)
+        shell: bash
+        run: |
+          ./scripts/create_env
+          for file in compose.yaml demos/*/compose.yaml; do
+            docker compose -f "${file}" --profile '*' config --quiet
+          done

@@ -81,6 +81,39 @@ If replay publishes `linear.x` but the robot still does not pull hard enough on 
 
 `teleop` still exists as a compatibility stub, but joystick teleop now runs directly inside the base `robot` service.
 
+## Confirmatory acquisition
+
+`session_a_confirmatory.yaml` is the frozen 60-attempt Session-A profile. Its
+manifest records the source hash and generator in the separate research
+repository. Regenerate it there when the protocol changes; do not hand-edit
+the copy here. The profile contains no manual checkpoints. Operators must
+follow the secured field procedure and verify deadman/stop behavior before use.
+
+From this demo directory, with the robot prepared for an approved acquisition:
+
+```bash
+EXPERIMENT_PROFILE=session_a_confirmatory.yaml \
+EXPERIMENT_ROLE=session_a_confirmatory \
+docker compose --profile record --profile experiment --profile confirmatory up
+```
+
+The conductor commands motion. The separate confirmatory monitor only reports
+advisory progress and records `/mtt_experiment/confirmatory_status` events.
+Use `EXPERIMENT_ROLE=non_counted_pilot` for a pilot; this label never qualifies
+an attempt. The `confirmatory` profile is opt-in because the standard ice
+profile does not define its required gate thresholds.
+
+After recording, in the ROS environment, check the required topic contract:
+
+```bash
+python3 scripts/qualify_confirmatory_session.py /path/to/session \
+  --topic-contract /path/to/research/configs/experiments/topic_contract_mtt154.yaml
+```
+
+Run that command from the workspace root. Missing samples, invalid timestamps
+and timing-limit failures produce a nonzero exit code. This field check does
+not replace the offline scientific qualification in the research repository.
+
 ## GPS mode
 
 Use USB by default:

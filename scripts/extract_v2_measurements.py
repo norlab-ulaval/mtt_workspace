@@ -15,7 +15,7 @@ Outputs (artifacts/gt_v2_icerink/):
                                    (diagnostic cross-check only, not fused)
   measurements/hardware_phi.csv   /hardware/articulation_angle (hitch yaw, encoder)
   measurements/lidar_phi.csv      /trailer/articulation_angle (hitch yaw, LiDAR PCA,
-                                   already fused online — see CLAUDE.md)
+                                   already fused online by trailer_detector_node)
   measurements/hardware_pitch.csv /hardware/articulation_pitch_rad
   measurements/track_odom.csv     /mtt_odometry
   measurements/tachometer.csv     /mtt_tachometer

@@ -4,6 +4,10 @@ set -euo pipefail
 cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
 
 release=false
+if [[ $# -gt 1 ]]; then
+  echo 'Usage: ./scripts/verify [--release]' >&2
+  exit 2
+fi
 case "${1-}" in
   "") ;;
   --release) release=true ;;
@@ -11,7 +15,8 @@ case "${1-}" in
     cat <<'EOF'
 Usage: ./scripts/verify [--release]
 
-Run offline workspace checks. This does not start ROS or contact hardware.
+Run static workspace checks and tooling tests. No ROS or hardware is started.
+Requires Git, Python 3 with PyYAML, Bash and the Docker Compose plugin.
 
   --release  also require the parent and every nested repository to be clean
 EOF
@@ -25,7 +30,13 @@ while IFS= read -r file; do
   first_line="$(head -n 1 "${file}" 2>/dev/null || true)"
   [[ "${first_line}" == *bash* || "${first_line}" == *"/sh"* ]] || continue
   bash -n "${file}"
-done < <(find scripts docker -maxdepth 2 -type f | sort)
+done < <(git ls-files --cached --others --exclude-standard scripts docker demos tests | sort -u)
+
+echo "[verify] Python syntax, local dependencies and documentation links"
+python3 scripts/check_workspace.py
+
+echo "[verify] offline tooling regressions"
+python3 -m unittest discover -s tests -p 'test_*.py'
 
 echo "[verify] Compose files"
 compose_files=(
@@ -39,12 +50,14 @@ compose_files=(
   demos/simulation/compose.yaml
 )
 for file in "${compose_files[@]}"; do
-  docker compose -f "${file}" config --quiet
+  docker compose -f "${file}" --profile '*' config --quiet
 done
 
 echo "[verify] whitespace and repository structure"
 git diff --check
-./scripts/status --doctor
+git diff --cached --check
+git submodule foreach --quiet --recursive 'git diff --check && git diff --cached --check'
+./scripts/status --doctor --allow-dirty
 
 if [[ "${release}" == true ]]; then
   echo "[verify] release cleanliness"

@@ -11,7 +11,7 @@ a narrow elevation slice (mimicking a 2D lidar sweep instead of scanning the
 full 3D volume), out to a few meters past the trailer rear.
 
 Geometry: same hitch pivot / trailer-rear constants as trailer_pose_node
-V4.0 (the proven reference, see CLAUDE.md "Key geometry constants"), and the
+V4.0 (see docs/reference/calibration.md), and the
 identical yaw_prior = pi - theta convention, theta read live from
 /trailer/articulation_angle (the KF-fused, authoritative source -- NOT the
 raw hardware topic). The "behind" sector is anchored at the trailer rear
@@ -41,7 +41,7 @@ from std_msgs.msg import Bool, Float32, Float64, String
 import tf2_ros
 
 # Same base_link-frame constants as trailer_pose_node / mtt_trailer_estimator_node
-# (CLAUDE.md "Key geometry constants" -- must stay consistent across all consumers).
+# See docs/reference/calibration.md; keep these consistent across consumers.
 HITCH_XYZ = (-1.45, -0.085, 0.35)
 TRAILER_REAR_LENGTH_M = 1.90
 

@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Build and test MTT packages without sharing the live network or host devices.
+set -euo pipefail
+cd "$(dirname -- "${BASH_SOURCE[0]}")/.."
+
+if [[ $# -gt 0 ]]; then
+  if [[ $# -eq 1 && ( "$1" == --help || "$1" == -h ) ]]; then
+    cat <<'EOF'
+Usage: ./scripts/test_offline
+
+Fresh build and behavioral tests for control, driver, perception and GPS parsing;
+pure Python avoidance tests. No live launch, network, host devices or credentials.
+Uses an existing MTT_IMAGE (default mtt_workspace:devel); never pulls/builds images.
+Output: a new artifacts/offline-tests/run.XXXXXX directory for each invocation.
+MTT_TEST_JOBS controls compiler parallelism (default 2).
+This is not the complete vendor test suite or hardware acceptance.
+EOF
+    exit 0
+  fi
+  echo 'Usage: ./scripts/test_offline' >&2
+  exit 2
+fi
+
+root="$(pwd)"
+source scripts/lib/mtt_env.sh
+image="$(mtt_env_or_file_or_default "${root}" MTT_IMAGE mtt_workspace:devel)"
+jobs="${MTT_TEST_JOBS:-2}"
+[[ "${jobs}" =~ ^[1-9][0-9]*$ ]] || { echo 'MTT_TEST_JOBS must be positive' >&2; exit 2; }
+docker image inspect "${image}" >/dev/null
+mkdir -p artifacts/offline-tests
+output="$(mktemp -d "${root}/artifacts/offline-tests/run.XXXXXX")"
+echo "[test_offline] image=${image}; results=${output}"
+docker image inspect --format '{{.Id}}' "${image}" > "${output}/image-id.txt"
+git rev-parse HEAD > "${output}/parent-commit.txt"
+git submodule status --recursive > "${output}/submodule-pins.txt"
+git diff --binary HEAD > "${output}/parent-working-tree.patch"
+git submodule foreach --quiet --recursive '
+  printf "Repository: %s\n" "$displaypath"
+  git diff --binary HEAD
+' > "${output}/submodule-working-trees.patch"
+git status --porcelain=v1 --untracked-files=all > "${output}/parent-status.txt"
+
+# Use docker run rather than a live Compose service: --network none is the
+# isolation boundary. The source bind is read-only; only results are writable.
+# A non-login shell avoids user logout hooks overriding successful test exits.
+docker run --rm --pull never --network none --cap-drop ALL \
+  --security-opt no-new-privileges --user "$(id -u):$(id -g)" \
+  --entrypoint bash --ulimit core=0 \
+  -e MTT_OFFLINE_TEST=1 -e ROS_DOMAIN_ID=232 -e ROS_LOCALHOST_ONLY=1 \
+  -e RMW_IMPLEMENTATION=rmw_fastrtps_cpp -e PYTHONDONTWRITEBYTECODE=1 \
+  -e PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 -e "MTT_TEST_JOBS=${jobs}" \
+  -v "${root}:/workspace:ro" -v "${output}:/validation" -w /validation \
+  "${image}" -c '
+    set -eo pipefail
+    source /opt/ros/jazzy/setup.bash
+    export CMAKE_BUILD_PARALLEL_LEVEL="${MTT_TEST_JOBS}"
+    export MAKEFLAGS="-j${MTT_TEST_JOBS}"
+    colcon --log-base /validation/log build \
+      --base-paths /workspace/src/mtt_core \
+      --packages-select mtt_msgs mtt_interfaces mtt_control mtt_driver mtt_perception mtt_gps_driver \
+      --build-base /validation/build --install-base /validation/install \
+      --executor sequential --cmake-args -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      > /validation/build.log 2>&1
+    source /validation/install/setup.bash
+    # Keep each exit code: a green XML summary alone must not hide a failed runner.
+    test_rc=0
+    avoidance_rc=0
+    summary_rc=0
+    # Run registered behavioral tests. Linters are a separate check; their
+    # existing failures must not be presented as behavioral test passes.
+    colcon --log-base /validation/test-log test \
+      --build-base /validation/build --install-base /validation/install \
+      --base-paths /workspace/src/mtt_core \
+      --packages-select mtt_control mtt_driver mtt_perception mtt_gps_driver \
+      --executor sequential --return-code-on-test-failure \
+      --ctest-args -R "^(test_|mtt_trailer_estimator_test|adaptive_sensor_confidence_test)" \
+      > /validation/tests.log 2>&1 || test_rc=$?
+    PYTHONPATH=/workspace/src/mtt_core/mtt_avoidance \
+      python3 -m pytest -q -p no:cacheprovider /workspace/src/mtt_core/mtt_avoidance/test \
+      > /validation/avoidance.log 2>&1 || avoidance_rc=$?
+    colcon test-result --test-result-base /validation/build --verbose \
+      > /validation/test-results.log 2>&1 || summary_rc=$?
+    printf "colcon_test=%s\navoidance=%s\ncolcon_summary=%s\n" \
+      "${test_rc}" "${avoidance_rc}" "${summary_rc}" > /validation/exit-codes.txt
+    cat /validation/test-results.log /validation/avoidance.log
+    cat /validation/exit-codes.txt
+    [[ "${test_rc}" == 0 && "${avoidance_rc}" == 0 && "${summary_rc}" == 0 ]]
+  '

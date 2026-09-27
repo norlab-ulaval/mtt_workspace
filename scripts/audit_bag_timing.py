@@ -6,11 +6,6 @@ import statistics
 from pathlib import Path
 from typing import Any
 
-import rosbag2_py
-from rclpy.serialization import deserialize_message
-from rosidl_runtime_py.utilities import get_message
-
-
 DEFAULT_TOPICS = {
     "/hesai_lidar/points",
     "/hesai_lidar/lidar_packets_loss",
@@ -52,14 +47,17 @@ def percentile(values: list[float], pct: float) -> float:
     return ordered[max(0, min(len(ordered) - 1, idx))]
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("bag")
-    parser.add_argument("--topic", action="append", dest="topics")
-    args = parser.parse_args()
-
-    bag = resolve_bag(Path(args.bag))
-    wanted = set(args.topics) if args.topics else DEFAULT_TOPICS
+def compute_topic_stats(
+    bag: Path, wanted: set[str]
+) -> tuple[dict[str, dict[str, Any]], list[tuple[float, int, int]]]:
+    """Reads `bag` once and returns (per-topic stats, /mapping/map samples).
+    Extracted from main() (2026-08-27) so other scripts (e.g. the Session-A
+    qualification wrapper) can consume the same numbers programmatically
+    instead of parsing this script's printed output -- main()'s printed
+    behavior is unchanged."""
+    import rosbag2_py
+    from rclpy.serialization import deserialize_message
+    from rosidl_runtime_py.utilities import get_message
 
     reader = rosbag2_py.SequentialReader()
     reader.open(
@@ -72,7 +70,7 @@ def main() -> int:
         for topic in wanted
         if topic in type_by_topic
     }
-    stats = {
+    stats: dict[str, dict[str, Any]] = {
         topic: {
             "n": 0,
             "first": None,
@@ -109,6 +107,19 @@ def main() -> int:
             row["sizes"].append(size)
             if topic == "/mapping/map":
                 map_samples.append((t, points, size))
+
+    return stats, map_samples
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("bag")
+    parser.add_argument("--topic", action="append", dest="topics")
+    args = parser.parse_args()
+
+    bag = resolve_bag(Path(args.bag))
+    wanted = set(args.topics) if args.topics else DEFAULT_TOPICS
+    stats, map_samples = compute_topic_stats(bag, wanted)
 
     print(f"bag: {bag}")
     print("== Topic Timing ==")

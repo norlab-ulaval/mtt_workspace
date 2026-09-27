@@ -6,6 +6,7 @@ bin/
 lib/
 !scripts/lib/
 !scripts/lib/*.sh
+!scripts/lib/*.py
 install/
 msg_gen/
 srv_gen/
@@ -75,6 +76,13 @@ __pycache__/
 .env.*
 
 # Local workspace noise
+/.agents/
+/.codex/
+/.claude/
+/CLAUDE.md
+/AGENTS.md
+/chat_*.txt
+/.nvimlog
 .pytest_cache/
 .mypy_cache/
 .cache/
@@ -93,6 +101,8 @@ src/external/
 src/mtt_core/
 
 # Data and results stay local
+/mapping_results_27aout.zip
+/norlab_ws/
 data/
 results/
 **/data/
@@ -139,6 +149,7 @@ frames_*.pdf
 /deliverables_mapping/
 /identified/
 /docs/superpowers/
+/docs/ai/
 /documentations/DATASET_SCHEMA.md
 /documentations/dataset_catalog.csv
 /documentations/*_report_*.md
@@ -174,8 +185,6 @@ frames_*.pdf
 /scripts/audit_m5_phidot_transition.py
 /scripts/build_gt_v2_overlay.py
 /scripts/build_icerink_motion_validation_dataset.py
-/scripts/build_msa_canonical_dataset.py
-/scripts/build_session_dataset.py
 /scripts/build_zone_map.py
 /scripts/calibrate_tachometer_against_msa.py
 /scripts/collect_boundary_polygon.py
@@ -183,7 +192,6 @@ frames_*.pdf
 /scripts/evaluate_covariances.py
 /scripts/evaluate_m0_m5_against_msa.py
 /scripts/evaluate_pose_sources_against_msa.py
-/scripts/export_bag_preview.py
 /scripts/export_trailer_roi_cloud.py
 /scripts/extract_articulation_topics_mcap.py
 /scripts/extract_lidar_articulation_offline.py
@@ -191,7 +199,6 @@ frames_*.pdf
 /scripts/index_mcap_inplace.py
 /scripts/invert_vtk_180.py
 /scripts/invert_vtk_axes.py
-/scripts/isaac_vslam_frame_bridge.py
 /scripts/load_reconciled_dataset.py
 /scripts/merge_articulation_into_msa_canonical.py
 /scripts/mtt_motion_model/m5_full_dissipative.py
@@ -204,4 +211,3 @@ frames_*.pdf
 /scripts/run_gt_pipeline_auto.py
 /scripts/smooth_lidar_csv.py
 /scripts/validate_m0_m5_icerink.py
-/scripts/zone_map.py
